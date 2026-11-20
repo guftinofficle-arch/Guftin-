@@ -78,9 +78,9 @@ jobs:
           const pkg = require('./package.json');
           const appConfig = fs.readFileSync('app.config.js', 'utf8');
           if (pkg.version !== '1.5.7' ||
-              !/version:\\s*"1\\.5\\.7"/.test(appConfig) ||
-              !/versionCode:\\s*43/.test(appConfig) ||
-              !/package:\\s*"com\\.guftin\\.app"/.test(appConfig)) {
+              !/version:\s*"1\.5\.7"/.test(appConfig) ||
+              !/versionCode:\s*43/.test(appConfig) ||
+              !/package:\s*"com\.guftin\.app"/.test(appConfig)) {
             throw new Error('Expected Guftin 1.5.7 / Android code 43 / com.guftin.app.');
           }
           console.log('Validated Guftin 1.5.7, versionCode 43 and package com.guftin.app.');
@@ -132,8 +132,8 @@ jobs:
           AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
 
           SIGNATURE_OUTPUT="$("$APKSIGNER" verify --verbose --print-certs "$APK" 2>&1)"
-          printf '%s\\n' "$SIGNATURE_OUTPUT"
-          ACTUAL_FINGERPRINT="$(printf '%s\\n' "$SIGNATURE_OUTPUT" | sed -nE 's/.*certificate SHA-256 digest: ([[:xdigit:]:]+).*/\\1/p' | head -n 1 | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+          printf '%s\n' "$SIGNATURE_OUTPUT"
+          ACTUAL_FINGERPRINT="$(printf '%s\n' "$SIGNATURE_OUTPUT" | sed -nE 's/.*certificate SHA-256 digest: ([[:xdigit:]:]+).*/\1/p' | head -n 1 | tr -d ':' | tr '[:upper:]' '[:lower:]')"
           EXPECTED_FINGERPRINT="fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c"
 
           if [ "$ACTUAL_FINGERPRINT" != "$EXPECTED_FINGERPRINT" ]; then
