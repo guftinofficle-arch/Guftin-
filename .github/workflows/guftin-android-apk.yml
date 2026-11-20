@@ -24,23 +24,32 @@ jobs:
 
     steps:
       - name: Checkout selected branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.ref }}
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: "20"
 
       - name: Set up Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # The legacy "tools" SDK package was removed from Google's repository.
+          packages: platform-tools
+
+      - name: Install Android 36 SDK platform and build tools
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null
+          sdkmanager --install "platform-tools" "platforms;android-36" "build-tools;36.0.0"
 
       - name: Validate app directory and config
         working-directory: apps/kingchat
@@ -61,8 +70,6 @@ jobs:
           import re
           p = Path("app.config.js")
           s = p.read_text()
-          # The previous failed EAS build identified this exact mismatch.
-          # Keep the project slug aligned with the existing EAS project identity.
           updated, n = re.subn(r'(^\s*slug\s*:\s*)["\']guftin["\']', r'\1"guftin-"', s, count=1, flags=re.M)
           if n:
               p.write_text(updated)
@@ -81,20 +88,19 @@ jobs:
         working-directory: apps/kingchat
         run: npx expo prebuild --platform android --no-install
 
-      - name: Build signed-by-debug-key APK for testing
+      - name: Build debug APK for testing
         working-directory: apps/kingchat/android
         shell: bash
         run: |
           chmod +x ./gradlew
           ./gradlew --no-daemon --stacktrace assembleDebug
 
-      - name: Verify APK output and package metadata
+      - name: Verify APK output
         working-directory: apps/kingchat
         shell: bash
         run: |
           APK="android/app/build/outputs/apk/debug/app-debug.apk"
           test -s "$APK" || { echo "::error::APK output was not created"; exit 1; }
-          echo "APK_PATH=$APK" >> "$GITHUB_ENV"
           ls -lh "$APK"
           if command -v apkanalyzer >/dev/null 2>&1; then
             apkanalyzer manifest application-id "$APK" || true
