@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 PROJECT_ROOT="$GITHUB_WORKSPACE/apps/kingchat"
-APK="$PROJECT_ROOT/android/app/build/outputs/apk/release/app-release.apk"
+APK="${APK_PATH:-$PROJECT_ROOT/android/app/build/outputs/apk/release/app-release.apk}"
 LOG="$PROJECT_ROOT/startup-smoke-logcat.txt"
 
 capture_logs() {
