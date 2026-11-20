@@ -124,7 +124,7 @@ jobs:
       - name: Install and smoke-test APK on Android 36 emulator
         uses: reactivecircus/android-emulator-runner@v2
         env:
-          APK_PATH: apps/kingchat/android/app/build/outputs/apk/debug/app-debug.apk
+          APK_PATH: android/app/build/outputs/apk/debug/app-debug.apk
         with:
           working-directory: apps/kingchat
           api-level: 36
