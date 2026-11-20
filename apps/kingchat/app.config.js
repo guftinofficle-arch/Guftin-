@@ -49,7 +49,7 @@ module.exports = ({ config }) => ({
     }
   },
   name: "Guftin",
-  slug: "guftin",
+  slug: "guftin-",
   version: "1.5.7",
   description: "Guftin is a messaging and channel app. For complaints, feedback, feature requests or support, contact Guftin Official at guftinofficle@gmail.com.",
   orientation: "portrait",
