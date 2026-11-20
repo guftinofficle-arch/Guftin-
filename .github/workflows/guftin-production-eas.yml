@@ -40,7 +40,7 @@ jobs:
           const fs = require('node:fs');
           const pkg = require('./package.json');
           const appConfig = fs.readFileSync('app.config.js', 'utf8');
-          if (pkg.version !== '1.5.7' || !/version:\s*"1\.5\.6"/.test(appConfig) || !/versionCode:\s*43/.test(appConfig)) {
+          if (pkg.version !== '1.5.7' || !/version:\s*"1\.5\.7"/.test(appConfig) || !/versionCode:\s*43/.test(appConfig)) {
             console.error('Refusing to build: expected the full Guftin 1.5.7 / Android code 43 source.');
             process.exit(1);
           }
