@@ -1,4 +1,4 @@
-name: Guftin Android APK (GitHub Gradle)
+name: Guftin Android APK — Build and Startup QA
 
 on:
   workflow_dispatch:
@@ -13,17 +13,17 @@ permissions:
   contents: read
 
 concurrency:
-  group: guftin-android-${{ github.ref }}
+  group: guftin-android-qa-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  build:
-    name: Build Guftin Android APK
+  build-and-smoke-test:
+    name: Build Guftin APK and verify Android startup
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
 
     steps:
-      - name: Checkout selected branch
+      - name: Check out release source
         uses: actions/checkout@v5
         with:
           ref: ${{ github.ref }}
@@ -31,9 +31,9 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: "20"
+          node-version: "22"
 
-      - name: Set up Java
+      - name: Set up Java 17
         uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -42,70 +42,67 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
         with:
-          # The legacy "tools" SDK package was removed from Google's repository.
           packages: platform-tools
 
       - name: Install Android 36 SDK platform and build tools
         shell: bash
         run: |
-          python3 - <<'PYCODE'
+          python3 - <<'PY'
           import subprocess
-          # Feed license confirmations through communicate(); this avoids
-          # the harmless-but-fatal yes(1) SIGPIPE/Broken pipe under pipefail.
           subprocess.run(
               ["sdkmanager", "--licenses"],
-              input=("y\n" * 100),
+              input=("y\\n" * 100),
               text=True,
               check=True,
           )
-          PYCODE
+          PY
           sdkmanager --install "platform-tools" "platforms;android-36" "build-tools;36.0.0"
 
-      - name: Validate app directory and config
+      - name: Validate Guftin release metadata
         working-directory: apps/kingchat
         shell: bash
         run: |
-          test -f package.json || { echo "::error::apps/kingchat/package.json is missing"; exit 1; }
-          test -f app.config.js || { echo "::error::apps/kingchat/app.config.js is missing"; exit 1; }
-          node --version
-          npm --version
-          grep -nE 'slug|version|versionCode|package' app.config.js || true
-
-      - name: Fix known Expo project slug mismatch
-        working-directory: apps/kingchat
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
-          p = Path("app.config.js")
-          s = p.read_text()
-          updated, n = re.subn(r'(^\s*slug\s*:\s*)["\']guftin["\']', r'\1"guftin-"', s, count=1, flags=re.M)
-          if n:
-              p.write_text(updated)
-              print("Corrected slug from guftin to guftin-.")
-          elif re.search(r'(^\s*slug\s*:\s*)["\']guftin-["\']', s, flags=re.M):
-              print("Slug is already guftin-.")
-          else:
-              raise SystemExit("Could not safely identify the slug property. Review app.config.js manually.")
-          PY
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const pkg = require('./package.json');
+          const appConfig = fs.readFileSync('app.config.js', 'utf8');
+          if (pkg.version !== '1.5.7' ||
+              !/version:\\s*"1\\.5\\.7"/.test(appConfig) ||
+              !/versionCode:\\s*43/.test(appConfig) ||
+              !/package:\\s*"com\\.guftin\\.app"/.test(appConfig)) {
+            throw new Error('Guftin package/version metadata does not match the expected 1.5.7 / Android 43 release.');
+          }
+          console.log('Validated Guftin 1.5.7, Android versionCode 43, package com.guftin.app.');
+          NODE
 
       - name: Install JavaScript dependencies
         working-directory: apps/kingchat
         run: npm install --no-audit --no-fund
 
-      - name: Generate Android native project
+      - name: Patch and validate React Native CallKeep Android bridge
+        working-directory: apps/kingchat
+        run: npm run patch:callkeep
+
+      - name: Run TypeScript validation
+        working-directory: apps/kingchat
+        run: npm run typecheck
+
+      - name: Export Android JavaScript bundle
+        working-directory: apps/kingchat
+        run: npx expo export --platform android --output-dir .expo-smoke-export
+
+      - name: Generate native Android project
         working-directory: apps/kingchat
         run: npx expo prebuild --platform android --no-install
 
-      - name: Build debug APK for testing
+      - name: Compile Android debug APK
         working-directory: apps/kingchat/android
         shell: bash
         run: |
           chmod +x ./gradlew
           ./gradlew --no-daemon --stacktrace assembleDebug
 
-      - name: Verify APK output
+      - name: Verify APK output and package metadata
         working-directory: apps/kingchat
         shell: bash
         run: |
@@ -113,16 +110,44 @@ jobs:
           test -s "$APK" || { echo "::error::APK output was not created"; exit 1; }
           ls -lh "$APK"
           if command -v apkanalyzer >/dev/null 2>&1; then
-            apkanalyzer manifest application-id "$APK" || true
-            apkanalyzer manifest version-name "$APK" || true
-            apkanalyzer manifest version-code "$APK" || true
+            apkanalyzer manifest application-id "$APK"
+            apkanalyzer manifest version-name "$APK"
+            apkanalyzer manifest version-code "$APK"
           fi
 
-      - name: Upload APK artifact
+      - name: Enable KVM for Android emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Install and smoke-test APK on Android 36 emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          APK_PATH: apps/kingchat/android/app/build/outputs/apk/debug/app-debug.apk
+        with:
+          working-directory: apps/kingchat
+          api-level: 36
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect
+          disable-animations: true
+          script: bash "$GITHUB_WORKSPACE/apps/kingchat/scripts/android-startup-smoke.sh"
+
+      - name: Upload Android startup smoke log
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Guftin-Android-debug-${{ github.run_number }}
+          name: Guftin-Android-startup-smoke-${{ github.run_number }}
+          path: apps/kingchat/startup-smoke-logcat.txt
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload verified QA APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Guftin-Android-QA-${{ github.run_number }}
           path: apps/kingchat/android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
-          
