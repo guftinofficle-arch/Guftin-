@@ -1,0 +1,112 @@
+name: Guftin Android APK (GitHub Gradle)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - release/guftin-v1.5.7-no-email-verification
+    paths:
+      - "apps/kingchat/**"
+      - ".github/workflows/guftin-android-apk.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: guftin-android-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build Guftin Android APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout selected branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Validate app directory and config
+        working-directory: apps/kingchat
+        shell: bash
+        run: |
+          test -f package.json || { echo "::error::apps/kingchat/package.json is missing"; exit 1; }
+          test -f app.config.js || { echo "::error::apps/kingchat/app.config.js is missing"; exit 1; }
+          node --version
+          npm --version
+          grep -nE 'slug|version|versionCode|package' app.config.js || true
+
+      - name: Fix known Expo project slug mismatch
+        working-directory: apps/kingchat
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          p = Path("app.config.js")
+          s = p.read_text()
+          # The previous failed EAS build identified this exact mismatch.
+          # Keep the project slug aligned with the existing EAS project identity.
+          updated, n = re.subn(r'(^\s*slug\s*:\s*)["\']guftin["\']', r'\1"guftin-"', s, count=1, flags=re.M)
+          if n:
+              p.write_text(updated)
+              print("Corrected slug from guftin to guftin-.")
+          elif re.search(r'(^\s*slug\s*:\s*)["\']guftin-["\']', s, flags=re.M):
+              print("Slug is already guftin-.")
+          else:
+              raise SystemExit("Could not safely identify the slug property. Review app.config.js manually.")
+          PY
+
+      - name: Install JavaScript dependencies
+        working-directory: apps/kingchat
+        run: npm install --no-audit --no-fund
+
+      - name: Generate Android native project
+        working-directory: apps/kingchat
+        run: npx expo prebuild --platform android --no-install
+
+      - name: Build signed-by-debug-key APK for testing
+        working-directory: apps/kingchat/android
+        shell: bash
+        run: |
+          chmod +x ./gradlew
+          ./gradlew --no-daemon --stacktrace assembleDebug
+
+      - name: Verify APK output and package metadata
+        working-directory: apps/kingchat
+        shell: bash
+        run: |
+          APK="android/app/build/outputs/apk/debug/app-debug.apk"
+          test -s "$APK" || { echo "::error::APK output was not created"; exit 1; }
+          echo "APK_PATH=$APK" >> "$GITHUB_ENV"
+          ls -lh "$APK"
+          if command -v apkanalyzer >/dev/null 2>&1; then
+            apkanalyzer manifest application-id "$APK" || true
+            apkanalyzer manifest version-name "$APK" || true
+            apkanalyzer manifest version-code "$APK" || true
+          fi
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Guftin-Android-debug-${{ github.run_number }}
+          path: apps/kingchat/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+          
