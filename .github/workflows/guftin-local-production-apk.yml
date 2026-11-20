@@ -1,6 +1,11 @@
 name: Guftin Signed Production APK — GitHub Local Build
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/guftin-local-production-apk.yml"
   workflow_dispatch:
     inputs:
       git_ref:
