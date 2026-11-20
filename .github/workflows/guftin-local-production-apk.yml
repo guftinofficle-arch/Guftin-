@@ -1,0 +1,166 @@
+name: Guftin Signed Production APK — GitHub Local Build
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/guftin-local-production-apk.yml"
+  workflow_dispatch:
+    inputs:
+      git_ref:
+        description: "Guftin release branch or commit to sign and build"
+        required: true
+        default: "release/guftin-v1.5.7-no-email-verification"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: guftin-local-production-apk
+  cancel-in-progress: false
+
+jobs:
+  signed-production-apk:
+    name: Build signed Guftin APK locally with existing EAS credentials
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: apps/kingchat
+
+    steps:
+      - name: Check out selected Guftin release
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.git_ref || 'release/guftin-v1.5.7-no-email-verification' }}
+
+      - name: Verify Expo owner token is available
+        shell: bash
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          if [ -z "$EXPO_TOKEN" ]; then
+            echo "::error::Missing GitHub Actions secret EXPO_TOKEN."
+            echo "Add the Expo owner access token under Repository Settings > Secrets and variables > Actions."
+            echo "The token is used to access the existing managed Android signing keystore; it is never printed."
+            exit 1
+          fi
+          echo "Expo authentication is available; token value remains hidden."
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22.23.3"
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install Android 36 toolchain
+        shell: bash
+        run: |
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-36" \
+            "build-tools;36.0.0" \
+            "ndk;27.1.12297006" \
+            "cmake;3.22.1"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.1.12297006" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/27.1.12297006" >> "$GITHUB_ENV"
+
+      - name: Validate release metadata
+        shell: bash
+        run: |
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const pkg = require('./package.json');
+          const appConfig = fs.readFileSync('app.config.js', 'utf8');
+          if (pkg.version !== '1.5.7' ||
+              !/version:\s*"1\.5\.7"/.test(appConfig) ||
+              !/versionCode:\s*43/.test(appConfig) ||
+              !/package:\s*"com\.guftin\.app"/.test(appConfig)) {
+            throw new Error('Expected Guftin 1.5.7 / Android code 43 / com.guftin.app.');
+          }
+          console.log('Validated Guftin 1.5.7, versionCode 43 and package com.guftin.app.');
+          NODE
+
+      - name: Install Guftin dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Patch React Native CallKeep Android bridge
+        run: npm run patch:callkeep
+
+      - name: Check Expo SDK dependency alignment
+        run: npx --yes expo install --check
+
+      - name: Run Expo Doctor
+        run: npx --yes expo-doctor@latest
+
+      - name: TypeScript validation
+        run: npm run typecheck
+
+      - name: Prepare launcher, splash and call-ringtone assets
+        run: |
+          npm run prepare:assets
+          node scripts/prepare-call-ringtone.js
+
+      - name: Build signed production APK locally (no EAS cloud build slot)
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          CI: "1"
+          EAS_LOCAL_BUILD_SKIP_CLEANUP: "1"
+        shell: bash
+        run: |
+          mkdir -p dist
+          npx --yes eas-cli@latest build \
+            --platform android \
+            --profile production \
+            --local \
+            --non-interactive \
+            --freeze-credentials \
+            --output ./dist/Guftin-1.5.7-GitHub.apk
+          test -s ./dist/Guftin-1.5.7-GitHub.apk
+
+      - name: Verify APK package, version and existing install certificate
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="./dist/Guftin-1.5.7-GitHub.apk"
+          APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
+
+          SIGNATURE_OUTPUT="$("$APKSIGNER" verify --verbose --print-certs "$APK" 2>&1)"
+          printf '%s\n' "$SIGNATURE_OUTPUT"
+          ACTUAL_FINGERPRINT="$(printf '%s\n' "$SIGNATURE_OUTPUT" | sed -nE 's/.*certificate SHA-256 digest: ([[:xdigit:]:]+).*/\1/p' | head -n 1 | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+          EXPECTED_FINGERPRINT="fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c"
+
+          if [ "$ACTUAL_FINGERPRINT" != "$EXPECTED_FINGERPRINT" ]; then
+            echo "::error::APK signing certificate does not match the existing Guftin install certificate."
+            echo "Expected: $EXPECTED_FINGERPRINT"
+            echo "Actual: ${ACTUAL_FINGERPRINT:-none}"
+            exit 1
+          fi
+
+          BADGING="$("$AAPT" dump badging "$APK" | head -n 1)"
+          echo "$BADGING"
+          echo "$BADGING" | grep -Fq "name='com.guftin.app'"
+          echo "$BADGING" | grep -Fq "versionCode='43'"
+          echo "$BADGING" | grep -Fq "versionName='1.5.7'"
+          sha256sum "$APK"
+          ls -lh "$APK"
+          echo "Signature and Android package metadata verified."
+
+      - name: Upload signed production APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Guftin-1.5.7-Signed-Production-APK
+          path: apps/kingchat/dist/Guftin-1.5.7-GitHub.apk
+          if-no-files-found: error
+          retention-days: 30
