@@ -11,7 +11,7 @@ on:
       git_ref:
         description: Branch or commit to build
         required: true
-        default: release/guftin-v1.5.4-otp-channel-admin
+        default: release/guftin-v1.5.7-no-email-verification
         type: string
 
 permissions:
@@ -25,7 +25,7 @@ jobs:
       - name: Check out Guftin source
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.git_ref || 'release/guftin-v1.5.4-otp-channel-admin' }}
+          ref: ${{ inputs.git_ref || 'release/guftin-v1.5.7-no-email-verification' }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -40,11 +40,11 @@ jobs:
           const fs = require('node:fs');
           const pkg = require('./package.json');
           const appConfig = fs.readFileSync('app.config.js', 'utf8');
-          if (pkg.version !== '1.5.6' || !/version:\s*"1\.5\.6"/.test(appConfig) || !/versionCode:\s*42/.test(appConfig)) {
-            console.error('Refusing to build: expected the full Guftin 1.5.6 / Android code 42 source.');
+          if (pkg.version !== '1.5.7' || !/version:\s*"1\.5\.6"/.test(appConfig) || !/versionCode:\s*43/.test(appConfig)) {
+            console.error('Refusing to build: expected the full Guftin 1.5.7 / Android code 43 source.');
             process.exit(1);
           }
-          console.log('Verified Guftin 1.5.6 / Android code 42 source.');
+          console.log('Verified Guftin 1.5.7 / Android code 43 source.');
           NODE
 
       - name: Verify Expo owner token is available
