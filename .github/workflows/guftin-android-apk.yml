@@ -48,7 +48,17 @@ jobs:
       - name: Install Android 36 SDK platform and build tools
         shell: bash
         run: |
-          yes | sdkmanager --licenses >/dev/null
+          python3 - <<'PYCODE'
+          import subprocess
+          # Feed license confirmations through communicate(); this avoids
+          # the harmless-but-fatal yes(1) SIGPIPE/Broken pipe under pipefail.
+          subprocess.run(
+              ["sdkmanager", "--licenses"],
+              input=("y\n" * 100),
+              text=True,
+              check=True,
+          )
+          PYCODE
           sdkmanager --install "platform-tools" "platforms;android-36" "build-tools;36.0.0"
 
       - name: Validate app directory and config
