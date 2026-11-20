@@ -1,4 +1,5 @@
 name: Guftin Signed Production APK — GitHub Local Build
+# Uses the release branch whose Expo slug now matches the existing EAS project.
 
 on:
   push:
