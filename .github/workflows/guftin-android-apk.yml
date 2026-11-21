@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - release/guftin-v1.5.7-no-email-verification
+      - release/guftin-v1.5.8-no-email-verification
     paths:
       - "apps/kingchat/**"
       - ".github/workflows/guftin-android-apk.yml"
@@ -66,13 +66,13 @@ jobs:
           const fs = require('node:fs');
           const pkg = require('./package.json');
           const appConfig = fs.readFileSync('app.config.js', 'utf8');
-          if (pkg.version !== '1.5.7' ||
+          if (pkg.version !== '1.5.8' ||
               !/version:\s*"1\.5\.7"/.test(appConfig) ||
               !/versionCode:\s*43/.test(appConfig) ||
               !/package:\s*"com\.guftin\.app"/.test(appConfig)) {
-            throw new Error('Guftin package/version metadata does not match the expected 1.5.7 / Android 43 release.');
+            throw new Error('Guftin package/version metadata does not match the expected 1.5.8 / Android 44 release.');
           }
-          console.log('Validated Guftin 1.5.7, Android versionCode 43, package com.guftin.app.');
+          console.log('Validated Guftin 1.5.8, Android versionCode 44, package com.guftin.app.');
           NODE
 
       - name: Install JavaScript dependencies
@@ -82,6 +82,10 @@ jobs:
       - name: Patch and validate React Native CallKeep Android bridge
         working-directory: apps/kingchat
         run: npm run patch:callkeep
+
+      - name: Patch Expo Notifications full-screen incoming calls
+        working-directory: apps/kingchat
+        run: npm run patch:expo-fullscreen
 
       - name: Run TypeScript validation
         working-directory: apps/kingchat
