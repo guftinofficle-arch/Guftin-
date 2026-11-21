@@ -1,58 +1,651 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#075e54"><title>King Chat</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#081b2b">
+<meta name="description" content="Guftin is a private communication space for real conversations, contacts and secure browser messaging.">
+<meta property="og:title" content="GUFTIN — Stay close. Stay connected.">
+<meta property="og:description" content="A calmer place for your conversations.">
+<title>GUFTIN — Stay close. Stay connected.</title>
+<link rel="manifest" href="/site.webmanifest">
 <style>
-:root{--green:#075e54;--lime:#25d366;--bg:#efeae2;--ink:#111b21;--muted:#667781}*{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:var(--bg);color:var(--ink)}button,input{font:inherit}button{cursor:pointer;border:0;border-radius:10px;padding:11px 14px;background:var(--green);color:white;font-weight:600}.app{height:100dvh;max-width:760px;margin:auto;background:#fff;display:flex;flex-direction:column;box-shadow:0 0 24px #0001}.top{background:var(--green);color:white;padding:16px;display:flex;align-items:center;justify-content:space-between}.brand{font-size:22px;font-weight:800;letter-spacing:.2px}.tag{font-size:12px;opacity:.8}.tabs{display:flex;background:var(--green);color:#cde5df}.tab{flex:1;text-align:center;padding:12px 4px;font-size:13px;cursor:pointer;border-bottom:3px solid transparent}.tab.active{color:white;border-color:var(--lime)}.search{padding:12px;background:#f6f6f6}.search input,.field{width:100%;padding:12px;border:1px solid #d9e0e3;border-radius:10px;background:white;outline-color:var(--lime)}.content{flex:1;overflow:auto}.row{padding:14px 16px;display:flex;gap:12px;align-items:center;border-bottom:1px solid #f0f0f0;cursor:pointer}.avatar{width:48px;height:48px;flex-shrink:0;border-radius:50%;display:grid;place-items:center;background:#d9fdd3;color:var(--green);font-weight:800;font-size:19px}.rowmain{min-width:0;flex:1}.rowtitle{font-weight:650}.preview{font-size:13px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:4px}.time{font-size:11px;color:var(--muted)}.bottom{padding:10px 14px;border-top:1px solid #eee;display:flex;gap:8px;align-items:center}.bottom input{flex:1;min-width:0;border-radius:22px}.screen{padding:20px}.hidden{display:none!important}.notice{margin:16px;padding:12px;background:#fff4d7;border-radius:10px;font-size:13px;color:#614b12}.auth{max-width:420px;margin:10vh auto;padding:24px}.auth h1{color:var(--green)}.auth .field{margin:7px 0}.bubble{max-width:82%;padding:10px 12px;margin:8px 12px;border-radius:12px;background:#fff;box-shadow:0 1px 1px #0001;overflow-wrap:anywhere}.bubble.mine{margin-left:auto;background:#d9fdd3}.muted{color:var(--muted);font-size:13px}.sectiontitle{padding:16px;font-weight:750}.empty{text-align:center;color:var(--muted);padding:42px 20px}.statusdot{display:inline-block;width:8px;height:8px;background:var(--lime);border-radius:50%;margin-right:5px}
+:root{color-scheme:dark;--bg:#071521;--panel:#0d2233;--panel2:#102a3d;--line:rgba(202,230,239,.11);--text:#ecf7f8;--muted:#9bb2bd;--teal:#36d6c3;--blue:#62a9ff;--danger:#ff7d87;--good:#4bd6a2;--shadow:0 24px 70px rgba(0,0,0,.28);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text)}body{min-height:100vh;background:radial-gradient(ellipse at 12% 8%,rgba(30,116,133,.18),transparent 38%),radial-gradient(ellipse at 92% 85%,rgba(43,101,171,.17),transparent 34%),var(--bg)}button,input,textarea{font:inherit}button{cursor:pointer}button:disabled{opacity:.55;cursor:not-allowed}a{color:var(--teal);text-decoration:none}a:hover{text-decoration:underline}.hidden,[hidden]{display:none!important}
+.auth-shell{min-height:100vh;display:grid;grid-template-columns:minmax(0,1.1fr) minmax(360px,.9fr);max-width:1320px;margin:auto;padding:34px;gap:6vw;align-items:center}.hero-copy{padding:clamp(18px,4vw,62px);max-width:690px}.wordmark{font-size:24px;font-weight:850;letter-spacing:.19em;color:#fff}.wordmark span{color:var(--teal)}.eyebrow{display:inline-flex;align-items:center;gap:9px;padding:8px 12px;border:1px solid rgba(54,214,195,.23);border-radius:99px;background:rgba(54,214,195,.07);color:#a7f5e8;font-size:12px;letter-spacing:.1em;text-transform:uppercase;margin:62px 0 25px}.eyebrow:before{content:"";width:7px;height:7px;border-radius:50%;background:var(--teal);box-shadow:0 0 13px var(--teal)}.hero-copy h1{font-size:clamp(42px,6vw,76px);line-height:1.02;letter-spacing:-.055em;margin:0 0 24px;font-weight:760}.hero-copy h1 em{font-style:normal;color:var(--teal)}.hero-copy>p{font-size:17px;line-height:1.8;color:var(--muted);max-width:570px}.hero-points{display:flex;flex-wrap:wrap;gap:12px;margin-top:36px}.hero-points span{border:1px solid var(--line);background:rgba(255,255,255,.025);border-radius:99px;padding:10px 14px;color:#c6d9df;font-size:13px}.auth-card{width:100%;max-width:470px;margin:auto;padding:clamp(24px,4vw,42px);background:linear-gradient(160deg,rgba(18,47,67,.96),rgba(9,28,43,.98));border:1px solid rgba(196,231,239,.14);border-radius:26px;box-shadow:var(--shadow)}.auth-card .wordmark{font-size:18px}.auth-card h2{font-size:30px;letter-spacing:-.035em;margin:28px 0 7px}.subtle{color:var(--muted);font-size:14px;line-height:1.65}.field-label{display:block;font-size:12px;color:#c7d9df;margin:18px 0 8px}.field{width:100%;border:1px solid rgba(190,220,231,.17);background:rgba(3,16,27,.53);color:var(--text);border-radius:12px;padding:14px 15px;outline:none;transition:border .18s,box-shadow .18s}.field:focus{border-color:rgba(54,214,195,.8);box-shadow:0 0 0 3px rgba(54,214,195,.1)}.primary{width:100%;border:0;border-radius:12px;padding:14px 17px;background:linear-gradient(100deg,#27bfae,#48d8c4);color:#05222b;font-weight:800;margin-top:22px;box-shadow:0 10px 28px rgba(39,191,174,.15)}.primary:hover{filter:brightness(1.06)}.link-button{border:0;background:transparent;padding:0;color:var(--teal);font-size:13px}.auth-actions{display:flex;justify-content:space-between;gap:12px;margin-top:18px}.message{margin-top:14px;padding:12px 13px;border-radius:11px;font-size:13px;line-height:1.5;display:none}.message.show{display:block}.message.error{background:rgba(255,125,135,.1);border:1px solid rgba(255,125,135,.25);color:#ffb5bb}.message.success{background:rgba(75,214,162,.09);border:1px solid rgba(75,214,162,.24);color:#a7f1d0}.auth-foot{margin-top:27px;padding-top:20px;border-top:1px solid var(--line);font-size:11px;color:#78929f;line-height:1.7}.auth-foot a{margin-right:14px}.app-shell{min-height:100vh;display:grid;grid-template-columns:252px minmax(0,1fr);max-width:1600px;margin:auto}.sidebar{position:sticky;top:0;height:100vh;padding:27px 17px 18px;border-right:1px solid var(--line);background:rgba(6,22,34,.83);display:flex;flex-direction:column}.sidebar .wordmark{padding:6px 14px 34px;font-size:21px}.nav-label{font-size:10px;letter-spacing:.15em;color:#67818f;padding:12px 14px 8px;text-transform:uppercase}.nav-btn{width:100%;display:flex;align-items:center;gap:13px;text-align:left;border:1px solid transparent;border-radius:12px;background:transparent;color:#a8bdc7;padding:12px 14px;margin:3px 0;font-size:14px}.nav-btn .ico{width:20px;text-align:center;font-size:16px;color:#7ca4b3}.nav-btn.active,.nav-btn:hover{background:rgba(54,214,195,.09);border-color:rgba(54,214,195,.13);color:#e9fbfa}.nav-btn.active .ico{color:var(--teal)}.sidebar-bottom{margin-top:auto;border-top:1px solid var(--line);padding:16px 9px 0}.account-mini{display:flex;align-items:center;gap:10px;min-width:0}.avatar{width:39px;height:39px;flex:0 0 39px;border-radius:50%;display:grid;place-items:center;background:linear-gradient(145deg,#175c6a,#2d9d9b);color:white;font-weight:800;background-size:cover;background-position:center}.account-mini strong{display:block;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.account-mini small{display:block;color:var(--muted);font-size:11px;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.app-main{min-width:0;min-height:100vh;display:flex;flex-direction:column}.app-header{height:82px;flex:0 0 82px;display:flex;align-items:center;justify-content:space-between;padding:0 clamp(18px,3vw,42px);border-bottom:1px solid var(--line);background:rgba(7,21,33,.6);backdrop-filter:blur(16px)}.app-header h1{font-size:19px;margin:0;letter-spacing:-.02em}.header-right{display:flex;align-items:center;gap:12px}.status-pill{font-size:11px;border:1px solid var(--line);border-radius:99px;padding:8px 11px;color:#a9c2cb}.icon-btn{border:1px solid var(--line);background:rgba(255,255,255,.035);color:#d4e5e9;border-radius:10px;padding:9px 11px}.page-area{flex:1;padding:clamp(16px,2.5vw,34px);min-width:0}.section-head{display:flex;align-items:flex-end;justify-content:space-between;gap:18px;margin-bottom:22px}.section-head h2{font-size:25px;margin:0 0 6px;letter-spacing:-.04em}.section-head p{margin:0;color:var(--muted);font-size:13px}.card{background:linear-gradient(150deg,rgba(17,43,61,.92),rgba(10,30,45,.92));border:1px solid var(--line);border-radius:18px;padding:20px}.muted{color:var(--muted)}.chat-layout{display:grid;grid-template-columns:minmax(260px,340px) minmax(0,1fr);height:calc(100vh - 145px);min-height:460px;border:1px solid var(--line);border-radius:18px;overflow:hidden;background:rgba(9,29,44,.65)}.conversation-panel{min-width:0;border-right:1px solid var(--line);display:flex;flex-direction:column}.panel-top{padding:18px;border-bottom:1px solid var(--line)}.panel-top h2{margin:0 0 13px;font-size:17px}.search-field{width:100%;border:1px solid var(--line);border-radius:10px;background:rgba(2,16,27,.55);padding:11px 12px;color:var(--text);outline:none}.conversation-list{overflow:auto;flex:1}.conversation-item{width:100%;display:flex;gap:11px;align-items:center;text-align:left;padding:14px;border:0;border-bottom:1px solid rgba(202,230,239,.055);background:transparent;color:var(--text)}.conversation-item:hover,.conversation-item.active{background:rgba(54,214,195,.08)}.conversation-item .meta{min-width:0;flex:1}.conversation-item strong{display:block;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.conversation-item small{display:block;margin-top:5px;color:var(--muted);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.conversation-item time{font-size:10px;color:#78909d}.chat-panel{display:flex;flex-direction:column;min-width:0;min-height:0}.chat-head{height:69px;flex:0 0 69px;padding:12px 18px;display:flex;align-items:center;gap:11px;border-bottom:1px solid var(--line)}.chat-head strong{display:block;font-size:13px}.chat-head small{display:block;color:var(--muted);font-size:11px;margin-top:4px}.chat-stream{padding:20px;overflow:auto;flex:1;display:flex;flex-direction:column;gap:10px}.chat-empty{margin:auto;text-align:center;max-width:350px;padding:30px}.chat-empty .orb{width:66px;height:66px;border-radius:22px;margin:0 auto 20px;background:linear-gradient(145deg,rgba(54,214,195,.2),rgba(98,169,255,.12));display:grid;place-items:center;color:var(--teal);font-size:26px}.chat-empty h3{font-size:18px;margin:0 0 8px}.chat-empty p{font-size:13px;line-height:1.7;color:var(--muted)}.bubble{max-width:min(76%,560px);padding:11px 13px;border-radius:14px;background:rgba(255,255,255,.06);border:1px solid rgba(210,235,240,.07);align-self:flex-start;white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;line-height:1.55}.bubble.mine{align-self:flex-end;background:rgba(35,156,144,.2);border-color:rgba(54,214,195,.14)}.bubble time{display:block;color:#86a1ab;font-size:10px;text-align:right;margin-top:6px}.composer{display:flex;gap:10px;padding:14px;border-top:1px solid var(--line)}.composer input{flex:1;min-width:0;border:1px solid var(--line);border-radius:12px;background:rgba(2,16,27,.55);padding:12px;color:var(--text);outline:none}.send-btn{border:0;border-radius:12px;background:var(--teal);color:#04252b;font-weight:800;padding:0 20px}.security-note{padding:9px 14px;text-align:center;font-size:10px;color:#77929f;border-top:1px solid rgba(200,230,238,.05)}.contact-grid{display:grid;grid-template-columns:minmax(280px,380px) minmax(0,1fr);gap:20px}.contact-result{display:flex;align-items:center;gap:12px;padding:13px 0;border-bottom:1px solid var(--line)}.contact-result:last-child{border-bottom:0}.contact-result .grow{flex:1;min-width:0}.contact-result strong{display:block;font-size:13px}.contact-result small{display:block;color:var(--muted);margin-top:4px;font-size:11px}.small-btn{border:1px solid rgba(54,214,195,.28);background:rgba(54,214,195,.08);color:#a5f4e8;border-radius:10px;padding:9px 11px;font-size:12px;font-weight:700}.profile-wrap{display:grid;grid-template-columns:minmax(280px,430px) minmax(0,1fr);gap:20px}.profile-photo{display:flex;align-items:center;gap:15px;margin-bottom:20px}.profile-photo .avatar{width:68px;height:68px;flex-basis:68px;font-size:22px}.settings-list{display:grid;gap:12px;max-width:760px}.setting-row{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:16px 0;border-bottom:1px solid var(--line)}.setting-row:last-child{border-bottom:0}.setting-row strong{font-size:13px}.setting-row p{color:var(--muted);font-size:12px;line-height:1.55;margin:5px 0 0}.plain-btn{border:1px solid var(--line);background:rgba(255,255,255,.04);color:#d9e8ec;border-radius:10px;padding:10px 13px;font-size:12px}.danger-btn{border:1px solid rgba(255,125,135,.28);background:rgba(255,125,135,.08);color:#ffadb4;border-radius:10px;padding:10px 13px;font-size:12px}.notice-box{padding:14px 15px;border-radius:12px;background:rgba(98,169,255,.075);border:1px solid rgba(98,169,255,.16);color:#b9d7ed;font-size:12px;line-height:1.65}.toast{position:fixed;z-index:20;right:22px;bottom:22px;max-width:min(420px,calc(100vw - 44px));padding:13px 16px;border:1px solid rgba(54,214,195,.24);background:#102c3c;color:#e8f8f7;border-radius:12px;box-shadow:var(--shadow);font-size:13px;display:none}.toast.show{display:block}.legal{max-width:800px;line-height:1.75}.legal h2{font-size:24px}.legal h3{font-size:16px;margin-top:26px}.legal p,.legal li{color:#b2c5cc;font-size:13px}.back-chat{display:none}
+@media(max-width:900px){.auth-shell{grid-template-columns:1fr;gap:24px;padding:20px}.hero-copy{max-width:620px;margin:auto;padding:22px 10px 0}.eyebrow{margin:30px 0 18px}.hero-copy h1{font-size:52px}.hero-copy>p{font-size:15px}.hero-points{margin-top:20px}.auth-card{margin:10px auto 30px}.app-shell{grid-template-columns:76px minmax(0,1fr)}.sidebar{padding:20px 9px 14px}.sidebar .wordmark{font-size:0;padding:6px 0 28px;text-align:center}.sidebar .wordmark:after{content:"G";font-size:23px;color:var(--teal);letter-spacing:0}.nav-label,.nav-btn .nav-text,.sidebar-bottom .account-mini .account-lines{display:none}.nav-btn{justify-content:center;padding:13px 5px}.nav-btn .ico{font-size:18px}.sidebar-bottom{padding:15px 0 0}.account-mini{justify-content:center}.account-mini .avatar{width:39px;height:39px;flex-basis:39px}}
+@media(max-width:620px){.auth-shell{padding:16px}.hero-copy{padding:10px 4px 0}.hero-copy h1{font-size:42px}.hero-copy>p{font-size:14px}.hero-points span{font-size:11px;padding:8px 10px}.auth-card{padding:23px 20px;border-radius:20px}.auth-card h2{font-size:26px}.app-shell{display:flex;flex-direction:column}.sidebar{position:fixed;z-index:15;top:auto;bottom:0;left:0;right:0;width:100%;height:66px;border-right:0;border-top:1px solid var(--line);padding:6px 7px;background:rgba(6,22,34,.96);backdrop-filter:blur(18px);display:flex;flex-direction:row;justify-content:space-around}.sidebar .wordmark,.nav-label,.sidebar-bottom{display:none}.nav-btn{width:auto;min-width:54px;flex:1;margin:0 2px;display:flex;flex-direction:column;gap:3px;padding:6px 3px;border:0;font-size:10px}.nav-btn .ico{font-size:16px;line-height:1.1}.nav-btn .nav-text{display:block;font-size:9px}.app-main{min-height:100vh;padding-bottom:66px}.app-header{height:64px;flex-basis:64px;padding:0 16px}.app-header h1{font-size:17px}.status-pill{display:none}.page-area{padding:13px}.chat-layout{height:calc(100dvh - 154px);min-height:400px;grid-template-columns:1fr}.conversation-panel{border-right:0}.chat-panel{display:none}.chat-layout.mobile-chat-open .conversation-panel{display:none}.chat-layout.mobile-chat-open .chat-panel{display:flex}.back-chat{display:inline-flex}.contact-grid,.profile-wrap{grid-template-columns:1fr}.section-head h2{font-size:22px}.bubble{max-width:88%}.chat-stream{padding:13px}.composer{padding:10px}.send-btn{padding:0 14px}}
+@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important;animation:none!important}}
 </style>
 </head>
 <body>
-<div id="authView" class="auth">
- <div class="brand" style="color:#075e54">👑 King Chat</div><p class="muted">Private messaging, built for your community.</p>
- <h1>Sign in with your phone</h1><p class="muted">Use your phone number to receive a one-time SMS verification code. No Google or email account needed.</p><h3 style="margin:8px 0;color:#075e54">Phone number</h3><input id="phoneNumber" class="field" type="tel" placeholder="+92 3XX XXXXXXX" autocomplete="tel"><div id="recaptcha-container"></div><button id="sendOtp" style="width:100%;margin-top:8px">Send SMS code</button><input id="phoneCode" class="field" inputmode="numeric" autocomplete="one-time-code" placeholder="SMS verification code"><button id="verifyOtp" style="width:100%;margin-top:8px;background:#128c7e">Verify code & sign in</button>
- <p class="muted">Your phone number must be verified by SMS. Firebase Phone sign-in must be enabled in the project.</p><p id="authMessage" class="muted"></p>
-</div>
-<div id="appView" class="app hidden">
- <header class="top"><div><div class="brand">👑 King Chat</div><div class="tag">Simple. Fast. Connected.</div></div><button id="logout" style="background:#ffffff22">Log out</button></header>
- <nav class="tabs"><div class="tab active" data-tab="chats">CHATS</div><div class="tab" data-tab="people">PEOPLE</div><div class="tab" data-tab="updates">UPDATES</div><div class="tab" data-tab="settings">SETTINGS</div></nav>
- <div id="searchWrap" class="search"><input id="search" placeholder="Search by name, email, or phone number"></div>
- <main id="main" class="content"></main>
- <div id="composer" class="bottom hidden"><input id="messageInput" class="field" placeholder="Message"><button id="send">Send ➤</button></div>
-</div>
+<section id="authShell" class="auth-shell">
+  <div class="hero-copy">
+    <div class="wordmark">GUFTIN<span>.</span></div>
+    <div class="eyebrow">Your conversations, together</div>
+    <h1>Stay close.<br><em>Stay connected.</em></h1>
+    <p>A thoughtful communication space built around real people, private conversations and the moments that bring us closer.</p>
+    <div class="hero-points"><span>Private conversations</span><span>Username-based contacts</span><span>Made for every screen</span></div>
+  </div>
+  <div class="auth-card">
+    <div class="wordmark">GUFTIN<span>.</span></div>
+    <h2 id="authTitle">Welcome back</h2>
+    <p id="authSubtitle" class="subtle">Sign in with your email and password to continue.</p>
+    <form id="authForm">
+      <div id="registerFields" hidden>
+        <label class="field-label" for="displayName">Display name</label>
+        <input class="field" id="displayName" maxlength="40" autocomplete="name" placeholder="Your name">
+        <label class="field-label" for="username">Permanent username</label>
+        <input class="field" id="username" maxlength="24" autocomplete="username" autocapitalize="none" placeholder="e.g. sara_01">
+        <p class="subtle" style="font-size:11px;margin:7px 0 0">3–24 letters, numbers or underscores. Your username cannot be changed later.</p>
+      </div>
+      <label class="field-label" for="email">Email address</label>
+      <input class="field" id="email" type="email" autocomplete="email" required placeholder="you@example.com">
+      <div id="passwordFields">
+        <label class="field-label" for="password">Password</label>
+        <input class="field" id="password" type="password" minlength="8" autocomplete="current-password" placeholder="At least 8 characters">
+      </div>
+      <div id="confirmFields" hidden>
+        <label class="field-label" for="confirmPassword">Confirm password</label>
+        <input class="field" id="confirmPassword" type="password" minlength="8" autocomplete="new-password" placeholder="Enter your password again">
+      </div>
+      <button class="primary" id="authSubmit" type="submit">Sign in</button>
+    </form>
+    <div id="authMessage" class="message" role="status" aria-live="polite"></div>
+    <div class="auth-actions">
+      <button class="link-button" id="authSwitch" type="button">Create an account</button>
+      <button class="link-button" id="forgotBtn" type="button">Forgot password?</button>
+    </div>
+    <div class="auth-foot">By continuing, you agree to use Guftin respectfully. We use your existing Guftin account and database.<br><br><a href="#privacy" id="privacyLink">Privacy</a><a href="#terms" id="termsLink">Terms</a><a href="mailto:guftinofficle@gmail.com">Support</a></div>
+  </div>
+</section>
+
+<section id="appShell" class="app-shell" hidden>
+  <aside class="sidebar">
+    <div class="wordmark">GUFTIN<span>.</span></div>
+    <div class="nav-label">Workspace</div>
+    <button class="nav-btn active" data-view="messages"><span class="ico">◫</span><span class="nav-text">Messages</span></button>
+    <button class="nav-btn" data-view="contacts"><span class="ico">◎</span><span class="nav-text">Contacts</span></button>
+    <div class="nav-label">Your space</div>
+    <button class="nav-btn" data-view="profile"><span class="ico">◉</span><span class="nav-text">My profile</span></button>
+    <button class="nav-btn" data-view="settings"><span class="ico">⚙</span><span class="nav-text">Settings</span></button>
+    <button class="nav-btn" data-view="help"><span class="ico">?</span><span class="nav-text">Help & support</span></button>
+    <div class="sidebar-bottom">
+      <div class="account-mini"><div id="sidebarAvatar" class="avatar">G</div><div class="account-lines"><strong id="sidebarName">Guftin member</strong><small id="sidebarUsername">@username</small></div></div>
+    </div>
+  </aside>
+  <main class="app-main">
+    <header class="app-header"><h1 id="pageTitle">Messages</h1><div class="header-right"><span class="status-pill">GUFTIN WEB</span><button class="icon-btn" id="signOutBtn" type="button">Sign out</button></div></header>
+    <section id="pageArea" class="page-area"></section>
+  </main>
+</section>
+
+<section id="publicLegal" class="auth-shell" hidden style="display:block;max-width:900px">
+  <div class="legal">
+    <div class="wordmark"><a href="/">GUFTIN<span>.</span></a></div>
+    <h2 id="legalTitle">Privacy</h2>
+    <div id="legalBody"></div>
+    <p><a href="/">← Back to Guftin</a></p>
+  </div>
+</section>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
 <script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
-import { getAuth, onAuthStateChanged, signOut, updateProfile, RecaptchaVerifier, signInWithPhoneNumber } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
-import { getFirestore, collection, doc, setDoc, addDoc, getDoc, getDocs, query, where, orderBy, onSnapshot, serverTimestamp, limit } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-// Replace these placeholders with the Web App config from Firebase Console > Project settings.
-const firebaseConfig = {apiKey: "AIzaSyATfe-auJU0CdMyRN0YS7oIhB85dGL8gmU",authDomain:"kingchat-ecbd6.firebaseapp.com",projectId: "kingchat-ecbd6",storageBucket:"kingchat-ecbd6.firebasestorage.app",messagingSenderId:"317953265600",appId: "1:317953265600:web:6977c511217f9dc76e8225"};
-const authView=document.querySelector('#authView'),appView=document.querySelector('#appView'),main=document.querySelector('#main'),composer=document.querySelector('#composer'),searchWrap=document.querySelector('#searchWrap');
-let app,auth,db,currentUser,activeTab='chats',activeChat=null,unsubMessages=null,unsubChats=null,allUsers=[],phoneConfirmation=null,recaptchaVerifier=null;
-const msg=(s)=>document.querySelector('#authMessage').textContent=s;
-try { if(firebaseConfig.apiKey!=="YOUR_API_KEY"){app=initializeApp(firebaseConfig);auth=getAuth(app);db=getFirestore(app);onAuthStateChanged(auth,async u=>{currentUser=u;if(u){authView.classList.add('hidden');appView.classList.remove('hidden');await setDoc(doc(db,'users',u.uid),{uid:u.uid,name:u.displayName||u.email?.split('@')[0]||'King Chat user',email:u.email||'',photoURL:u.photoURL||'',lastSeen:serverTimestamp()},{merge:true});renderTab('chats')}else{appView.classList.add('hidden');authView.classList.remove('hidden');if(unsubChats)unsubChats();if(unsubMessages)unsubMessages()}})}else{msg('Setup required: add your Firebase web config in index.html. See README for steps.')}}catch(e){msg(e.message)}
-document.querySelector('#sendOtp').onclick=async()=>{try{
- const phone=document.querySelector('#phoneNumber').value.trim();
- if(!/^\+[1-9]\d{7,14}$/.test(phone)){msg('Please enter phone with country code, e.g. +923001234567');return}
- if(!recaptchaVerifier)recaptchaVerifier=new RecaptchaVerifier(auth,'recaptcha-container',{size:'normal'});
- phoneConfirmation=await signInWithPhoneNumber(auth,phone,recaptchaVerifier);
- msg('SMS code sent. Enter the code above.');
- }catch(e){msg('Could not send SMS: '+e.message);if(recaptchaVerifier){try{await recaptchaVerifier.clear()}catch{}recaptchaVerifier=null}}
-};
-document.querySelector('#verifyOtp').onclick=async()=>{try{if(!phoneConfirmation){msg('First tap Send SMS code.');return}await phoneConfirmation.confirm(document.querySelector('#phoneCode').value.trim());msg('Phone verified.')}catch(e){msg('Verification failed: '+e.message)}};
-document.querySelector('#logout').onclick=()=>signOut(auth);
-document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>renderTab(t.dataset.tab));
-document.querySelector('#search').addEventListener('input',()=>renderTab(activeTab));
-function el(tag,cls,text){const n=document.createElement(tag);if(cls)n.className=cls;if(text!==undefined)n.textContent=text;return n}
-function row(name,preview,click,photo){const r=el('div','row'),a=el('div','avatar',name.slice(0,1).toUpperCase());if(photo){a.textContent='';a.style.backgroundImage='url('+photo+')';a.style.backgroundSize='cover'}const m=el('div','rowmain');m.append(el('div','rowtitle',name),el('div','preview',preview));r.append(a,m);if(click)r.onclick=click;return r}
-async function renderTab(tab){activeTab=tab;document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.tab===tab));main.replaceChildren();composer.classList.add('hidden');searchWrap.classList.toggle('hidden',tab==='settings');if(unsubChats){unsubChats();unsubChats=null}if(unsubMessages){unsubMessages();unsubMessages=null}if(!currentUser||!db)return;
-const term=document.querySelector('#search').value.trim().toLowerCase();
-if(tab==='chats'){main.append(el('div','sectiontitle','Your conversations'));const q=query(collection(db,'chats'),where('members','array-contains',currentUser.uid),orderBy('updatedAt','desc'),limit(50));unsubChats=onSnapshot(q,snap=>{main.replaceChildren(el('div','sectiontitle','Your conversations'));let found=0;snap.forEach(d=>{const c=d.data(),other=(c.members||[]).find(x=>x!==currentUser.uid)||currentUser.uid,name=c.names?.[other]||'Chat';if(term&&!name.toLowerCase().includes(term))return;found++;main.append(row(name,c.lastMessage||'Start a conversation',()=>openChat(d.id,c,name)))});if(!found)main.append(el('div','empty','No chats yet. Open People to start a conversation.'))},e=>main.append(el('div','notice',e.message)))}
-else if(tab==='people'){main.append(el('div','sectiontitle','Find people'));try{const snap=await getDocs(query(collection(db,'users'),limit(100)));allUsers=snap.docs.map(d=>d.data()).filter(u=>u.uid!==currentUser.uid);const users=allUsers.filter(u=>!term||(u.name||'').toLowerCase().includes(term)||(u.email||'').toLowerCase().includes(term)||(u.phoneNumber||'').toLowerCase().includes(term));if(!users.length)main.append(el('div','empty',term?'No users matched. Search with the person\'s name, email, or full phone number including country code.':'No other users found yet. Ask a friend to create an account.'));users.forEach(u=>main.append(row(u.name||(u.phoneNumber?u.phoneNumber:'King Chat user'),u.phoneNumber||u.email||'Tap to message',()=>startChat(u),u.photoURL)))}catch(e){const permission=e.code==='permission-denied'||/Missing or insufficient permissions/i.test(e.message);main.append(el('div','notice',permission?'Firebase blocked access to the users list. Publish firestore.rules in Firebase Console, then sign out and sign in again.':'Could not load people: '+e.message))}}
-else if(tab==='updates'){main.append(el('div','sectiontitle','Updates'),el('div','empty','Status updates are planned for a future version.'))}
-else if(tab==='settings'){main.append(el('div','sectiontitle','Account settings'));main.append(row(currentUser.displayName||'Your account',currentUser.email||''));main.append(row('Account ID',currentUser.uid));main.append(el('div','notice','King Chat starter version. Voice/video calls, push notifications, media sharing, group administration and end-to-end encryption are not included yet.'))}}
-async function startChat(other){try{const q=query(collection(db,'chats'),where('members','array-contains',currentUser.uid));const snap=await getDocs(q);let existing=snap.docs.find(d=>(d.data().members||[]).includes(other.uid));let id,c;if(existing){id=existing.id;c=existing.data()}else{const names={[currentUser.uid]:currentUser.displayName||currentUser.email,[other.uid]:other.name||other.email};const ref=await addDoc(collection(db,'chats'),{members:[currentUser.uid,other.uid],names,lastMessage:'',createdAt:serverTimestamp(),updatedAt:serverTimestamp()});id=ref.id;c={members:[currentUser.uid,other.uid],names}}await openChat(id,c,other.name||other.email||'Chat')}catch(e){main.append(el('div','notice',e.message))}}
-async function openChat(id,c,name){activeChat={id,c,name};main.replaceChildren();main.append(el('div','sectiontitle','‹ '+name));main.lastChild.style.cursor='pointer';main.lastChild.onclick=()=>renderTab('chats');composer.classList.remove('hidden');if(unsubMessages)unsubMessages();try{const q=query(collection(db,'chats',id,'messages'),orderBy('createdAt','asc'),limit(200));unsubMessages=onSnapshot(q,s=>{main.replaceChildren();const head=el('div','sectiontitle','‹ '+name);head.onclick=()=>renderTab('chats');head.style.cursor='pointer';main.append(head);s.forEach(d=>{const m=d.data();main.append(el('div','bubble'+(m.senderId===currentUser.uid?' mine':''),m.text||''))});main.scrollTop=main.scrollHeight},e=>main.append(el('div','notice',e.message)))}catch(e){main.append(el('div','notice',e.message))}}
-document.querySelector('#send').onclick=sendMessage;document.querySelector('#messageInput').onkeydown=e=>{if(e.key==='Enter')sendMessage()};
-async function sendMessage(){const input=document.querySelector('#messageInput'),text=input.value.trim();if(!text||!activeChat)return;input.value='';try{await addDoc(collection(db,'chats',activeChat.id,'messages'),{text,senderId:currentUser.uid,createdAt:serverTimestamp()});await setDoc(doc(db,'chats',activeChat.id),{lastMessage:text,updatedAt:serverTimestamp()},{merge:true})}catch(e){input.value=text;main.append(el('div','notice','Message failed: '+e.message))}}
+import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
+
+const SUPABASE_URL = "https://oyjemlbsmffvofefgxvd.supabase.co";
+const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_cJwVyQs551sviwX7hPzDHQ_mhla0wDr";
+const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+  auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
+});
+
+const $ = (id) => document.getElementById(id);
+const authShell = $("authShell"), appShell = $("appShell"), publicLegal = $("publicLegal"), pageArea = $("pageArea");
+let authMode = "signin", currentUser = null, profile = null, deviceId = null, devicePrivateKey = null;
+let activeConversation = null, conversationRows = [], contactsRows = [], realtimeChannel = null, toastTimer = null;
+
+function toast(message, error = false) {
+  const node = $("toast");
+  node.textContent = message;
+  node.style.borderColor = error ? "rgba(255,125,135,.45)" : "rgba(54,214,195,.28)";
+  node.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => node.classList.remove("show"), 4200);
+}
+function setAuthMessage(message, kind = "success") {
+  const node = $("authMessage");
+  node.textContent = message;
+  node.className = "message show " + kind;
+}
+function clearAuthMessage() { $("authMessage").className = "message"; }
+function setAuthMode(mode) {
+  authMode = mode;
+  clearAuthMessage();
+  $("registerFields").hidden = mode !== "signup";
+  $("confirmFields").hidden = mode !== "signup";
+  $("passwordFields").hidden = mode === "forgot";
+  $("password").required = mode !== "forgot";
+  $("confirmPassword").required = mode === "signup";
+  $("authTitle").textContent = mode === "signup" ? "Create your account" : mode === "forgot" ? "Reset your password" : "Welcome back";
+  $("authSubtitle").textContent = mode === "signup" ? "Create your Guftin account with email and password." : mode === "forgot" ? "We will send a password reset link to your email." : "Sign in with your email and password to continue.";
+  $("authSubmit").textContent = mode === "signup" ? "Create account" : mode === "forgot" ? "Send reset link" : "Sign in";
+  $("authSwitch").textContent = mode === "signup" ? "Already have an account? Sign in" : "Create an account";
+  $("forgotBtn").hidden = mode !== "signin";
+  $("authSwitch").hidden = mode === "forgot";
+}
+function showAuth() {
+  currentUser = null; profile = null; activeConversation = null;
+  if (realtimeChannel) supabase.removeChannel(realtimeChannel);
+  realtimeChannel = null;
+  appShell.hidden = true; publicLegal.hidden = true; authShell.hidden = false;
+  setAuthMode("signin");
+}
+function showApp() { authShell.hidden = true; publicLegal.hidden = true; appShell.hidden = false; }
+
+$("authSwitch").addEventListener("click", () => setAuthMode(authMode === "signup" ? "signin" : "signup"));
+$("forgotBtn").addEventListener("click", () => setAuthMode("forgot"));
+$("authForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  clearAuthMessage();
+  const email = $("email").value.trim().toLowerCase();
+  const password = $("password").value;
+  const submit = $("authSubmit");
+  submit.disabled = true;
+  try {
+    if (authMode === "signup") {
+      const username = $("username").value.trim().toLowerCase();
+      const displayName = $("displayName").value.trim();
+      if (!/^[a-z0-9_]{3,24}$/.test(username)) throw new Error("Username must be 3–24 characters using letters, numbers or underscores.");
+      if (displayName.length < 2 || displayName.length > 40) throw new Error("Display name must be between 2 and 40 characters.");
+      if (password.length < 8) throw new Error("Use a password with at least 8 characters.");
+      if (password !== $("confirmPassword").value) throw new Error("The passwords do not match.");
+      const availability = await supabase.rpc("kc_is_username_available", { p_username: username });
+      if (availability.error) throw availability.error;
+      if (availability.data !== true) throw new Error("That username is already taken. Try another one.");
+      const result = await supabase.auth.signUp({
+        email, password,
+        options: { data: { username, display_name: displayName, full_name: displayName } }
+      });
+      if (result.error) throw result.error;
+      if (result.data.session) {
+        setAuthMessage("Your account was created. Opening your Guftin workspace…");
+      } else {
+        setAuthMessage("Registration received. Check your email for the verification link, then sign in. No account is marked verified until Supabase confirms it.");
+      }
+    } else if (authMode === "forgot") {
+      const result = await supabase.auth.resetPasswordForEmail(email);
+      if (result.error) throw result.error;
+      setAuthMessage("If the email belongs to a Guftin account, Supabase has accepted the password-reset request. Check your inbox.");
+    } else {
+      const result = await supabase.auth.signInWithPassword({ email, password });
+      if (result.error) throw result.error;
+      setAuthMessage("Signed in. Loading your workspace…");
+    }
+  } catch (error) {
+    setAuthMessage(error.message || "The request could not be completed. Please try again.", "error");
+  } finally {
+    submit.disabled = false;
+  }
+});
+
+function openLegal(kind) {
+  authShell.hidden = true; appShell.hidden = true; publicLegal.hidden = false;
+  if (kind === "terms") {
+    $("legalTitle").textContent = "Terms and conditions";
+    $("legalBody").innerHTML = '<p>Guftin is a communication service. By using it, you agree to use the service lawfully and respectfully, protect your account credentials, and avoid sending content that violates another person’s rights or safety.</p><h3>Accounts</h3><p>You are responsible for activity through your account. Keep your email and password secure. Permanent usernames identify your account and cannot be changed through the website.</p><h3>Service availability</h3><p>Features depend on available backend services, device support and network access. Unavailable features are not represented as working.</p><h3>Content and privacy</h3><p>Only share information you have permission to share. Review your privacy settings and the security notices shown in the application. The current browser messaging protocol has not been independently audited.</p><h3>Support</h3><p>Contact <a href="mailto:guftinofficle@gmail.com">guftinofficle@gmail.com</a> for help or account requests.</p><p>Last updated: 21 November 2026.</p>';
+  } else {
+    $("legalTitle").textContent = "Privacy notice";
+    $("legalBody").innerHTML = '<p>Guftin uses the existing Supabase project for authentication and application data. This website uses email/password authentication only. It does not offer Google Sign-In.</p><h3>Information used</h3><p>Account email, permanent username, display name, profile information, contacts, browser device public keys and conversation data may be processed to provide the service.</p><h3>Browser messages</h3><p>Browser text messages are encrypted in the browser before they are stored. Message content keys are wrapped for registered browser devices. Private device keys are kept in browser IndexedDB. Clearing site data or losing a device key can make that device unable to decrypt its older messages. This implementation has not yet received an independent security audit and is not a claim of certified security.</p><h3>Storage and access</h3><p>Supabase row-level security restricts access to account and conversation data. Public frontend code uses a publishable key only; privileged service keys are not included in this website.</p><h3>Requests</h3><p>For account deletion, privacy questions or support, email <a href="mailto:guftinofficle@gmail.com">guftinofficle@gmail.com</a>. Do not send your password in an email.</p><p>Last updated: 21 November 2026.</p>';
+  }
+}
+$("privacyLink").addEventListener("click", (e) => { e.preventDefault(); openLegal("privacy"); });
+$("termsLink").addEventListener("click", (e) => { e.preventDefault(); openLegal("terms"); });
+
+function openKeyDb() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open("guftin-secure-browser", 1);
+    request.onupgradeneeded = () => request.result.createObjectStore("device-keys");
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error("Secure browser key storage is unavailable."));
+  });
+}
+async function keyDbGet(key) {
+  const db = await openKeyDb();
+  return new Promise((resolve, reject) => {
+    const request = db.transaction("device-keys", "readonly").objectStore("device-keys").get(key);
+    request.onsuccess = () => { db.close(); resolve(request.result || null); };
+    request.onerror = () => { db.close(); reject(request.error); };
+  });
+}
+async function keyDbPut(key, value) {
+  const db = await openKeyDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("device-keys", "readwrite");
+    tx.objectStore("device-keys").put(value, key);
+    tx.oncomplete = () => { db.close(); resolve(); };
+    tx.onerror = () => { db.close(); reject(tx.error); };
+  });
+}
+function getDeviceId() {
+  let id = localStorage.getItem("guftin_web_device_id");
+  if (!id) { id = crypto.randomUUID(); localStorage.setItem("guftin_web_device_id", id); }
+  return id;
+}
+async function registerBrowserDevice() {
+  if (!window.crypto || !crypto.subtle || !window.indexedDB) throw new Error("This browser does not support the secure key storage required for browser messaging. Open Guftin in an up-to-date browser over HTTPS.");
+  deviceId = getDeviceId();
+  let stored = await keyDbGet(deviceId);
+  let publicJwk;
+  if (stored && stored.privateKey && stored.publicJwk) {
+    devicePrivateKey = stored.privateKey;
+    publicJwk = stored.publicJwk;
+  } else {
+    const pair = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]);
+    publicJwk = await crypto.subtle.exportKey("jwk", pair.publicKey);
+    const privateJwk = await crypto.subtle.exportKey("jwk", pair.privateKey);
+    devicePrivateKey = await crypto.subtle.importKey("jwk", privateJwk, { name: "ECDH", namedCurve: "P-256" }, false, ["deriveBits"]);
+    stored = { privateKey: devicePrivateKey, publicJwk, createdAt: new Date().toISOString() };
+    await keyDbPut(deviceId, stored);
+  }
+  const existing = await supabase.from("kc_web_devices").select("id,revoked_at").eq("user_id", currentUser.id).eq("device_id", deviceId).maybeSingle();
+  if (existing.error) throw existing.error;
+  const deviceName = /Android/i.test(navigator.userAgent) ? "Android browser" : /iPhone|iPad/i.test(navigator.userAgent) ? "Apple mobile browser" : "Desktop browser";
+  if (existing.data && existing.data.revoked_at) throw new Error("This browser device was revoked. Clear the Guftin browser device registration and sign in again, or contact support.");
+  if (existing.data) {
+    const updated = await supabase.from("kc_web_devices").update({ public_key: publicJwk, device_name: deviceName }).eq("id", existing.data.id);
+    if (updated.error) throw updated.error;
+  } else {
+    const inserted = await supabase.from("kc_web_devices").insert({ user_id: currentUser.id, device_id: deviceId, device_name: deviceName, public_key: publicJwk });
+    if (inserted.error) throw inserted.error;
+  }
+}
+function bytesToB64Url(bytes) {
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+function b64UrlToBytes(value) {
+  const base = value.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = base + "=".repeat((4 - base.length % 4) % 4);
+  const binary = atob(padded);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+const encoder = new TextEncoder(), decoder = new TextDecoder();
+async function hkdfAesKey(sharedSecret, salt, targetDeviceId) {
+  const baseKey = await crypto.subtle.importKey("raw", sharedSecret, "HKDF", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey(
+    { name: "HKDF", hash: "SHA-256", salt, info: encoder.encode("GUFTIN-WEB-E2EE-V1:" + targetDeviceId) },
+    baseKey, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]
+  );
+}
+async function encryptForDevices(plainText, devices) {
+  const contentKey = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
+  const rawContentKey = await crypto.subtle.exportKey("raw", contentKey);
+  const messageIv = crypto.getRandomValues(new Uint8Array(12));
+  const encrypted = await crypto.subtle.encrypt({ name: "AES-GCM", iv: messageIv }, contentKey, encoder.encode(plainText));
+  const ephemeralPair = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]);
+  const ephemeralPublicKey = await crypto.subtle.exportKey("jwk", ephemeralPair.publicKey);
+  const envelopes = [];
+  for (const device of devices) {
+    const recipientPublic = await crypto.subtle.importKey("jwk", device.public_key, { name: "ECDH", namedCurve: "P-256" }, false, []);
+    const secret = await crypto.subtle.deriveBits({ name: "ECDH", public: recipientPublic }, ephemeralPair.privateKey, 256);
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const wrapKey = await hkdfAesKey(secret, salt, device.device_id);
+    const wrapIv = crypto.getRandomValues(new Uint8Array(12));
+    const wrapped = await crypto.subtle.encrypt({ name: "AES-GCM", iv: wrapIv }, wrapKey, rawContentKey);
+    envelopes.push({
+      device_id: device.device_id,
+      salt: bytesToB64Url(salt),
+      wrap_iv: bytesToB64Url(wrapIv),
+      wrapped_key: bytesToB64Url(new Uint8Array(wrapped))
+    });
+  }
+  return {
+    ciphertext: bytesToB64Url(new Uint8Array(encrypted)),
+    iv: bytesToB64Url(messageIv),
+    ephemeral_public_key: ephemeralPublicKey,
+    key_envelopes: envelopes
+  };
+}
+async function decryptBrowserMessage(message) {
+  const envelope = (message.key_envelopes || []).find(item => item.device_id === deviceId);
+  if (!envelope || !devicePrivateKey) return "This message was encrypted for another browser device.";
+  try {
+    const ephemeralPublic = await crypto.subtle.importKey("jwk", message.ephemeral_public_key, { name: "ECDH", namedCurve: "P-256" }, false, []);
+    const secret = await crypto.subtle.deriveBits({ name: "ECDH", public: ephemeralPublic }, devicePrivateKey, 256);
+    const wrapKey = await hkdfAesKey(secret, b64UrlToBytes(envelope.salt), envelope.device_id);
+    const rawContentKey = await crypto.subtle.decrypt({ name: "AES-GCM", iv: b64UrlToBytes(envelope.wrap_iv) }, wrapKey, b64UrlToBytes(envelope.wrapped_key));
+    const contentKey = await crypto.subtle.importKey("raw", rawContentKey, { name: "AES-GCM" }, false, ["decrypt"]);
+    const clear = await crypto.subtle.decrypt({ name: "AES-GCM", iv: b64UrlToBytes(message.iv) }, contentKey, b64UrlToBytes(message.ciphertext));
+    return decoder.decode(clear);
+  } catch (error) {
+    console.warn("Unable to decrypt this browser message", error);
+    return "Unable to decrypt on this browser device.";
+  }
+}
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
+}
+function initials(name) {
+  return String(name || "G").trim().split(/\s+/).slice(0, 2).map(part => part[0] || "").join("").toUpperCase() || "G";
+}
+async function avatarStyle(path) {
+  if (!path) return "";
+  if (/^https?:\/\//i.test(path)) return ' style="background-image:url(&quot;' + escapeHtml(path) + '&quot;)"';
+  const result = await supabase.storage.from("chat-media").createSignedUrl(path, 3600);
+  if (result.error || !result.data) return "";
+  return ' style="background-image:url(&quot;' + escapeHtml(result.data.signedUrl) + '&quot;)"';
+}
+async function signedAvatar(path) {
+  if (!path) return null;
+  if (/^https?:\/\//i.test(path)) return path;
+  const result = await supabase.storage.from("chat-media").createSignedUrl(path, 3600);
+  return result.error ? null : result.data?.signedUrl || null;
+}
+function profileName(userId) {
+  const entry = window.guftinProfiles?.[userId];
+  return entry?.display_name || entry?.username || "Guftin member";
+}
+async function loadProfiles(ids) {
+  const unique = [...new Set(ids.filter(Boolean))];
+  if (!unique.length) return {};
+  const result = await supabase.from("kc_profiles").select("id,username,display_name,avatar_url,about").in("id", unique);
+  if (result.error) throw result.error;
+  const map = {};
+  for (const row of result.data || []) map[row.id] = row;
+  window.guftinProfiles = { ...(window.guftinProfiles || {}), ...map };
+  return map;
+}
+async function bootWorkspace() {
+  if (!currentUser) return;
+  showApp();
+  $("pageTitle").textContent = "Messages";
+  try {
+    const loaded = await supabase.from("kc_profiles").select("id,username,display_name,avatar_url,about,created_at").eq("id", currentUser.id).maybeSingle();
+    if (loaded.error) throw loaded.error;
+    profile = loaded.data;
+    const metadata = currentUser.user_metadata || {};
+    const username = profile?.username || metadata.username;
+    const displayName = profile?.display_name && profile.display_name !== "New member" ? profile.display_name : metadata.display_name || currentUser.email?.split("@")[0] || "Guftin member";
+    if (!username) throw new Error("Your permanent username is missing from your account profile. Contact Guftin support so it can be fixed safely.");
+    const finished = await supabase.rpc("kc_finish_profile", { p_username: username, p_display_name: displayName });
+    if (finished.error) throw finished.error;
+    const refreshed = await supabase.from("kc_profiles").select("id,username,display_name,avatar_url,about,created_at").eq("id", currentUser.id).single();
+    if (refreshed.error) throw refreshed.error;
+    profile = refreshed.data;
+    $("sidebarName").textContent = profile.display_name;
+    $("sidebarUsername").textContent = "@" + profile.username;
+    $("sidebarAvatar").textContent = initials(profile.display_name);
+    const photo = await signedAvatar(profile.avatar_url);
+    if (photo) $("sidebarAvatar").style.backgroundImage = "url('" + photo.replace(/'/g, "%27") + "')";
+    await registerBrowserDevice();
+    if (realtimeChannel) supabase.removeChannel(realtimeChannel);
+    realtimeChannel = supabase.channel("guftin-web-inbox-" + currentUser.id)
+      .on("postgres_changes", { event: "*", schema: "public", table: "kc_web_messages" }, async (payload) => {
+        await loadConversations();
+        if (activeConversation && payload.new?.conversation_id === activeConversation.id) await loadMessages();
+      }).subscribe();
+    await showView("messages");
+  } catch (error) {
+    pageArea.innerHTML = '<div class="card"><h2>Workspace setup needs attention</h2><p class="muted">' + escapeHtml(error.message || "Unable to initialise your browser workspace.") + '</p><p class="muted">Your account has not been deleted or changed. Contact <a href="mailto:guftinofficle@gmail.com">Guftin support</a> and include this message.</p></div>';
+    toast(error.message || "Workspace setup failed.", true);
+  }
+}
+async function loadConversations() {
+  const result = await supabase.from("kc_web_conversations").select("id,user_low,user_high,updated_at").or("user_low.eq." + currentUser.id + ",user_high.eq." + currentUser.id).order("updated_at", { ascending: false }).limit(100);
+  if (result.error) throw result.error;
+  conversationRows = result.data || [];
+  const otherIds = conversationRows.map(row => row.user_low === currentUser.id ? row.user_high : row.user_low);
+  const profileMap = await loadProfiles(otherIds);
+  const latest = {};
+  for (const row of conversationRows) {
+    const msg = await supabase.from("kc_web_messages").select("id,sender_id,created_at,ciphertext,iv,ephemeral_public_key,key_envelopes").eq("conversation_id", row.id).order("created_at", { ascending: false }).limit(1).maybeSingle();
+    if (!msg.error && msg.data) latest[row.id] = msg.data;
+  }
+  const container = $("conversationList");
+  if (!container) return;
+  container.replaceChildren();
+  if (!conversationRows.length) {
+    container.innerHTML = '<div class="chat-empty" style="padding:32px 18px"><div class="orb">◫</div><h3>No conversations yet</h3><p>Find someone by their permanent Guftin username to start a private chat.</p></div>';
+    return;
+  }
+  for (const row of conversationRows) {
+    const otherId = row.user_low === currentUser.id ? row.user_high : row.user_low;
+    const person = profileMap[otherId] || {};
+    const last = latest[row.id];
+    let preview = last ? (last.sender_id === currentUser.id ? "You: " : "") + await decryptBrowserMessage(last) : "Start your conversation";
+    if (preview.length > 54) preview = preview.slice(0, 54) + "…";
+    const item = document.createElement("button");
+    item.className = "conversation-item" + (activeConversation?.id === row.id ? " active" : "");
+    const photo = await signedAvatar(person.avatar_url);
+    item.innerHTML = '<div class="avatar"' + (photo ? ' style="background-image:url(&quot;' + escapeHtml(photo) + '&quot;)"' : "") + '>' + (photo ? "" : escapeHtml(initials(person.display_name))) + '</div><div class="meta"><strong>' + escapeHtml(person.display_name || person.username || "Guftin member") + '</strong><small>' + escapeHtml(preview) + '</small></div><time>' + new Date(row.updated_at).toLocaleDateString() + '</time>';
+    item.addEventListener("click", () => openConversation(row, person));
+    container.append(item);
+  }
+}
+async function loadMessages() {
+  if (!activeConversation) return;
+  const stream = $("chatStream");
+  if (!stream) return;
+  const result = await supabase.from("kc_web_messages").select("id,sender_id,created_at,ciphertext,iv,ephemeral_public_key,key_envelopes").eq("conversation_id", activeConversation.id).order("created_at", { ascending: true }).limit(100);
+  if (result.error) throw result.error;
+  stream.replaceChildren();
+  if (!result.data?.length) {
+    stream.innerHTML = '<div class="chat-empty"><div class="orb">✦</div><h3>Your conversation starts here</h3><p>Messages are encrypted on this browser before being sent. Send a hello to begin.</p></div>';
+    return;
+  }
+  for (const msg of result.data) {
+    const text = await decryptBrowserMessage(msg);
+    const bubble = document.createElement("div");
+    bubble.className = "bubble" + (msg.sender_id === currentUser.id ? " mine" : "");
+    const body = document.createElement("div");
+    body.textContent = text;
+    const time = document.createElement("time");
+    time.textContent = new Date(msg.created_at).toLocaleString([], { hour: "2-digit", minute: "2-digit", month: "short", day: "numeric" });
+    bubble.append(body, time);
+    stream.append(bubble);
+  }
+  stream.scrollTop = stream.scrollHeight;
+}
+async function openConversation(row, person) {
+  activeConversation = { ...row, person };
+  const layout = $("chatLayout");
+  if (layout) layout.classList.add("mobile-chat-open");
+  $("chatHeadName").textContent = person.display_name || person.username || "Guftin member";
+  $("chatHeadUsername").textContent = "@" + (person.username || "member");
+  const photo = await signedAvatar(person.avatar_url);
+  $("chatHeadAvatar").style.backgroundImage = photo ? "url('" + photo.replace(/'/g, "%27") + "')" : "";
+  $("chatHeadAvatar").textContent = photo ? "" : initials(person.display_name);
+  $("composer").hidden = false;
+  await loadMessages();
+  document.querySelectorAll(".conversation-item").forEach(node => node.classList.remove("active"));
+  const activeButton = [...document.querySelectorAll(".conversation-item")].find(node => node.textContent.includes(person.display_name || person.username || "Guftin member"));
+  activeButton?.classList.add("active");
+}
+async function sendCurrentMessage() {
+  const input = $("messageInput"), text = input.value.trim();
+  if (!text || !activeConversation) return;
+  if (!devicePrivateKey) { toast("Secure browser device keys are not ready.", true); return; }
+  const button = $("sendMessageBtn"); button.disabled = true;
+  try {
+    const devicesResult = await supabase.from("kc_web_devices").select("device_id,user_id,public_key").in("user_id", [activeConversation.user_low, activeConversation.user_high]).is("revoked_at", null);
+    if (devicesResult.error) throw devicesResult.error;
+    const devices = devicesResult.data || [];
+    const hasLow = devices.some(device => device.user_id === activeConversation.user_low);
+    const hasHigh = devices.some(device => device.user_id === activeConversation.user_high);
+    if (!hasLow || !hasHigh) throw new Error("Both people must sign in to Guftin Web once before browser messages can be sent. This registers their browser encryption keys.");
+    if (devices.length > 40) throw new Error("This conversation has too many active browser devices for the current web messaging limit.");
+    const encrypted = await encryptForDevices(text, devices);
+    const inserted = await supabase.from("kc_web_messages").insert({
+      conversation_id: activeConversation.id,
+      sender_id: currentUser.id,
+      message_type: "text",
+      ciphertext: encrypted.ciphertext,
+      iv: encrypted.iv,
+      ephemeral_public_key: encrypted.ephemeral_public_key,
+      key_envelopes: encrypted.key_envelopes
+    });
+    if (inserted.error) throw inserted.error;
+    input.value = "";
+    await loadMessages();
+    await loadConversations();
+  } catch (error) { toast(error.message || "Message could not be sent.", true); }
+  finally { button.disabled = false; input.focus(); }
+}
+function renderMessagesPage() {
+  pageArea.innerHTML = '<div class="chat-layout" id="chatLayout"><section class="conversation-panel"><div class="panel-top"><h2>Conversations</h2><input id="conversationSearch" class="search-field" placeholder="Search conversations"></div><div id="conversationList" class="conversation-list"></div></section><section class="chat-panel"><div class="chat-head"><button class="icon-btn back-chat" id="backToChats" type="button">←</button><div id="chatHeadAvatar" class="avatar">G</div><div><strong id="chatHeadName">Select a conversation</strong><small id="chatHeadUsername">Your private space</small></div></div><div class="chat-stream" id="chatStream"><div class="chat-empty"><div class="orb">◫</div><h3>Your messages belong here</h3><p>Select a conversation or find a person by their Guftin username to start a private browser chat.</p></div></div><div class="composer" id="composer" hidden><input id="messageInput" maxlength="4000" placeholder="Write a message…" autocomplete="off"><button id="sendMessageBtn" class="send-btn" type="button">Send</button></div><div class="security-note">Browser messages are encrypted before storage. Private keys stay in this browser profile.</div></section></div>';
+  $("conversationSearch").addEventListener("input", () => {
+    const term = $("conversationSearch").value.toLowerCase();
+    document.querySelectorAll(".conversation-item").forEach(item => item.hidden = !item.textContent.toLowerCase().includes(term));
+  });
+  $("sendMessageBtn").addEventListener("click", sendCurrentMessage);
+  $("messageInput").addEventListener("keydown", (event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); sendCurrentMessage(); } });
+  $("backToChats").addEventListener("click", () => $("chatLayout").classList.remove("mobile-chat-open"));
+  loadConversations().catch(error => toast(error.message || "Unable to load conversations.", true));
+}
+async function renderContactsPage() {
+  pageArea.innerHTML = '<div class="section-head"><div><h2>Your people</h2><p>Find Guftin members using their permanent username.</p></div></div><div class="contact-grid"><div class="card"><h3 style="margin:0 0 7px;font-size:16px">Find someone</h3><p class="subtle" style="font-size:12px">Enter an exact username, without the @ symbol.</p><form id="contactSearchForm"><input class="field" id="contactUsername" minlength="3" maxlength="24" placeholder="username" autocapitalize="none" autocomplete="off"><button class="primary" type="submit">Add contact</button></form><div id="contactMessage" class="message"></div></div><div class="card"><h3 style="margin:0 0 12px;font-size:16px">Saved contacts</h3><div id="contactsList"><p class="muted">Loading contacts…</p></div></div></div>';
+  $("contactSearchForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const username = $("contactUsername").value.trim().toLowerCase();
+    const output = $("contactMessage");
+    output.className = "message show";
+    output.textContent = "Checking username…";
+    try {
+      const result = await supabase.rpc("kc_save_contact_by_username", { p_username: username });
+      if (result.error) throw result.error;
+      output.className = "message show success";
+      output.textContent = "Contact added. You can now start a private browser conversation.";
+      await loadContacts();
+    } catch (error) { output.className = "message show error"; output.textContent = error.message || "Could not add this contact."; }
+  });
+  await loadContacts();
+}
+async function loadContacts() {
+  const list = $("contactsList");
+  if (!list) return;
+  const result = await supabase.from("kc_contacts").select("contact_id,created_at").eq("owner_id", currentUser.id).order("created_at", { ascending: false });
+  if (result.error) throw result.error;
+  const profileMap = await loadProfiles((result.data || []).map(item => item.contact_id));
+  contactsRows = (result.data || []).map(item => ({ ...item, profile: profileMap[item.contact_id] || {} }));
+  list.replaceChildren();
+  if (!contactsRows.length) { list.innerHTML = '<p class="muted" style="font-size:13px">No saved contacts yet. Add someone by username to get started.</p>'; return; }
+  for (const item of contactsRows) {
+    const row = document.createElement("div"); row.className = "contact-result";
+    const photo = await signedAvatar(item.profile.avatar_url);
+    row.innerHTML = '<div class="avatar"' + (photo ? ' style="background-image:url(&quot;' + escapeHtml(photo) + '&quot;)"' : "") + '>' + (photo ? "" : escapeHtml(initials(item.profile.display_name))) + '</div><div class="grow"><strong>' + escapeHtml(item.profile.display_name || "Guftin member") + '</strong><small>@' + escapeHtml(item.profile.username || "member") + '</small></div><button class="small-btn" type="button">Message</button>';
+    row.querySelector("button").addEventListener("click", () => startChat(item.profile.username));
+    list.append(row);
+  }
+}
+async function startChat(username) {
+  try {
+    const result = await supabase.rpc("kc_web_start_direct_conversation", { p_username: username });
+    if (result.error) throw result.error;
+    const row = Array.isArray(result.data) ? result.data[0] : result.data;
+    if (!row?.conversation_id) throw new Error("Guftin could not open this conversation.");
+    const loaded = await supabase.from("kc_web_conversations").select("id,user_low,user_high,updated_at").eq("id", row.conversation_id).single();
+    if (loaded.error) throw loaded.error;
+    await loadProfiles([row.contact_id]);
+    await showView("messages");
+    await openConversation(loaded.data, window.guftenProfiles?.[row.contact_id] || { display_name: row.display_name, username: row.username, avatar_url: row.avatar_url });
+  } catch (error) { toast(error.message || "Unable to start conversation.", true); }
+}
+function renderProfilePage() {
+  pageArea.innerHTML = '<div class="section-head"><div><h2>Your profile</h2><p>Manage the details other Guftin members can see.</p></div></div><div class="profile-wrap"><div class="card"><div class="profile-photo"><div id="profileAvatar" class="avatar">G</div><div><strong id="profileDisplayHeading">Your profile</strong><p class="subtle" style="font-size:12px;margin:5px 0">Permanent username: <span id="permanentUsername"></span></p></div></div><form id="profileForm"><label class="field-label" for="editDisplayName">Display name</label><input class="field" id="editDisplayName" maxlength="40" required><label class="field-label" for="editAbout">About</label><textarea class="field" id="editAbout" rows="4" maxlength="160" style="resize:vertical"></textarea><button class="primary" type="submit">Save profile</button></form><div id="profileMessage" class="message"></div></div><div class="card"><h3 style="margin:0 0 8px;font-size:16px">Profile photo</h3><p class="subtle" style="font-size:12px">Upload a JPG, PNG or WebP image. Guftin converts it to a compact JPEG before saving it to private storage.</p><input class="field" id="avatarFile" type="file" accept="image/jpeg,image/png,image/webp"><button class="plain-btn" id="uploadAvatarBtn" type="button" style="margin-top:13px">Upload profile photo</button><div id="avatarMessage" class="message"></div><div class="notice-box" style="margin-top:20px">Your username is permanent and cannot be edited. Profile photo access follows the permissions on the existing Guftin storage bucket.</div></div></div>';
+  $("editDisplayName").value = profile.display_name || "";
+  $("editAbout").value = profile.about || "";
+  $("profileDisplayHeading").textContent = profile.display_name || "Your profile";
+  $("permanentUsername").textContent = "@" + profile.username;
+  $("profileAvatar").textContent = initials(profile.display_name);
+  signedAvatar(profile.avatar_url).then(photo => { if (photo) $("profileAvatar").style.backgroundImage = "url('" + photo.replace(/'/g, "%27") + "')"; });
+  $("profileForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const output = $("profileMessage"); output.className = "message show"; output.textContent = "Saving…";
+    try {
+      const name = $("editDisplayName").value.trim(), about = $("editAbout").value.trim();
+      if (name.length < 2 || name.length > 40) throw new Error("Display name must be 2–40 characters.");
+      const result = await supabase.from("kc_profiles").update({ display_name: name, about }).eq("id", currentUser.id);
+      if (result.error) throw result.error;
+      profile.display_name = name; profile.about = about;
+      $("sidebarName").textContent = name; $("profileDisplayHeading").textContent = name;
+      output.className = "message show success"; output.textContent = "Your profile was updated.";
+    } catch (error) { output.className = "message show error"; output.textContent = error.message || "Could not save profile."; }
+  });
+  $("uploadAvatarBtn").addEventListener("click", uploadAvatar);
+}
+async function uploadAvatar() {
+  const file = $("avatarFile").files?.[0], output = $("avatarMessage"), button = $("uploadAvatarBtn");
+  output.className = "message show";
+  try {
+    if (!file) throw new Error("Choose a photo first.");
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) throw new Error("Choose a JPG, PNG or WebP photo.");
+    if (file.size > 8 * 1024 * 1024) throw new Error("The original photo must be 8 MB or smaller.");
+    button.disabled = true; output.textContent = "Preparing and uploading photo…";
+    const imageBitmap = await createImageBitmap(file);
+    const scale = Math.min(1, 1200 / Math.max(imageBitmap.width, imageBitmap.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(imageBitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(imageBitmap.height * scale));
+    canvas.getContext("2d").drawImage(imageBitmap, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/jpeg", .86));
+    if (!blob) throw new Error("This image could not be converted.");
+    const path = currentUser.id + "/profile/" + Date.now() + ".jpg";
+    const upload = await supabase.storage.from("chat-media").upload(path, blob, { contentType: "image/jpeg", upsert: false });
+    if (upload.error) throw upload.error;
+    const saved = await supabase.rpc("kc_save_profile_avatar", { p_avatar_path: path });
+    if (saved.error) throw saved.error;
+    profile.avatar_url = path;
+    const photo = await signedAvatar(path);
+    if (photo) {
+      $("profileAvatar").style.backgroundImage = "url('" + photo.replace(/'/g, "%27") + "')";
+      $("profileAvatar").textContent = "";
+      $("sidebarAvatar").style.backgroundImage = "url('" + photo.replace(/'/g, "%27") + "')";
+      $("sidebarAvatar").textContent = "";
+    }
+    output.className = "message show success"; output.textContent = "Profile photo saved.";
+  } catch (error) { output.className = "message show error"; output.textContent = error.message || "Could not upload this photo."; }
+  finally { button.disabled = false; }
+}
+function renderSettingsPage() {
+  pageArea.innerHTML = '<div class="section-head"><div><h2>Settings</h2><p>Account and browser security controls.</p></div></div><div class="settings-list"><div class="card"><div class="setting-row"><div><strong>Account email</strong><p>' + escapeHtml(currentUser.email || "Not available") + '</p></div><span class="status-pill">' + (currentUser.email_confirmed_at ? "Verified" : "Unverified") + '</span></div><div class="setting-row"><div><strong>Permanent username</strong><p>@' + escapeHtml(profile.username) + ' · cannot be changed</p></div></div><div class="setting-row"><div><strong>Browser encryption device</strong><p>Device key stored locally in this browser profile. Clearing browser site data can make old messages unreadable on this device.</p></div><span class="status-pill">Registered</span></div><div class="setting-row"><div><strong>Sign out</strong><p>End this browser session.</p></div><button class="plain-btn" id="settingsSignOut" type="button">Sign out</button></div><div class="setting-row"><div><strong>Account deletion</strong><p>Send a request to Guftin support. Deletion is not performed from this browser page.</p></div><a class="danger-btn" href="mailto:guftinofficle@gmail.com?subject=Guftin%20account%20deletion%20request">Request deletion</a></div></div><div class="card"><h3 style="margin:0 0 8px;font-size:15px">Browser release availability</h3><p class="subtle" style="font-size:12px;margin:0">Private one-to-one text messaging, username contacts and profile management are connected to the existing Guftin backend. Groups, status publishing, media chat, browser push notifications and voice/video calls are not enabled in this browser release yet. The Android application remains separate and is not changed by this website.</p></div></div>';
+  $("settingsSignOut").addEventListener("click", signOut);
+}
+function renderHelpPage() {
+  pageArea.innerHTML = '<div class="section-head"><div><h2>Help & support</h2><p>Ways to get help with your Guftin account.</p></div></div><div class="card legal"><h3>Can I use my Android Guftin account?</h3><p>Yes. Sign in with the same verified email and password used by your Guftin account. Your permanent username and profile are shared through the existing backend.</p><h3>Why must both people open Guftin Web?</h3><p>The browser messaging system registers a separate public encryption key for each browser device. Both people need an active browser device before the website can send encrypted messages.</p><h3>What if I clear browser storage?</h3><p>The private encryption key is held in this browser profile. Clearing site data may remove that key, which can prevent this device from decrypting older browser messages.</p><h3>Need help?</h3><p>Write to <a href="mailto:guftinofficle@gmail.com">guftinofficle@gmail.com</a>. Never include your password or private encryption key in a support email.</p></div>';
+}
+async function showView(view) {
+  document.querySelectorAll(".nav-btn").forEach(btn => btn.classList.toggle("active", btn.dataset.view === view));
+  $("pageTitle").textContent = ({ messages: "Messages", contacts: "Contacts", profile: "My profile", settings: "Settings", help: "Help & support" })[view] || "Guftin";
+  if (view === "messages") renderMessagesPage();
+  else if (view === "contacts") await renderContactsPage();
+  else if (view === "profile") renderProfilePage();
+  else if (view === "settings") renderSettingsPage();
+  else if (view === "help") renderHelpPage();
+}
+document.querySelectorAll(".nav-btn").forEach(button => button.addEventListener("click", () => showView(button.dataset.view).catch(error => toast(error.message || "Unable to open this section.", true))));
+$("signOutBtn").addEventListener("click", signOut);
+async function signOut() {
+  const result = await supabase.auth.signOut();
+  if (result.error) toast(result.error.message, true);
+}
+supabase.auth.onAuthStateChange((_event, session) => {
+  currentUser = session?.user || null;
+  if (currentUser) setTimeout(() => bootWorkspace(), 0);
+  else showAuth();
+});
+const initial = await supabase.auth.getSession();
+if (initial.data.session?.user) {
+  currentUser = initial.data.session.user;
+  await bootWorkspace();
+}
+if ("serviceWorker" in navigator && location.protocol === "https:") {
+  navigator.serviceWorker.register("/sw.js").catch(error => console.info("Offline shell is not installed", error));
+}
+const hash = location.hash.toLowerCase();
+if (hash === "#privacy" || hash === "#terms") openLegal(hash.slice(1));
 </script>
-</body></html>
+</body>
+</html>
