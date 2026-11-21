@@ -275,6 +275,7 @@ const getDocumentMimeType=(name:string)=>{
 };
 const PERMISSION_SETUP_STEPS = [
   {key:'notifications',icon:'🔔',title:'Notifications',description:'Allow message alerts, status likes and views, and incoming voice/video call alerts while Guftin is in the background.'},
+  {key:'fullScreenCalls',icon:'📞',title:'Full-screen incoming calls',description:'On Android 14 and newer, allow Guftin to show an incoming call over the lock screen. In the Android page, turn on Allow full-screen notifications, then return here and continue. If your Android version does not offer this setting, calls can still appear as a normal notification.'},
   {key:'microphone',icon:'🎙️',title:'Microphone',description:'Allow the microphone for voice messages and voice/video calls.'},
   {key:'camera',icon:'📷',title:'Camera',description:'Allow the camera so you can join video calls and share camera video.'},
   {key:'photos',icon:'🖼️',title:'Photos and videos',description:'Allow photo and video access when you choose a profile picture, share media, or post a status.'},
@@ -876,6 +877,7 @@ function GuftinApp() {
   const [permissionSetupStep,setPermissionSetupStep]=useState(0);
   const [permissionSetupBusy,setPermissionSetupBusy]=useState(false);
   const [permissionSetupAutoSave,setPermissionSetupAutoSave]=useState(true);
+  const [permissionSetupFullScreenOpened,setPermissionSetupFullScreenOpened]=useState(false);
   const [permissionSetupNotice,setPermissionSetupNotice]=useState('');
   const [themeName,setThemeName]=useState('emerald');
   const [deliveredByMessage,setDeliveredByMessage]=useState<Record<string,string>>({});
@@ -1074,6 +1076,7 @@ function GuftinApp() {
       if(done!=='completed'){
         setPermissionSetupStep(0);
         setPermissionSetupAutoSave(true);
+        setPermissionSetupFullScreenOpened(false);
         setPermissionSetupNotice('');
         setPermissionSetupVisible(true);
       }else{
@@ -1441,7 +1444,7 @@ function GuftinApp() {
 
   const advancePermissionSetup=async()=>{
     if(permissionSetupStep>=PERMISSION_SETUP_STEPS.length-1)await finishPermissionSetup();
-    else{setPermissionSetupStep(current=>current+1);setPermissionSetupNotice('');}
+    else{setPermissionSetupStep(current=>current+1);setPermissionSetupNotice('');setPermissionSetupFullScreenOpened(false);}
   };
 
   const skipPermissionSetupStep=async()=>{
@@ -1473,6 +1476,20 @@ function GuftinApp() {
             setPushEnabled(false);
             setPermissionSetupNotice(error?.message||'Android permission is allowed, but Expo/Firebase push registration still needs configuration.');
           }
+        }
+      }else if(step.key==='fullScreenCalls'){
+        if(Platform.OS!=='android'||Number(Platform.Version)<34){
+          granted=true;
+        }else if(!permissionSetupFullScreenOpened){
+          await IntentLauncher.startActivityAsync(
+            'android.settings.MANAGE_APP_USE_FULL_SCREEN_INTENT',
+            {data:'package:com.guftin.app'}
+          );
+          setPermissionSetupFullScreenOpened(true);
+          setPermissionSetupNotice('When Android settings opens, enable Allow full-screen notifications for Guftin. Return to this screen and tap Continue.');
+          return;
+        }else{
+          granted=true;
         }
       }else if(step.key==='microphone'){
         const permission=await Audio.requestPermissionsAsync();
@@ -3624,7 +3641,7 @@ function GuftinApp() {
             <Text style={{color:C.ink,fontWeight:'800'}}>Not now</Text>
           </Btn>
           <Btn disabled={permissionSetupBusy} onPress={()=>void requestPermissionSetupStep()} style={{flex:1,padding:15,borderRadius:14,alignItems:'center',backgroundColor:C.green}}>
-            {permissionSetupBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>{step.key==='autoSave'?'Save choice':'Allow'}</Text>}
+            {permissionSetupBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>{step.key==='autoSave'?'Save choice':step.key==='fullScreenCalls'?(permissionSetupFullScreenOpened?'Continue':'Open settings'):'Allow'}</Text>}
           </Btn>
         </View>
         <Btn disabled={permissionSetupBusy} onPress={()=>void finishPermissionSetup()} style={{paddingVertical:14,paddingHorizontal:12,alignItems:'center',marginTop:7}}>
@@ -3974,7 +3991,7 @@ function GuftinApp() {
       <View style={{flex:1,backgroundColor:'#0008',justifyContent:'flex-end'}}><View style={{backgroundColor:C.white,borderTopLeftRadius:24,borderTopRightRadius:24,padding:22}}>
         <Text style={{fontSize:21,fontWeight:'900',color:C.ink}}>Guftin settings</Text>
         <Text style={{color:C.muted,fontSize:12,marginTop:5,marginBottom:15}}>Privacy and connection preferences</Text>
-        <Btn onPress={()=>{setSettingsOpen(false);setPermissionSetupStep(0);setPermissionSetupAutoSave(mediaAutoDownload);setPermissionSetupNotice('');setPermissionSetupVisible(true);}} style={{backgroundColor:C.mint,padding:12,borderRadius:13,marginBottom:7}}>
+        <Btn onPress={()=>{setSettingsOpen(false);setPermissionSetupStep(0);setPermissionSetupAutoSave(mediaAutoDownload);setPermissionSetupFullScreenOpened(false);setPermissionSetupNotice('');setPermissionSetupVisible(true);}} style={{backgroundColor:C.mint,padding:12,borderRadius:13,marginBottom:7}}>
           <Text style={{color:C.green,fontWeight:'900',textAlign:'center'}}>Review app permissions</Text>
         </Btn>
         <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingVertical:12}}><View style={{flex:1,paddingRight:12}}><Text style={{color:C.ink,fontWeight:'800'}}>Show online status</Text><Text style={{color:C.muted,fontSize:11}}>Let contacts see when you are online</Text></View><Switch value={onlineVisibility} onValueChange={setOnlineVisibility} trackColor={{true:C.green}}/></View>
