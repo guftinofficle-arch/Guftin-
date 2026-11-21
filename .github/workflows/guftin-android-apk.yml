@@ -1,11 +1,12 @@
 name: Guftin Android APK — Build and Startup QA
-# QA the current 1.5.8 release source, including the native full-screen incoming-call notification patch.
+# QA Guftin 1.5.9 email OTP signup and native Android call notification fixes.
 
 on:
   workflow_dispatch:
   push:
     branches:
       - release/guftin-v1.5.8-no-email-verification
+      - release/guftin-v1.5.7-no-email-verification
     paths:
       - "apps/kingchat/**"
       - ".github/workflows/guftin-android-apk.yml"
@@ -67,13 +68,13 @@ jobs:
           const fs = require('node:fs');
           const pkg = require('./package.json');
           const appConfig = fs.readFileSync('app.config.js', 'utf8');
-          if (pkg.version !== '1.5.8' ||
-              !/version:\s*"1\.5\.7"/.test(appConfig) ||
-              !/versionCode:\s*43/.test(appConfig) ||
+          if (pkg.version !== '1.5.9' ||
+              !/version:\s*"1\.5\.9"/.test(appConfig) ||
+              !/versionCode:\s*45/.test(appConfig) ||
               !/package:\s*"com\.guftin\.app"/.test(appConfig)) {
-            throw new Error('Guftin package/version metadata does not match the expected 1.5.8 / Android 44 release.');
+            throw new Error('Guftin package/version metadata does not match the expected 1.5.9 / Android 45 release.');
           }
-          console.log('Validated Guftin 1.5.8, Android versionCode 44, package com.guftin.app.');
+          console.log('Validated Guftin 1.5.9, Android versionCode 45, package com.guftin.app.');
           NODE
 
       - name: Install JavaScript dependencies
