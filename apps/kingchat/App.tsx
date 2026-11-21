@@ -3266,7 +3266,18 @@ function GuftinApp() {
         password,
         options:{data:{display_name:cleanName,username:cleanUsername}}
       });
-      if(error)throw error;
+      if(error){
+        if(/already registered|already been registered|user already exists/i.test(error.message||'')){
+          const {error:resendError}=await supabase.auth.resend({type:'signup',email:cleanEmail});
+          if(resendError)throw resendError;
+          setEmail(cleanEmail);
+          setEmailOtp('');
+          setEmailOtpPending(true);
+          setAuthError('This email already has a pending Guftin signup. A fresh verification code has been requested. If the account was created earlier, use the password you chose then.');
+          return;
+        }
+        throw error;
+      }
       if(data.session){
         // Projects with email confirmation disabled may return a session immediately.
         setPassword('');
