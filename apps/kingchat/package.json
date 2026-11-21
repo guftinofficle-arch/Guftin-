@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "prepare:assets": "node scripts/prepare-assets.js",
     "patch:callkeep": "node scripts/patch-callkeep-android.js",
-    "eas-build-post-install": "npm run prepare:assets"
+    "eas-build-post-install": "npm run prepare:assets",
+    "patch:expo-fullscreen": "node scripts/patch-expo-fullscreen.js"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",
