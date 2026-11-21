@@ -1,6 +1,7 @@
 name: Guftin Signed Production APK — GitHub Local Build
 # Uses the release branch whose Expo slug matches the existing EAS project.
 # Version 1.5.8 includes secure-call identity, direct-call membership and Android full-screen call notification fixes; native patchers also run during EAS post-install.
+# Strict TypeScript null guard is verified before signed artifact upload.
 
 on:
   push:
