@@ -29,3 +29,5 @@ Project: `oyjemlbsmffvofefgxvd`
 ## Important
 
 Changing app code alone cannot change the hosted Supabase email template or SMTP delivery settings. After the dashboard settings are saved, test a new signup and confirm the 6-digit email arrives. The app does not create an authenticated session until Supabase accepts the OTP.
+
+The app also handles an email address that already has an unconfirmed signup by requesting a fresh signup OTP instead of silently failing. If a prior pending signup exists, the user should verify using the password chosen for that original signup.
