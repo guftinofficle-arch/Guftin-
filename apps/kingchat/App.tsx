@@ -18,6 +18,7 @@ import { Audio } from 'expo-av';
 import Constants from 'expo-constants';
 import * as Notifications from 'expo-notifications';
 import * as TaskManager from 'expo-task-manager';
+import * as IntentLauncher from 'expo-intent-launcher';
 import RNCallKeep from 'react-native-callkeep';
 import mobileAds, { BannerAd, BannerAdSize, MaxAdContentRating, TestIds } from 'react-native-google-mobile-ads';
 import { File, Paths } from 'expo-file-system';
@@ -32,7 +33,7 @@ registerGlobals();
 Notifications.setNotificationHandler({handleNotification:async()=>({shouldShowAlert:true,shouldPlaySound:true,shouldSetBadge:true,shouldShowBanner:true,shouldShowList:true})});
 
 const CALL_BACKGROUND_TASK = 'guftin-incoming-call-v1';
-const CALL_NOTIFICATION_CHANNEL_ID = 'guftin_call_ringtone_v1';
+const CALL_NOTIFICATION_CHANNEL_ID = 'guftin_call_ringtone_v2';
 const CALL_RINGTONE_SOUND = 'guftin_call_ringtone.wav';
 const PRIVACY_POLICY_URL = 'https://github.com/uu786uu786uu-source/King-fighter/blob/release/guftin-v1.5.4-otp-channel-admin/apps/kingchat/PRIVACY_POLICY.md';
 
@@ -177,9 +178,10 @@ const presentNativeIncomingCall = async (payload:any) => {
           caller_id: String(payload?.caller_id || ''),
           caller_name: callerName,
           call_type: callType,
-          call_scope: isGroupCall ? 'group' : 'direct'
+          call_scope: isGroupCall ? 'group' : 'direct',
+          __guftin_full_screen_intent: true
         }
-      },
+      } as any,
       trigger: { channelId: CALL_NOTIFICATION_CHANNEL_ID }
     });
   } catch (notificationError:any) {
@@ -3993,6 +3995,19 @@ function GuftinApp() {
         <Text style={{color:C.muted,fontSize:12,marginTop:5,marginBottom:15}}>Privacy and connection preferences</Text>
         <Btn onPress={()=>{setSettingsOpen(false);setPermissionSetupStep(0);setPermissionSetupAutoSave(mediaAutoDownload);setPermissionSetupFullScreenOpened(false);setPermissionSetupNotice('');setPermissionSetupVisible(true);}} style={{backgroundColor:C.mint,padding:12,borderRadius:13,marginBottom:7}}>
           <Text style={{color:C.green,fontWeight:'900',textAlign:'center'}}>Review app permissions</Text>
+        </Btn>
+        <Btn onPress={()=>void (async()=>{
+          if(Platform.OS!=='android'||Number(Platform.Version)<34){
+            Alert.alert('Full-screen call alerts','This Android setting is available on Android 14 and newer. Calls still use the normal high-priority incoming notification on earlier Android versions.');
+            return;
+          }
+          try{
+            await IntentLauncher.startActivityAsync('android.settings.MANAGE_APP_USE_FULL_SCREEN_INTENT',{data:'package:com.guftin.app'});
+          }catch(error:any){
+            Alert.alert('Could not open call alert settings',error?.message||'Open Android Settings → Apps → Special app access → Full-screen notifications → Guftin.');
+          }
+        })()} style={{backgroundColor:C.mint,padding:12,borderRadius:13,marginBottom:7}}>
+          <Text style={{color:C.green,fontWeight:'900',textAlign:'center'}}>Allow full-screen incoming calls</Text>
         </Btn>
         <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingVertical:12}}><View style={{flex:1,paddingRight:12}}><Text style={{color:C.ink,fontWeight:'800'}}>Show online status</Text><Text style={{color:C.muted,fontSize:11}}>Let contacts see when you are online</Text></View><Switch value={onlineVisibility} onValueChange={setOnlineVisibility} trackColor={{true:C.green}}/></View>
         <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingVertical:12}}><View style={{flex:1,paddingRight:12}}><Text style={{color:C.ink,fontWeight:'800'}}>Read receipts</Text><Text style={{color:C.muted,fontSize:11}}>Show seen status on messages</Text></View><Switch value={showReadReceipts} onValueChange={setShowReadReceipts} trackColor={{true:C.green}}/></View>
