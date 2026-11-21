@@ -129,7 +129,7 @@ jobs:
             --output ./dist/Guftin-1.6.0-GitHub.apk
           test -s ./dist/Guftin-1.6.0-GitHub.apk
 
-      - name: Verify APK package, version and existing install certificate
+      - name: Verify APK package, version and selected signing certificate
         shell: bash
         run: |
           set -euo pipefail
@@ -140,10 +140,10 @@ jobs:
           SIGNATURE_OUTPUT="$("$APKSIGNER" verify --verbose --print-certs "$APK" 2>&1)"
           printf '%s\n' "$SIGNATURE_OUTPUT"
           ACTUAL_FINGERPRINT="$(printf '%s\n' "$SIGNATURE_OUTPUT" | sed -nE 's/.*certificate SHA-256 digest: ([[:xdigit:]:]+).*/\1/p' | head -n 1 | tr -d ':' | tr '[:upper:]' '[:lower:]')"
-          EXPECTED_FINGERPRINT="fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c"
+          EXPECTED_FINGERPRINT="1e3a51e0307556bd26f59f95cc0a3cd7e45f7056dc2333bec95c013026b0b32a"
 
           if [ "$ACTUAL_FINGERPRINT" != "$EXPECTED_FINGERPRINT" ]; then
-            echo "::error::APK signing certificate does not match the existing Guftin install certificate."
+            echo "::error::APK signing certificate does not match the selected Guftin signing certificate."
             echo "Expected: $EXPECTED_FINGERPRINT"
             echo "Actual: ${ACTUAL_FINGERPRINT:-none}"
             exit 1
