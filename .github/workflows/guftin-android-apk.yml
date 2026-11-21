@@ -1,4 +1,5 @@
 name: Guftin Android APK — Build and Startup QA
+# QA the current 1.5.8 release source, including the native full-screen incoming-call notification patch.
 
 on:
   workflow_dispatch:
