@@ -1,7 +1,7 @@
 name: Guftin Signed Production APK — GitHub Local Build
 # Uses the release branch whose Expo slug matches the existing EAS project.
 # Version 1.5.9 adds email OTP signup verification alongside secure-call identity and Android full-screen incoming-call support.
-# Email signup now waits for a 6-digit Supabase OTP before opening the account.
+# Email signup now waits for a 6-digit Supabase OTP before opening the account; duplicate pending signups request a fresh OTP.
 
 on:
   push:
