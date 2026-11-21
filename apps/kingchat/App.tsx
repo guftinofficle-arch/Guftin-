@@ -3215,6 +3215,12 @@ function GuftinApp() {
     setAuthBusy(true);
     setAuthError('');
     try{
+      const {data:usernameAvailable,error:usernameCheckError}=await supabase.rpc('kc_is_username_available',{p_username:cleanUsername});
+      if(usernameCheckError)throw usernameCheckError;
+      if(usernameAvailable!==true){
+        setAuthError('This username is already taken. Please choose a different username, such as umair786.');
+        return;
+      }
       const {data,error}=await supabase.auth.signUp({
         email:cleanEmail,
         password,
