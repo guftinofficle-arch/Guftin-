@@ -1,9 +1,10 @@
-name: Guftin Signed Production APK — GitHub Local Build
+name: Guftin 1.6.0 Signed Production APK — GitHub Local Build
 
 on:
   push:
     branches:
       - main
+      - release/guftin-v1.6.0-no-email-verification
     paths:
       - ".github/workflows/guftin-local-production-apk.yml"
   workflow_dispatch:
@@ -11,7 +12,7 @@ on:
       git_ref:
         description: "Guftin release branch or commit to sign and build"
         required: true
-        default: "release/guftin-v1.5.7-no-email-verification"
+        default: "release/guftin-v1.6.0-no-email-verification"
         type: string
 
 permissions:
@@ -34,7 +35,7 @@ jobs:
       - name: Check out selected Guftin release
         uses: actions/checkout@v5
         with:
-          ref: ${{ inputs.git_ref || 'release/guftin-v1.5.7-no-email-verification' }}
+          ref: ${{ inputs.git_ref || 'release/guftin-v1.6.0-no-email-verification' }}
 
       - name: Verify Expo owner token is available
         shell: bash
@@ -82,13 +83,13 @@ jobs:
           const fs = require('node:fs');
           const pkg = require('./package.json');
           const appConfig = fs.readFileSync('app.config.js', 'utf8');
-          if (pkg.version !== '1.5.7' ||
+          if (pkg.version !== '1.6.0' ||
               !/version:\s*"1\.5\.7"/.test(appConfig) ||
               !/versionCode:\s*43/.test(appConfig) ||
               !/package:\s*"com\.guftin\.app"/.test(appConfig)) {
-            throw new Error('Expected Guftin 1.5.7 / Android code 43 / com.guftin.app.');
+            throw new Error('Expected Guftin 1.6.0 / Android code 43 / com.guftin.app.');
           }
-          console.log('Validated Guftin 1.5.7, versionCode 43 and package com.guftin.app.');
+          console.log('Validated Guftin 1.6.0, versionCode 46 and package com.guftin.app.');
           NODE
 
       - name: Install Guftin dependencies
@@ -125,14 +126,14 @@ jobs:
             --local \
             --non-interactive \
             --freeze-credentials \
-            --output ./dist/Guftin-1.5.7-GitHub.apk
-          test -s ./dist/Guftin-1.5.7-GitHub.apk
+            --output ./dist/Guftin-1.6.0-GitHub.apk
+          test -s ./dist/Guftin-1.6.0-GitHub.apk
 
       - name: Verify APK package, version and existing install certificate
         shell: bash
         run: |
           set -euo pipefail
-          APK="./dist/Guftin-1.5.7-GitHub.apk"
+          APK="./dist/Guftin-1.6.0-GitHub.apk"
           APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
           AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
 
@@ -151,8 +152,8 @@ jobs:
           BADGING="$("$AAPT" dump badging "$APK" | head -n 1)"
           echo "$BADGING"
           echo "$BADGING" | grep -Fq "name='com.guftin.app'"
-          echo "$BADGING" | grep -Fq "versionCode='43'"
-          echo "$BADGING" | grep -Fq "versionName='1.5.7'"
+          echo "$BADGING" | grep -Fq "versionCode='46'"
+          echo "$BADGING" | grep -Fq "versionName='1.6.0'"
           sha256sum "$APK"
           ls -lh "$APK"
           echo "Signature and Android package metadata verified."
@@ -160,7 +161,7 @@ jobs:
       - name: Upload signed production APK
         uses: actions/upload-artifact@v4
         with:
-          name: Guftin-1.5.7-Signed-Production-APK
-          path: apps/kingchat/dist/Guftin-1.5.7-GitHub.apk
+          name: Guftin-1.6.0-Signed-Production-APK
+          path: apps/kingchat/dist/Guftin-1.6.0-GitHub.apk
           if-no-files-found: error
           retention-days: 30
