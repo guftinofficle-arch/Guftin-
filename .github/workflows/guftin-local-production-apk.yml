@@ -84,10 +84,10 @@ jobs:
           const pkg = require('./package.json');
           const appConfig = fs.readFileSync('app.config.js', 'utf8');
           if (pkg.version !== '1.6.0' ||
-              !/version:\s*"1\.5\.7"/.test(appConfig) ||
-              !/versionCode:\s*43/.test(appConfig) ||
+              !/version:\s*"1\.6\.0"/.test(appConfig) ||
+              !/versionCode:\s*46/.test(appConfig) ||
               !/package:\s*"com\.guftin\.app"/.test(appConfig)) {
-            throw new Error('Expected Guftin 1.6.0 / Android code 43 / com.guftin.app.');
+            throw new Error('Expected Guftin 1.6.0 / Android code 46 / com.guftin.app.');
           }
           console.log('Validated Guftin 1.6.0, versionCode 46 and package com.guftin.app.');
           NODE
