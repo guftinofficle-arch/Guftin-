@@ -3250,7 +3250,7 @@ function GuftinApp() {
     const cleanName=fullName.trim();
     if(cleanName.length<2||cleanName.length>40){setAuthError('Enter your display name (2-40 characters).');return;}
     if(!/^[a-z0-9_]{3,24}$/.test(cleanUsername)){setAuthError('Username must be 3-24 characters using letters, numbers or underscore.');return;}
-    if(!/^\\S+@\\S+\\.\\S+$/.test(cleanEmail)){setAuthError('Enter a valid email address.');return;}
+    if(!/^\S+@\S+\.\S+$/.test(cleanEmail)){setAuthError('Enter a valid email address.');return;}
     if(password.length<8){setAuthError('Password must be at least 8 characters.');return;}
     setAuthBusy(true);
     setAuthError('');
@@ -3289,7 +3289,7 @@ function GuftinApp() {
 
   const verifySignupOtp=async()=>{
     const cleanEmail=email.trim().toLowerCase();
-    const token=emailOtp.replace(/\\D/g,'');
+    const token=emailOtp.replace(/\D/g,'');
     if(token.length!==6){setAuthError('Enter the complete 6-digit code sent to your email.');return;}
     setOtpBusy(true);setAuthError('');
     try{
@@ -3618,7 +3618,7 @@ function GuftinApp() {
         </View>
         <Text style={{fontSize:23,fontWeight:'900',color:C.ink,marginBottom:8}}>Enter verification code</Text>
         <Text style={{color:C.muted,marginBottom:18,lineHeight:20}}>Enter the code from the email. Do not share this code with anyone.</Text>
-        <TextInput value={emailOtp} onChangeText={v=>{setEmailOtp(v.replace(/\\D/g,'').slice(0,6));setAuthError('');}} placeholder="6-digit code" keyboardType="number-pad" textContentType="oneTimeCode" autoComplete="one-time-code" maxLength={6} style={{backgroundColor:C.white,borderRadius:15,padding:18,marginBottom:12,color:C.ink,fontSize:25,fontWeight:'800',letterSpacing:8,textAlign:'center'}}/>
+        <TextInput value={emailOtp} onChangeText={v=>{setEmailOtp(v.replace(/\D/g,'').slice(0,6));setAuthError('');}} placeholder="6-digit code" keyboardType="number-pad" textContentType="oneTimeCode" autoComplete="one-time-code" maxLength={6} style={{backgroundColor:C.white,borderRadius:15,padding:18,marginBottom:12,color:C.ink,fontSize:25,fontWeight:'800',letterSpacing:8,textAlign:'center'}}/>
         {authError?<Text style={{color:C.red,fontSize:12,lineHeight:18,marginBottom:12}}>{authError}</Text>:null}
         <Btn disabled={otpBusy||emailOtp.length!==6} onPress={verifySignupOtp} style={{backgroundColor:C.green,padding:17,borderRadius:16,alignItems:'center'}}>{otpBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Verify email</Text>}</Btn>
         <Btn disabled={otpBusy} onPress={resendSignupOtp} style={{padding:16,alignItems:'center'}}><Text style={{color:C.green,fontWeight:'800'}}>Resend code</Text></Btn>
