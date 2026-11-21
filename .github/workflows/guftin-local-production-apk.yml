@@ -1,7 +1,7 @@
 name: Guftin Signed Production APK — GitHub Local Build
 # Uses the release branch whose Expo slug matches the existing EAS project.
-# Version 1.5.8 includes secure-call identity, direct-call membership and Android full-screen call notification fixes; native patchers also run during EAS post-install.
-# Strict TypeScript null guard is verified before signed artifact upload.
+# Version 1.5.9 adds email OTP signup verification alongside secure-call identity and Android full-screen incoming-call support.
+# Email signup now waits for a 6-digit Supabase OTP before opening the account.
 
 on:
   push:
@@ -85,13 +85,13 @@ jobs:
           const fs = require('node:fs');
           const pkg = require('./package.json');
           const appConfig = fs.readFileSync('app.config.js', 'utf8');
-          if (pkg.version !== '1.5.8' ||
-              !/version:\s*"1\.5\.8"/.test(appConfig) ||
-              !/versionCode:\s*44/.test(appConfig) ||
+          if (pkg.version !== '1.5.9' ||
+              !/version:\s*"1\.5\.9"/.test(appConfig) ||
+              !/versionCode:\s*45/.test(appConfig) ||
               !/package:\s*"com\.guftin\.app"/.test(appConfig)) {
-            throw new Error('Expected Guftin 1.5.8 / Android code 44 / com.guftin.app.');
+            throw new Error('Expected Guftin 1.5.9 / Android code 45 / com.guftin.app.');
           }
-          console.log('Validated Guftin 1.5.8, versionCode 44 and package com.guftin.app.');
+          console.log('Validated Guftin 1.5.9, versionCode 45 and package com.guftin.app.');
           NODE
 
       - name: Install Guftin dependencies
@@ -131,7 +131,7 @@ jobs:
             --local \
             --non-interactive \
             --freeze-credentials \
-            --output ./dist/Guftin-1.5.8-GitHub.apk
+            --output ./dist/Guftin-1.5.9-GitHub.apk
           test -s ./dist/Guftin-1.5.8-GitHub.apk
 
       - name: Verify APK signature and Android package metadata (fresh install)
@@ -148,8 +148,8 @@ jobs:
           BADGING="$("$AAPT" dump badging "$APK" | head -n 1)"
           echo "$BADGING"
           echo "$BADGING" | grep -Fq "name='com.guftin.app'"
-          echo "$BADGING" | grep -Fq "versionCode='44'"
-          echo "$BADGING" | grep -Fq "versionName='1.5.8'"
+          echo "$BADGING" | grep -Fq "versionCode='45'"
+          echo "$BADGING" | grep -Fq "versionName='1.5.9'"
           sha256sum "$APK"
           ls -lh "$APK"
           echo "APK signature and Android package metadata verified for fresh installation."
@@ -157,7 +157,7 @@ jobs:
       - name: Upload signed production APK
         uses: actions/upload-artifact@v4
         with:
-          name: Guftin-1.5.8-Fresh-Install-APK
+          name: Guftin-1.5.9-Email-OTP-APK
           path: apps/kingchat/dist/Guftin-1.5.8-GitHub.apk
           if-no-files-found: error
           retention-days: 30
