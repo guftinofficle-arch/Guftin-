@@ -12,7 +12,7 @@ on:
       git_ref:
         description: "Guftin release branch or commit to sign and build"
         required: true
-        default: "release/guftin-v1.5.8-no-email-verification"
+        default: "release/guftin-v1.5.7-no-email-verification"
         type: string
 
 permissions:
@@ -35,7 +35,7 @@ jobs:
       - name: Check out selected Guftin release
         uses: actions/checkout@v5
         with:
-          ref: ${{ inputs.git_ref || 'release/guftin-v1.5.8-no-email-verification' }}
+          ref: ${{ inputs.git_ref || 'release/guftin-v1.5.7-no-email-verification' }}
 
       - name: Verify Expo owner token is available
         shell: bash
