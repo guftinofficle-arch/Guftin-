@@ -21,7 +21,7 @@ module.exports = function withCallKeepAndroidPermissions(config) {
     // full-screen special-access toggle is enabled directly by the user in Settings.
     const application = AndroidConfig.Manifest.getMainApplicationOrThrow(config.modResults);
     const mainActivity = (application.activity || []).find((activity) =>
-      /(?:^|\\.)MainActivity$/.test(activity.$?.["android:name"] || "")
+      /(?:^|[.])MainActivity$/.test(activity.$?.["android:name"] || "")
     );
     if (!mainActivity) {
       throw new Error("Guftin could not find MainActivity for incoming-call lock-screen presentation.");
