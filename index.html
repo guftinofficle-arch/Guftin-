@@ -134,7 +134,7 @@ function setAuthMode(mode) {
   $("authSwitch").hidden = mode === "forgot";
 }
 function showAuth() {
-  currentUser = null; profile = null; activeConversation = null;
+  currentUser = null; profile = null; activeConversation = null; window.guftinProfiles = {};
   if (realtimeChannel) supabase.removeChannel(realtimeChannel);
   realtimeChannel = null;
   appShell.hidden = true; publicLegal.hidden = true; authShell.hidden = false;
@@ -250,7 +250,7 @@ async function registerBrowserDevice() {
   const existing = await supabase.from("kc_web_devices").select("id,revoked_at").eq("user_id", currentUser.id).eq("device_id", deviceId).maybeSingle();
   if (existing.error) throw existing.error;
   const deviceName = /Android/i.test(navigator.userAgent) ? "Android browser" : /iPhone|iPad/i.test(navigator.userAgent) ? "Apple mobile browser" : "Desktop browser";
-  if (existing.data && existing.data.revoked_at) throw new Error("This browser device was revoked. Clear the Guftin browser device registration and sign in again, or contact support.");
+  if (existing.data && existing.data.revoked_at) { deviceId = crypto.randomUUID(); localStorage.setItem("guftin_web_device_id", deviceId); return registerBrowserDevice(); }
   if (existing.data) {
     const updated = await supabase.from("kc_web_devices").update({ public_key: publicJwk, device_name: deviceName }).eq("id", existing.data.id);
     if (updated.error) throw updated.error;
