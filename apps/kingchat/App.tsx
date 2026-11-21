@@ -933,6 +933,9 @@ function GuftinApp() {
   const [email,setEmail]=useState('');
   const [password,setPassword]=useState('');
   const [authError,setAuthError]=useState('');
+  const [emailOtpPending,setEmailOtpPending]=useState(false);
+  const [emailOtp,setEmailOtp]=useState('');
+  const [otpBusy,setOtpBusy]=useState(false);
 
   const [addOpen,setAddOpen]=useState(false);
   const [contactUsername,setContactUsername]=useState('');
@@ -3247,7 +3250,7 @@ function GuftinApp() {
     const cleanName=fullName.trim();
     if(cleanName.length<2||cleanName.length>40){setAuthError('Enter your display name (2-40 characters).');return;}
     if(!/^[a-z0-9_]{3,24}$/.test(cleanUsername)){setAuthError('Username must be 3-24 characters using letters, numbers or underscore.');return;}
-    if(!/^\S+@\S+\.\S+$/.test(cleanEmail)){setAuthError('Enter a valid email address.');return;}
+    if(!/^\\S+@\\S+\\.\\S+$/.test(cleanEmail)){setAuthError('Enter a valid email address.');return;}
     if(password.length<8){setAuthError('Password must be at least 8 characters.');return;}
     setAuthBusy(true);
     setAuthError('');
@@ -3255,7 +3258,7 @@ function GuftinApp() {
       const {data:usernameAvailable,error:usernameCheckError}=await supabase.rpc('kc_is_username_available',{p_username:cleanUsername});
       if(usernameCheckError)throw usernameCheckError;
       if(usernameAvailable!==true){
-        setAuthError('This username is already taken. Please choose a different username, such as umair786.');
+        setAuthError('This username is already taken. Please choose a different username.');
         return;
       }
       const {data,error}=await supabase.auth.signUp({
@@ -3264,16 +3267,58 @@ function GuftinApp() {
         options:{data:{display_name:cleanName,username:cleanUsername}}
       });
       if(error)throw error;
-      if(!data.session){
-        setAuthError('Email confirmation is still enabled on the Guftin server. Disable Confirm email in Supabase Authentication > Sign In / Providers > Email, then create your account again.');
+      if(data.session){
+        // Projects with email confirmation disabled may return a session immediately.
+        setPassword('');
+        setAuthError('');
         return;
       }
-      setPassword('');
+      if(!data.user){
+        throw new Error('Guftin could not start email verification. Please try again.');
+      }
+      setEmail(cleanEmail);
+      setEmailOtp('');
+      setEmailOtpPending(true);
       setAuthError('');
     }catch(e:any){
       setAuthError(e?.message||'Account creation failed. Please try again.');
     }finally{
       setAuthBusy(false);
+    }
+  };
+
+  const verifySignupOtp=async()=>{
+    const cleanEmail=email.trim().toLowerCase();
+    const token=emailOtp.replace(/\\D/g,'');
+    if(token.length!==6){setAuthError('Enter the complete 6-digit code sent to your email.');return;}
+    setOtpBusy(true);setAuthError('');
+    try{
+      const {data,error}=await supabase.auth.verifyOtp({email:cleanEmail,token,type:'signup'});
+      if(error)throw error;
+      if(!data.session)throw new Error('The code was accepted but Guftin did not receive a sign-in session. Please sign in with your email and password.');
+      setEmailOtpPending(false);
+      setEmailOtp('');
+      setPassword('');
+      setAuthError('');
+    }catch(e:any){
+      setAuthError(e?.message||'Verification failed. Check the code and try again.');
+    }finally{
+      setOtpBusy(false);
+    }
+  };
+
+  const resendSignupOtp=async()=>{
+    const cleanEmail=email.trim().toLowerCase();
+    setOtpBusy(true);setAuthError('');
+    try{
+      const {error}=await supabase.auth.resend({type:'signup',email:cleanEmail});
+      if(error)throw error;
+      setEmailOtp('');
+      setAuthError('A new verification code has been requested. Check your inbox and spam folder.');
+    }catch(e:any){
+      setAuthError(e?.message||'Could not resend the verification code. Please wait and try again.');
+    }finally{
+      setOtpBusy(false);
     }
   };
 
@@ -3561,6 +3606,27 @@ function GuftinApp() {
     </SafeAreaView>;
   }
 
+  if(!session&&emailOtpPending){
+    return <SafeAreaView style={{flex:1,backgroundColor:C.paper,padding:25,justifyContent:'center'}}>
+      <StatusBar barStyle="dark-content"/>
+      <ScrollView contentContainerStyle={{flexGrow:1,justifyContent:'center'}}>
+        <View style={{alignItems:'center',marginBottom:34}}>
+          <Avatar label="K" color={C.green} size={78}/>
+          <Heading>Verify your email</Heading>
+          <Text style={{color:C.muted,marginTop:10,textAlign:'center',lineHeight:22}}>We sent a 6-digit verification code to</Text>
+          <Text style={{color:C.ink,fontWeight:'800',marginTop:4}}>{email}</Text>
+        </View>
+        <Text style={{fontSize:23,fontWeight:'900',color:C.ink,marginBottom:8}}>Enter verification code</Text>
+        <Text style={{color:C.muted,marginBottom:18,lineHeight:20}}>Enter the code from the email. Do not share this code with anyone.</Text>
+        <TextInput value={emailOtp} onChangeText={v=>{setEmailOtp(v.replace(/\\D/g,'').slice(0,6));setAuthError('');}} placeholder="6-digit code" keyboardType="number-pad" textContentType="oneTimeCode" autoComplete="one-time-code" maxLength={6} style={{backgroundColor:C.white,borderRadius:15,padding:18,marginBottom:12,color:C.ink,fontSize:25,fontWeight:'800',letterSpacing:8,textAlign:'center'}}/>
+        {authError?<Text style={{color:C.red,fontSize:12,lineHeight:18,marginBottom:12}}>{authError}</Text>:null}
+        <Btn disabled={otpBusy||emailOtp.length!==6} onPress={verifySignupOtp} style={{backgroundColor:C.green,padding:17,borderRadius:16,alignItems:'center'}}>{otpBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Verify email</Text>}</Btn>
+        <Btn disabled={otpBusy} onPress={resendSignupOtp} style={{padding:16,alignItems:'center'}}><Text style={{color:C.green,fontWeight:'800'}}>Resend code</Text></Btn>
+        <Btn disabled={otpBusy} onPress={()=>{setEmailOtpPending(false);setEmailOtp('');setAuthError('');}} style={{padding:12,alignItems:'center'}}><Text style={{color:C.muted,fontWeight:'700'}}>Back to create account</Text></Btn>
+      </ScrollView>
+    </SafeAreaView>;
+  }
+
   if(!session){
     return <SafeAreaView style={{flex:1,backgroundColor:C.paper,padding:25,justifyContent:'center'}}>
       <StatusBar barStyle="dark-content"/>
@@ -3582,7 +3648,7 @@ function GuftinApp() {
           {authError?<Text style={{color:C.red,fontSize:12,lineHeight:18,marginBottom:12}}>{authError}</Text>:null}
           <Btn disabled={authBusy} onPress={authMode==='signup'?signUpEmail:signInEmail} style={{backgroundColor:C.green,padding:17,borderRadius:16,alignItems:'center'}}>{authBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>{authMode==='signup'?'Create account':'Sign in with email'}</Text>}</Btn>
           <Btn onPress={()=>{setAuthMode(authMode==='signup'?'login':'signup');setAuthError('');}} style={{padding:16,alignItems:'center'}}><Text style={{color:C.green,fontWeight:'800'}}>{authMode==='signup'?'Already have an account? Sign in':'New to Guftin? Create account'}</Text></Btn>
-          <Text style={{color:C.muted,fontSize:10,textAlign:'center',marginTop:8,lineHeight:16}}>No email verification code is required. Sign in after creating your account.</Text>
+          <Text style={{color:C.muted,fontSize:10,textAlign:'center',marginTop:8,lineHeight:16}}>A 6-digit email verification code is required to activate your new Guftin account.</Text>
 
       </ScrollView>
     </SafeAreaView>;
