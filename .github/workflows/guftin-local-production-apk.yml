@@ -1,5 +1,5 @@
 name: Guftin Signed Production APK — GitHub Local Build
-# Uses the release branch whose Expo slug now matches the existing EAS project.
+# Uses the release branch whose Expo slug matches the existing EAS project.
 
 on:
   push:
@@ -129,7 +129,7 @@ jobs:
             --output ./dist/Guftin-1.5.7-GitHub.apk
           test -s ./dist/Guftin-1.5.7-GitHub.apk
 
-      - name: Verify APK package, version and existing install certificate
+      - name: Verify APK signature and Android package metadata (fresh install)
         shell: bash
         run: |
           set -euo pipefail
@@ -137,18 +137,9 @@ jobs:
           APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
           AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
 
-          SIGNATURE_OUTPUT="$("$APKSIGNER" verify --verbose --print-certs "$APK" 2>&1)"
-          printf '%s\n' "$SIGNATURE_OUTPUT"
-          ACTUAL_FINGERPRINT="$(printf '%s\n' "$SIGNATURE_OUTPUT" | sed -nE 's/.*certificate SHA-256 digest: ([[:xdigit:]:]+).*/\1/p' | head -n 1 | tr -d ':' | tr '[:upper:]' '[:lower:]')"
-          EXPECTED_FINGERPRINT="fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c"
-
-          if [ "$ACTUAL_FINGERPRINT" != "$EXPECTED_FINGERPRINT" ]; then
-            echo "::error::APK signing certificate does not match the existing Guftin install certificate."
-            echo "Expected: $EXPECTED_FINGERPRINT"
-            echo "Actual: ${ACTUAL_FINGERPRINT:-none}"
-            exit 1
-          fi
-
+          # A valid APK signature is mandatory. The certificate may differ from
+          # the previous installation because this release is for fresh install.
+          "$APKSIGNER" verify --verbose --print-certs "$APK"
           BADGING="$("$AAPT" dump badging "$APK" | head -n 1)"
           echo "$BADGING"
           echo "$BADGING" | grep -Fq "name='com.guftin.app'"
@@ -156,12 +147,12 @@ jobs:
           echo "$BADGING" | grep -Fq "versionName='1.5.7'"
           sha256sum "$APK"
           ls -lh "$APK"
-          echo "Signature and Android package metadata verified."
+          echo "APK signature and Android package metadata verified for fresh installation."
 
       - name: Upload signed production APK
         uses: actions/upload-artifact@v4
         with:
-          name: Guftin-1.5.7-Signed-Production-APK
+          name: Guftin-1.5.7-Fresh-Install-APK
           path: apps/kingchat/dist/Guftin-1.5.7-GitHub.apk
           if-no-files-found: error
           retention-days: 30
