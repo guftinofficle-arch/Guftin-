@@ -899,7 +899,7 @@ function GuftinApp() {
     const userId=session?.user?.id;
     if(!userId)throw new Error('Sign in to Guftin before making or answering a call.');
     const cached=deviceIdentityRef.current;
-    if(cached?.userId===userId)return cached.identity;
+    if(cached && cached.userId===userId)return cached.identity;
 
     let pending=deviceIdentityLoadRef.current;
     if(!pending||pending.userId!==userId){
