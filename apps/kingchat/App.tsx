@@ -936,6 +936,9 @@ function GuftinApp() {
   const [emailOtpPending,setEmailOtpPending]=useState(false);
   const [emailOtp,setEmailOtp]=useState('');
   const [otpBusy,setOtpBusy]=useState(false);
+  const [otpPurpose,setOtpPurpose]=useState<'signup'|'recovery'>('signup');
+  const [newPassword,setNewPassword]=useState('');
+  const [confirmNewPassword,setConfirmNewPassword]=useState('');
 
   const [addOpen,setAddOpen]=useState(false);
   const [contactUsername,setContactUsername]=useState('');
@@ -3289,6 +3292,7 @@ function GuftinApp() {
       }
       setEmail(cleanEmail);
       setEmailOtp('');
+      setOtpPurpose('signup');
       setEmailOtpPending(true);
       setAuthError('');
     }catch(e:any){
@@ -3296,6 +3300,11 @@ function GuftinApp() {
     }finally{
       setAuthBusy(false);
     }
+  };
+
+  const verifyCurrentOtp=async()=>{
+    if(otpPurpose==='recovery'){await verifyRecoveryOtp();return;}
+    await verifySignupOtp();
   };
 
   const verifySignupOtp=async()=>{
@@ -3318,6 +3327,11 @@ function GuftinApp() {
     }
   };
 
+  const resendCurrentOtp=async()=>{
+    if(otpPurpose==='recovery'){await resendRecoveryOtp();return;}
+    await resendSignupOtp();
+  };
+
   const resendSignupOtp=async()=>{
     const cleanEmail=email.trim().toLowerCase();
     setOtpBusy(true);setAuthError('');
@@ -3331,6 +3345,61 @@ function GuftinApp() {
     }finally{
       setOtpBusy(false);
     }
+  };
+
+  const requestPasswordReset=async()=>{
+    const cleanEmail=email.trim().toLowerCase();
+    if(!/^\S+@\S+\.\S+$/.test(cleanEmail)){setAuthError('Enter the email address linked to your Guftin account.');return;}
+    setAuthBusy(true);setAuthError('');
+    try{
+      const {error}=await supabase.auth.resetPasswordForEmail(cleanEmail);
+      if(error)throw error;
+      setOtpPurpose('recovery');
+      setEmailOtp('');
+      setNewPassword('');
+      setConfirmNewPassword('');
+      setEmailOtpPending(true);
+    }catch(e:any){
+      setAuthError(e?.message||'Could not send a password reset code. Please try again.');
+    }finally{setAuthBusy(false);}
+  };
+
+  const verifyRecoveryOtp=async()=>{
+    const cleanEmail=email.trim().toLowerCase();
+    const token=emailOtp.replace(/\D/g,'');
+    if(token.length!==6){setAuthError('Enter the complete 6-digit reset code from your email.');return;}
+    if(newPassword.length<8){setAuthError('Your new password must be at least 8 characters.');return;}
+    if(newPassword!==confirmNewPassword){setAuthError('The new passwords do not match.');return;}
+    setOtpBusy(true);setAuthError('');
+    try{
+      const {data,error}=await supabase.auth.verifyOtp({email:cleanEmail,token,type:'recovery'});
+      if(error)throw error;
+      if(!data.session)throw new Error('The reset code was accepted but no secure reset session was created. Please request a new code.');
+      const {error:updateError}=await supabase.auth.updateUser({password:newPassword});
+      if(updateError)throw updateError;
+      setEmailOtpPending(false);
+      setEmailOtp('');
+      setPassword('');
+      setNewPassword('');
+      setConfirmNewPassword('');
+      setAuthMode('login');
+      setAuthError('Password updated successfully. Sign in using your new password.');
+    }catch(e:any){
+      setAuthError(e?.message||'Password reset failed. Check the code and try again.');
+    }finally{setOtpBusy(false);}
+  };
+
+  const resendRecoveryOtp=async()=>{
+    const cleanEmail=email.trim().toLowerCase();
+    setOtpBusy(true);setAuthError('');
+    try{
+      const {error}=await supabase.auth.resetPasswordForEmail(cleanEmail);
+      if(error)throw error;
+      setEmailOtp('');
+      setAuthError('A new password reset code has been requested. Check your inbox and spam folder.');
+    }catch(e:any){
+      setAuthError(e?.message||'Could not resend the password reset code. Please wait and try again.');
+    }finally{setOtpBusy(false);}
   };
 
   const signInEmail=async()=>{
@@ -3623,17 +3692,21 @@ function GuftinApp() {
       <ScrollView contentContainerStyle={{flexGrow:1,justifyContent:'center'}}>
         <View style={{alignItems:'center',marginBottom:34}}>
           <Avatar label="K" color={C.green} size={78}/>
-          <Heading>Verify your email</Heading>
-          <Text style={{color:C.muted,marginTop:10,textAlign:'center',lineHeight:22}}>We sent a 6-digit verification code to</Text>
+          <Heading>{otpPurpose==='recovery'?'Reset your password':'Verify your email'}</Heading>
+          <Text style={{color:C.muted,marginTop:10,textAlign:'center',lineHeight:22}}>We sent a 6-digit {otpPurpose==='recovery'?'password reset':'verification'} code to</Text>
           <Text style={{color:C.ink,fontWeight:'800',marginTop:4}}>{email}</Text>
         </View>
         <Text style={{fontSize:23,fontWeight:'900',color:C.ink,marginBottom:8}}>Enter verification code</Text>
-        <Text style={{color:C.muted,marginBottom:18,lineHeight:20}}>Enter the code from the email. Do not share this code with anyone.</Text>
+        <Text style={{color:C.muted,marginBottom:18,lineHeight:20}}>Enter the code from your email. Do not share it with anyone.</Text>
         <TextInput value={emailOtp} onChangeText={v=>{setEmailOtp(v.replace(/\D/g,'').slice(0,6));setAuthError('');}} placeholder="6-digit code" keyboardType="number-pad" textContentType="oneTimeCode" autoComplete="one-time-code" maxLength={6} style={{backgroundColor:C.white,borderRadius:15,padding:18,marginBottom:12,color:C.ink,fontSize:25,fontWeight:'800',letterSpacing:8,textAlign:'center'}}/>
+        {otpPurpose==='recovery'?<>
+          <TextInput value={newPassword} onChangeText={setNewPassword} placeholder="New password (at least 8 characters)" secureTextEntry autoCapitalize="none" style={{backgroundColor:C.white,borderRadius:15,padding:16,marginBottom:10,color:C.ink}}/>
+          <TextInput value={confirmNewPassword} onChangeText={setConfirmNewPassword} placeholder="Confirm new password" secureTextEntry autoCapitalize="none" style={{backgroundColor:C.white,borderRadius:15,padding:16,marginBottom:12,color:C.ink}}/>
+        </>:null}
         {authError?<Text style={{color:C.red,fontSize:12,lineHeight:18,marginBottom:12}}>{authError}</Text>:null}
-        <Btn disabled={otpBusy||emailOtp.length!==6} onPress={verifySignupOtp} style={{backgroundColor:C.green,padding:17,borderRadius:16,alignItems:'center'}}>{otpBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Verify email</Text>}</Btn>
-        <Btn disabled={otpBusy} onPress={resendSignupOtp} style={{padding:16,alignItems:'center'}}><Text style={{color:C.green,fontWeight:'800'}}>Resend code</Text></Btn>
-        <Btn disabled={otpBusy} onPress={()=>{setEmailOtpPending(false);setEmailOtp('');setAuthError('');}} style={{padding:12,alignItems:'center'}}><Text style={{color:C.muted,fontWeight:'700'}}>Back to create account</Text></Btn>
+        <Btn disabled={otpBusy||emailOtp.length!==6||(otpPurpose==='recovery'&&(newPassword.length<8||newPassword!==confirmNewPassword))} onPress={verifyCurrentOtp} style={{backgroundColor:C.green,padding:17,borderRadius:16,alignItems:'center'}}>{otpBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>{otpPurpose==='recovery'?'Verify code & reset password':'Verify email'}</Text>}</Btn>
+        <Btn disabled={otpBusy} onPress={resendCurrentOtp} style={{padding:16,alignItems:'center'}}><Text style={{color:C.green,fontWeight:'800'}}>Resend code</Text></Btn>
+        <Btn disabled={otpBusy} onPress={()=>{setEmailOtpPending(false);setEmailOtp('');setNewPassword('');setConfirmNewPassword('');setAuthError('');}} style={{padding:12,alignItems:'center'}}><Text style={{color:C.muted,fontWeight:'700'}}>Back to sign in</Text></Btn>
       </ScrollView>
     </SafeAreaView>;
   }
@@ -3657,6 +3730,7 @@ function GuftinApp() {
           <TextInput value={email} onChangeText={setEmail} placeholder="Email address" keyboardType="email-address" autoCapitalize="none" autoComplete="email" style={{backgroundColor:C.white,borderRadius:15,padding:16,marginBottom:10,color:C.ink}}/>
           <TextInput value={password} onChangeText={setPassword} placeholder="Password (at least 8 characters)" secureTextEntry autoCapitalize="none" autoComplete={authMode==='signup'?'new-password':'password'} style={{backgroundColor:C.white,borderRadius:15,padding:16,marginBottom:12,color:C.ink}}/>
           {authError?<Text style={{color:C.red,fontSize:12,lineHeight:18,marginBottom:12}}>{authError}</Text>:null}
+          {authMode==='login'?<Btn disabled={authBusy} onPress={requestPasswordReset} style={{padding:10,alignItems:'center'}}><Text style={{color:C.green,fontWeight:'800'}}>Forgot password?</Text></Btn>:null}
           <Btn disabled={authBusy} onPress={authMode==='signup'?signUpEmail:signInEmail} style={{backgroundColor:C.green,padding:17,borderRadius:16,alignItems:'center'}}>{authBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>{authMode==='signup'?'Create account':'Sign in with email'}</Text>}</Btn>
           <Btn onPress={()=>{setAuthMode(authMode==='signup'?'login':'signup');setAuthError('');}} style={{padding:16,alignItems:'center'}}><Text style={{color:C.green,fontWeight:'800'}}>{authMode==='signup'?'Already have an account? Sign in':'New to Guftin? Create account'}</Text></Btn>
           <Text style={{color:C.muted,fontSize:10,textAlign:'center',marginTop:8,lineHeight:16}}>A 6-digit email verification code is required to activate your new Guftin account.</Text>
