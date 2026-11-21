@@ -20,6 +20,15 @@ module.exports = function withCallKeepAndroidPermissions(config) {
     // Keep the CallKeep phone-call foreground service correctly typed. The
     // full-screen special-access toggle is enabled directly by the user in Settings.
     const application = AndroidConfig.Manifest.getMainApplicationOrThrow(config.modResults);
+    const mainActivity = (application.activity || []).find((activity) =>
+      /(?:^|\\.)MainActivity$/.test(activity.$?.["android:name"] || "")
+    );
+    if (!mainActivity) {
+      throw new Error("Guftin could not find MainActivity for incoming-call lock-screen presentation.");
+    }
+    mainActivity.$["android:showWhenLocked"] = "true";
+    mainActivity.$["android:turnScreenOn"] = "true";
+
     const connectionService = (application.service || []).find(
       (service) => service.$?.["android:name"] === "io.wazo.callkeep.VoiceConnectionService"
     );
