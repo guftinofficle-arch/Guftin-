@@ -102,7 +102,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
 const $ = (id) => document.getElementById(id);
 const authShell = $("authShell"), appShell = $("appShell"), publicLegal = $("publicLegal"), pageArea = $("pageArea");
 let authMode = "signin", currentUser = null, profile = null, deviceId = null, devicePrivateKey = null;
-let activeConversation = null, conversationRows = [], contactsRows = [], realtimeChannel = null, toastTimer = null;
+let activeConversation = null, conversationRows = [], contactsRows = [], realtimeChannel = null, toastTimer = null, bootPromise = null;
 
 function toast(message, error = false) {
   const node = $("toast");
@@ -393,6 +393,12 @@ async function bootWorkspace() {
     toast(error.message || "Workspace setup failed.", true);
   }
 }
+async function ensureBoot() {
+  if (!currentUser) return;
+  if (bootPromise) return bootPromise;
+  bootPromise = bootWorkspace();
+  try { await bootPromise; } finally { bootPromise = null; }
+}
 async function loadConversations() {
   const result = await supabase.from("kc_web_conversations").select("id,user_low,user_high,updated_at").or("user_low.eq." + currentUser.id + ",user_high.eq." + currentUser.id).order("updated_at", { ascending: false }).limit(100);
   if (result.error) throw result.error;
@@ -550,7 +556,7 @@ async function startChat(username) {
     if (loaded.error) throw loaded.error;
     await loadProfiles([row.contact_id]);
     await showView("messages");
-    await openConversation(loaded.data, window.guftenProfiles?.[row.contact_id] || { display_name: row.display_name, username: row.username, avatar_url: row.avatar_url });
+    await openConversation(loaded.data, window.guftinProfiles?.[row.contact_id] || { display_name: row.display_name, username: row.username, avatar_url: row.avatar_url });
   } catch (error) { toast(error.message || "Unable to start conversation.", true); }
 }
 function renderProfilePage() {
@@ -614,7 +620,7 @@ function renderSettingsPage() {
   $("settingsSignOut").addEventListener("click", signOut);
 }
 function renderHelpPage() {
-  pageArea.innerHTML = '<div class="section-head"><div><h2>Help & support</h2><p>Ways to get help with your Guftin account.</p></div></div><div class="card legal"><h3>Can I use my Android Guftin account?</h3><p>Yes. Sign in with the same verified email and password used by your Guftin account. Your permanent username and profile are shared through the existing backend.</p><h3>Why must both people open Guftin Web?</h3><p>The browser messaging system registers a separate public encryption key for each browser device. Both people need an active browser device before the website can send encrypted messages.</p><h3>What if I clear browser storage?</h3><p>The private encryption key is held in this browser profile. Clearing site data may remove that key, which can prevent this device from decrypting older browser messages.</p><h3>Need help?</h3><p>Write to <a href="mailto:guftinofficle@gmail.com">guftinofficle@gmail.com</a>. Never include your password or private encryption key in a support email.</p></div>';
+  pageArea.innerHTML = '<div class="section-head"><div><h2>Help & support</h2><p>Ways to get help with your Guftin account.</p></div></div><div class="card legal"><h3>Can I use my Android Guftin account?</h3><p>Sign in with the same verified email and password used by your Guftin account. Your permanent username, profile and contacts use the shared backend. Browser conversation threads are currently kept separate from the Android inbox.</p><h3>Why must both people open Guftin Web?</h3><p>The browser messaging system registers a separate public encryption key for each browser device. Both people need an active browser device before the website can send encrypted messages.</p><h3>What if I clear browser storage?</h3><p>The private encryption key is held in this browser profile. Clearing site data may remove that key, which can prevent this device from decrypting older browser messages.</p><h3>Need help?</h3><p>Write to <a href="mailto:guftinofficle@gmail.com">guftinofficle@gmail.com</a>. Never include your password or private encryption key in a support email.</p></div>';
 }
 async function showView(view) {
   document.querySelectorAll(".nav-btn").forEach(btn => btn.classList.toggle("active", btn.dataset.view === view));
@@ -633,13 +639,13 @@ async function signOut() {
 }
 supabase.auth.onAuthStateChange((_event, session) => {
   currentUser = session?.user || null;
-  if (currentUser) setTimeout(() => bootWorkspace(), 0);
+  if (currentUser) setTimeout(() => ensureBoot(), 0);
   else showAuth();
 });
 const initial = await supabase.auth.getSession();
 if (initial.data.session?.user) {
   currentUser = initial.data.session.user;
-  await bootWorkspace();
+  await ensureBoot();
 }
 if ("serviceWorker" in navigator && location.protocol === "https:") {
   navigator.serviceWorker.register("/sw.js").catch(error => console.info("Offline shell is not installed", error));
