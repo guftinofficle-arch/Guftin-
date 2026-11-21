@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit",
     "prepare:assets": "node scripts/prepare-assets.js",
     "patch:callkeep": "node scripts/patch-callkeep-android.js",
-    "eas-build-post-install": "npm run prepare:assets",
+    "eas-build-post-install": "npm run prepare:assets && npm run patch:callkeep && npm run patch:expo-fullscreen",
     "patch:expo-fullscreen": "node scripts/patch-expo-fullscreen.js"
   },
   "dependencies": {
