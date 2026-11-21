@@ -885,7 +885,42 @@ function GuftinApp() {
   const handledNotificationResponses=useRef(new Set<string>());
   const joiningCallIds=useRef(new Set<string>());
   const endingCallIds=useRef(new Set<string>());
+  const deviceIdentityRef=useRef<{userId:string;identity:DeviceIdentity}|null>(null);
+  const deviceIdentityLoadRef=useRef<{userId:string;promise:Promise<DeviceIdentity>}|null>(null);
   Object.assign(C,THEMES[themeName]||THEMES.emerald);
+
+  // Device identity belongs to a user, not to a refreshed Supabase Session object.
+  // Share one initialization promise between startup, outgoing calls and call answers.
+  const ensureDeviceIdentity=useCallback(async():Promise<DeviceIdentity>=>{
+    const userId=session?.user?.id;
+    if(!userId)throw new Error('Sign in to Guftin before making or answering a call.');
+    const cached=deviceIdentityRef.current;
+    if(cached?.userId===userId)return cached.identity;
+
+    let pending=deviceIdentityLoadRef.current;
+    if(!pending||pending.userId!==userId){
+      pending={userId,promise:loadOrCreateDeviceIdentity(supabase,userId)};
+      deviceIdentityLoadRef.current=pending;
+    }
+    setE2eeStatus('loading');
+    try{
+      const identity=await pending.promise;
+      if(session?.user?.id===userId){
+        deviceIdentityRef.current={userId,identity};
+        setDeviceIdentity(identity);
+        setE2eeStatus('ready');
+      }
+      return identity;
+    }catch(error){
+      if(session?.user?.id===userId){
+        setDeviceIdentity(null);
+        setE2eeStatus('error');
+      }
+      throw error;
+    }finally{
+      if(deviceIdentityLoadRef.current===pending)deviceIdentityLoadRef.current=null;
+    }
+  },[session?.user?.id]);
 
   const [authBusy,setAuthBusy]=useState(false);
   const [authMode,setAuthMode]=useState<'login'|'signup'>('signup');
@@ -1071,29 +1106,20 @@ function GuftinApp() {
   },[liveCall,statusComposer,addOpen,settingsOpen,active,searching,tab]);
 
   useEffect(()=>{
-    let cancelled=false;
-    if(!session){
+    const userId=session?.user?.id;
+    if(!userId){
+      deviceIdentityRef.current=null;
+      deviceIdentityLoadRef.current=null;
       setDeviceIdentity(null);
       setE2eeStatus('loading');
       return;
     }
-    setE2eeStatus('loading');
-    void loadOrCreateDeviceIdentity(supabase,session.user.id)
-      .then(identity=>{
-        if(!cancelled){
-          setDeviceIdentity(identity);
-          setE2eeStatus('ready');
-        }
-      })
-      .catch(error=>{
-        console.warn('E2EE device setup failed:',error?.message||error);
-        if(!cancelled){
-          setDeviceIdentity(null);
-          setE2eeStatus('error');
-        }
-      });
-    return ()=>{cancelled=true;};
-  },[session]);
+    let active=true;
+    void ensureDeviceIdentity().catch(error=>{
+      if(active)console.warn('Guftin secure-device setup failed:',error?.message||error);
+    });
+    return ()=>{active=false;};
+  },[session?.user?.id,ensureDeviceIdentity]);
 
   const loadProfile=useCallback(async()=>{
     if(!session) return;
@@ -1620,7 +1646,8 @@ function GuftinApp() {
     if(!call?.id||joiningCallIds.current.has(call.id))return;
     joiningCallIds.current.add(call.id);
     try{
-      if(!session||!deviceIdentity||e2eeStatus!=='ready')throw new Error('This phone is not ready for encrypted calling. Open Guftin again and make sure secure chat is ready.');
+      if(!session?.user?.id)throw new Error('Sign in to Guftin before joining this call.');
+      const callIdentity=await ensureDeviceIdentity();
       const {data:callRecord,error:callRecordError}=await supabase.from('kc_call_logs')
         .select('id,conversation_id,caller_id,callee_id,call_type,status,call_scope,e2ee_key_envelopes')
         .eq('id',call.id).maybeSingle();
@@ -1637,7 +1664,7 @@ function GuftinApp() {
       }else{
         nativeIncomingCall=callRecord.callee_id===session.user.id;
       }
-      const e2eeKey=decryptCallKeyForDevice(callRecord.e2ee_key_envelopes,deviceIdentity);
+      const e2eeKey=decryptCallKeyForDevice(callRecord.e2ee_key_envelopes,callIdentity);
       const {data,error}=await supabase.functions.invoke('livekit-token',{body:{call_id:call.id}});
       if(error)throw error;
       if(!data?.server_url||!data?.participant_token)throw new Error(data?.error||'The LiveKit token endpoint is not ready.');
@@ -1664,7 +1691,7 @@ function GuftinApp() {
     }finally{
       joiningCallIds.current.delete(call.id);
     }
-  },[session,deviceIdentity,e2eeStatus]);
+  },[session?.user?.id,ensureDeviceIdentity]);
 
   const syncNativeIncomingCallAction=(callId:string,status:'accepted'|'declined')=>{
     if(Platform.OS!=='android')return;
@@ -1698,24 +1725,21 @@ function GuftinApp() {
     setIncomingCall(null);
     if(status==='accepted')await joinCall({...call,status:'accepted'});
     else setOutgoingCall(null);
-  },[session,joinCall]);
+  },[session?.user?.id,joinCall]);
 
   const acceptCallWhenReady=useCallback(async(call:any)=>{
-    if(!session||!call?.id)return;
-    if(!deviceIdentity||e2eeStatus!=='ready'){
+    if(!session?.user?.id||!call?.id)return;
+    setPendingCallAccept(call);
+    try{
+      await ensureDeviceIdentity();
+      await respondToCall(call,'accepted');
+    }catch(error:any){
       setIncomingCall(call);
-      setPendingCallAccept(call);
-      return;
+      Alert.alert('Secure calling setup failed',error?.message||'This phone could not prepare its encrypted call keys. Check the connection and try again.');
+    }finally{
+      setPendingCallAccept(null);
     }
-    await respondToCall(call,'accepted');
-  },[session,deviceIdentity,e2eeStatus,respondToCall]);
-
-  useEffect(()=>{
-    if(!pendingCallAccept||!session||!deviceIdentity||e2eeStatus!=='ready')return;
-    const call=pendingCallAccept;
-    setPendingCallAccept(null);
-    void respondToCall(call,'accepted');
-  },[pendingCallAccept,session,deviceIdentity,e2eeStatus,respondToCall]);
+  },[session?.user?.id,ensureDeviceIdentity,respondToCall]);
 
   useEffect(()=>{
     if(!session){
@@ -2897,26 +2921,21 @@ function GuftinApp() {
   };
 
   const startCall=async(callType:'voice'|'video')=>{
-    if(!active||!session||callBusy)return;
-    if(!deviceIdentity||e2eeStatus!=='ready'){
-      Alert.alert('Secure calling not ready','Open Guftin on both phones and wait until secure chat is ready before starting a call.');
-      return;
-    }
+    if(!active||!session?.user?.id||callBusy)return;
     if(!['direct','group'].includes(active.kind)){
       Alert.alert('Calling unavailable','Calls are available in direct chats and groups.');
       return;
     }
     setCallBusy(true);
     try{
-      let memberIds:string[];
-      if(active.pendingContactId){
-        memberIds=[session.user.id,active.pendingContactId];
-      }else{
-        const {data:members,error:memberError}=await supabase.from('kc_conversation_members')
-          .select('user_id').eq('conversation_id',active.id);
-        if(memberError)throw memberError;
-        memberIds=[...new Set((members||[]).map((row:any)=>row.user_id))] as string[];
-      }
+      const callIdentity=await ensureDeviceIdentity();
+      // Create a pending direct conversation first so RLS lets this caller
+      // read the contact's public device keys before the encrypted key roster is built.
+      const callChat=await ensureActiveDirectConversation(active);
+      const {data:members,error:memberError}=await supabase.from('kc_conversation_members')
+        .select('user_id').eq('conversation_id',callChat.id);
+      if(memberError)throw memberError;
+      const memberIds=[...new Set((members||[]).map((row:any)=>row.user_id))] as string[];
       if(!memberIds.includes(session.user.id))throw new Error('You are no longer a member of this conversation.');
       if(active.kind==='direct'&&(memberIds.length!==2||memberIds.filter(id=>id!==session.user.id).length!==1))
         throw new Error('This direct call needs exactly one other member.');
@@ -2928,16 +2947,15 @@ function GuftinApp() {
       const registeredUsers=new Set((devices||[]).map((device:any)=>device.user_id));
       if(memberIds.some((id:string)=>!registeredUsers.has(id)))
         throw new Error('Every participant must open the latest Guftin version and register a secure device before this encrypted call can start.');
-      if(!(devices||[]).some((device:any)=>device.id===deviceIdentity.deviceId))
-        throw new Error('This phone is not in the conversation encryption roster. Reopen Guftin and try again.');
+      if(!(devices||[]).some((device:any)=>device.id===callIdentity.deviceId))
+        throw new Error('This phone is not in the conversation encryption roster. Reopen Guftin and retry secure-device setup.');
       const callKey=ExpoCrypto.getRandomBytes(32);
       let e2eeKeyEnvelopes:any;
       try{
-        e2eeKeyEnvelopes=encryptCallKeyForDevices(callKey,devices||[],deviceIdentity);
+        e2eeKeyEnvelopes=encryptCallKeyForDevices(callKey,devices||[],callIdentity);
       }finally{
         callKey.fill(0);
       }
-      const callChat=await ensureActiveDirectConversation(active);
       let call:any;
       if(callChat.kind==='group'){
         const {data,error}=await supabase.rpc('kc_create_group_call',{
