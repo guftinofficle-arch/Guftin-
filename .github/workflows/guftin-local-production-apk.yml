@@ -84,10 +84,10 @@ jobs:
           const pkg = require('./package.json');
           const appConfig = fs.readFileSync('app.config.js', 'utf8');
           if (pkg.version !== '1.5.8' ||
-              !/version:\s*"1\.5\.7"/.test(appConfig) ||
-              !/versionCode:\s*43/.test(appConfig) ||
+              !/version:\s*"1\.5\.8"/.test(appConfig) ||
+              !/versionCode:\s*44/.test(appConfig) ||
               !/package:\s*"com\.guftin\.app"/.test(appConfig)) {
-            throw new Error('Expected Guftin 1.5.8 / Android code 43 / com.guftin.app.');
+            throw new Error('Expected Guftin 1.5.8 / Android code 44 / com.guftin.app.');
           }
           console.log('Validated Guftin 1.5.8, versionCode 44 and package com.guftin.app.');
           NODE
@@ -97,6 +97,9 @@ jobs:
 
       - name: Patch React Native CallKeep Android bridge
         run: npm run patch:callkeep
+
+      - name: Patch Expo Notifications with full-screen call PendingIntent support
+        run: npm run patch:expo-fullscreen
 
       - name: Check Expo SDK dependency alignment
         run: npx --yes expo install --check
