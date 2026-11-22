@@ -4199,6 +4199,9 @@ function GuftinApp() {
       </View>
     </Modal>
 
+    <Modal visible={appLocked} transparent animationType="fade" onRequestClose={()=>{}}>
+      <View style={{flex:1,backgroundColor:C.white,justifyContent:'center',alignItems:'center',padding:24}}><Text style={{fontSize:25,fontWeight:'900',color:C.ink,marginBottom:12}}>Guftin is locked</Text><Btn onPress={()=>startPinFlow('unlock-app')} style={{backgroundColor:C.green,padding:15,borderRadius:13,width:'100%'}}><Text style={{color:'#fff',fontWeight:'900',textAlign:'center'}}>Enter App PIN</Text></Btn></View>
+    </Modal>
     <Modal visible={pinModalVisible} transparent animationType="fade" onRequestClose={()=>{if(pinMode==='unlock-app'||pinMode==='unlock-chat')return;setPinModalVisible(false);}}>
       <View style={{flex:1,backgroundColor:'#0009',justifyContent:'center',padding:24}}><View style={{backgroundColor:C.white,borderRadius:22,padding:22,gap:12}}>
         <Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>{pinMode==='unlock-chat'?'Unlock Chat':pinMode==='unlock-app'?'Unlock Guftin':'Create PIN'}</Text>
@@ -4210,9 +4213,7 @@ function GuftinApp() {
         {(pinMode!=='unlock-app'&&pinMode!=='unlock-chat')?<Btn onPress={()=>setPinModalVisible(false)} style={{padding:8}}><Text style={{color:C.muted,textAlign:'center'}}>Cancel</Text></Btn>:null}
       </View></View>
     </Modal>
-    <Modal visible={appLocked} transparent animationType="fade" onRequestClose={()=>{}}>
-      <View style={{flex:1,backgroundColor:C.white,justifyContent:'center',alignItems:'center',padding:24}}><Text style={{fontSize:25,fontWeight:'900',color:C.ink,marginBottom:12}}>Guftin is locked</Text><Btn onPress={()=>startPinFlow('unlock-app')} style={{backgroundColor:C.green,padding:15,borderRadius:13,width:'100%'}}><Text style={{color:'#fff',fontWeight:'900',textAlign:'center'}}>Enter App PIN</Text></Btn></View>
-    </Modal>
+
     <Modal visible={settingsOpen} transparent animationType="slide" onRequestClose={()=>setSettingsOpen(false)}>
       <View style={{flex:1,backgroundColor:'#0008',justifyContent:'flex-end'}}><View style={{backgroundColor:C.white,borderTopLeftRadius:24,borderTopRightRadius:24,padding:22}}>
         <Text style={{fontSize:21,fontWeight:'900',color:C.ink}}>Guftin settings</Text>
