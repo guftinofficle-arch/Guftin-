@@ -51,8 +51,19 @@
       </div>
       <button class="primary" id="authSubmit" type="submit">Sign in</button>
     </form>
+    <form id="signupOtpForm" hidden>
+      <p class="subtle" style="margin:18px 0 8px">We sent a 6-digit verification code to:</p>
+      <p id="signupOtpEmail" style="font-size:13px;font-weight:750;overflow-wrap:anywhere"></p>
+      <label class="field-label" for="signupOtp">Email verification code</label>
+      <input class="field" id="signupOtp" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="Enter 6-digit code" required>
+      <button class="primary" id="verifySignupOtp" type="submit">Verify email</button>
+      <div class="auth-actions">
+        <button class="link-button" id="resendSignupOtp" type="button">Resend code</button>
+        <button class="link-button" id="backSignupOtp" type="button">Back</button>
+      </div>
+    </form>
     <div id="authMessage" class="message" role="status" aria-live="polite"></div>
-    <div class="auth-actions">
+    <div class="auth-actions" id="authActions">
       <button class="link-button" id="authSwitch" type="button">Create an account</button>
       <button class="link-button" id="forgotBtn" type="button">Forgot password?</button>
     </div>
@@ -103,6 +114,7 @@ const $ = (id) => document.getElementById(id);
 const authShell = $("authShell"), appShell = $("appShell"), publicLegal = $("publicLegal"), pageArea = $("pageArea");
 let authMode = "signin", currentUser = null, profile = null, deviceId = null, devicePrivateKey = null;
 let activeConversation = null, conversationRows = [], contactsRows = [], realtimeChannel = null, toastTimer = null, bootPromise = null;
+let pendingSignupEmail = "";
 
 function toast(message, error = false) {
   const node = $("toast");
@@ -166,11 +178,28 @@ $("authForm").addEventListener("submit", async (event) => {
         email, password,
         options: { data: { username, display_name: displayName, full_name: displayName } }
       });
-      if (result.error) throw result.error;
+      if (result.error) {
+        if (/already registered|already been registered|user already exists/i.test(result.error.message || "")) {
+          const resend = await supabase.auth.resend({ type: "signup", email });
+          if (resend.error) throw resend.error;
+          showSignupOtp(email);
+          setAuthMessage("A fresh verification code was requested. Check your inbox and spam folder.");
+          return;
+        }
+        throw result.error;
+      }
       if (result.data.session) {
         setAuthMessage("Your account was created. Opening your Guftin workspace…");
+      } else if (result.data.user) {
+        // Supabase returns an empty identities array for an already-pending signup.
+        if (Array.isArray(result.data.user.identities) && result.data.user.identities.length === 0) {
+          const resend = await supabase.auth.resend({ type: "signup", email });
+          if (resend.error) throw resend.error;
+        }
+        showSignupOtp(email);
+        setAuthMessage("Registration received. Enter the 6-digit code sent to your email to verify your account.");
       } else {
-        setAuthMessage("Registration received. Check your email for the verification link, then sign in. No account is marked verified until Supabase confirms it.");
+        throw new Error("Guftin could not start email verification. Please try again.");
       }
     } else if (authMode === "forgot") {
       const result = await supabase.auth.resetPasswordForEmail(email);
@@ -186,6 +215,66 @@ $("authForm").addEventListener("submit", async (event) => {
   } finally {
     submit.disabled = false;
   }
+});
+
+function showSignupOtp(email) {
+  pendingSignupEmail = email.trim().toLowerCase();
+  $("signupOtpEmail").textContent = pendingSignupEmail;
+  $("signupOtp").value = "";
+  $("authForm").hidden = true;
+  $("signupOtpForm").hidden = false;
+  $("authActions").hidden = true;
+  $("authTitle").textContent = "Verify your email";
+  $("authSubtitle").textContent = "Enter the one-time code to finish creating your Guftin account.";
+  $("signupOtp").focus();
+}
+$("signupOtpForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const token = $("signupOtp").value.replace(/\\D/g, "");
+  if (token.length !== 6) {
+    setAuthMessage("Enter the complete 6-digit verification code.", "error");
+    return;
+  }
+  const button = $("verifySignupOtp");
+  button.disabled = true;
+  clearAuthMessage();
+  try {
+    const { data, error } = await supabase.auth.verifyOtp({
+      email: pendingSignupEmail,
+      token,
+      type: "signup"
+    });
+    if (error) throw error;
+    if (!data.session) throw new Error("The code was accepted, but no sign-in session was returned. Please sign in with your email and password.");
+    setAuthMessage("Email verified. Opening your Guftin workspace…");
+  } catch (error) {
+    setAuthMessage(error.message || "The verification code is invalid or expired. Request a new code.", "error");
+  } finally {
+    button.disabled = false;
+  }
+});
+$("resendSignupOtp").addEventListener("click", async () => {
+  const button = $("resendSignupOtp");
+  button.disabled = true;
+  clearAuthMessage();
+  try {
+    const { error } = await supabase.auth.resend({ type: "signup", email: pendingSignupEmail });
+    if (error) throw error;
+    $("signupOtp").value = "";
+    setAuthMessage("A new verification code was requested. Check your inbox and spam folder.");
+  } catch (error) {
+    setAuthMessage(error.message || "Could not resend the code. Wait briefly and try again.", "error");
+  } finally {
+    button.disabled = false;
+  }
+});
+$("backSignupOtp").addEventListener("click", () => {
+  $("signupOtpForm").hidden = true;
+  $("authForm").hidden = false;
+  $("authActions").hidden = false;
+  $("email").value = pendingSignupEmail;
+  setAuthMode("signup");
+  clearAuthMessage();
 });
 
 function openLegal(kind) {
