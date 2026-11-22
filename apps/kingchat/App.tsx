@@ -260,9 +260,10 @@ type Chat = { id:string; name:string; avatar:string; avatarUrl?:string; color:st
 type Message = { id:string; conversation_id:string; sender_id:string|null; body:string|null; message_type:string; attachment_url?:string|null; created_at:string; mine:boolean; deleted_at?:string|null; pending?:boolean };
 const sortInboxChats=(items:Chat[])=>items.slice().sort((a,b)=>(Number(!!b.isOfficial)-Number(!!a.isOfficial))||((Number(b.lastAt)||0)-(Number(a.lastAt)||0)));
 const extractChannelInviteCode=(url:string)=>{
-  const match=url.match(/(?:^|\\/)channel\\/([^/?#]+)/i);
-  if(!match)return '';
-  try{return decodeURIComponent(match[1]);}catch{return match[1];}
+  const parts=url.replace(/[?#].*$/, '').split('/').filter(Boolean);
+  const channelIndex=parts.findIndex(part=>part.toLowerCase()==='channel');
+  if(channelIndex<0||!parts[channelIndex+1])return '';
+  try{return decodeURIComponent(parts[channelIndex+1]);}catch{return parts[channelIndex+1];}
 };
 const palette = ['#d49a91','#8796c7','#81ad98','#bd8aa8','#c4a47c','#9a91bd'];
 // Supabase chat-media is currently configured for 50 MB per object. Keep encrypted
