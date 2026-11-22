@@ -2123,7 +2123,7 @@ function GuftinApp() {
   const hashPin=async(value:string)=>ExpoCrypto.digestStringAsync(ExpoCrypto.CryptoDigestAlgorithm.SHA256,'guftin-pin-v1:'+value);
   const startPinFlow=(mode:any,chat?:Chat|null)=>{setPinMode(mode);setPinTargetChat(chat||null);setPinEntry('');setPinConfirm('');setPinModalVisible(true);};
   const savePin=async()=>{
-    if(!/^\\d{4,8}$/.test(pinEntry)){Alert.alert('Invalid PIN','Enter a PIN with 4 to 8 digits.');return;}
+    if(!/^\d{4,8}$/.test(pinEntry)){Alert.alert('Invalid PIN','Enter a PIN with 4 to 8 digits.');return;}
     if(pinEntry!==pinConfirm){Alert.alert('PIN mismatch','The PIN entries do not match.');return;}
     const scope=pinMode==='set-app'?'app':'chat';
     const key=pinStorageKey(scope,scope==='chat'?pinTargetChat?.id:undefined);
@@ -4206,7 +4206,7 @@ function GuftinApp() {
       <View style={{flex:1,backgroundColor:'#0009',justifyContent:'center',padding:24}}><View style={{backgroundColor:C.white,borderRadius:22,padding:22,gap:12}}>
         <Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>{pinMode==='unlock-chat'?'Unlock Chat':pinMode==='unlock-app'?'Unlock Guftin':'Create PIN'}</Text>
         <Text style={{fontSize:12,color:C.muted}}>{pinMode==='unlock-chat'?'Enter this chat’s PIN.':pinMode==='unlock-app'?'Enter your app PIN.':'Choose a 4–8 digit PIN and confirm it.'}</Text>
-        <TextInput value={pinEntry} onChangeText={v=>setPinEntry(v.replace(/\\D/g,'').slice(0,8))} keyboardType="number-pad" secureTextEntry placeholder="PIN" style={{borderWidth:1,borderColor:C.line,borderRadius:12,padding:14,color:C.ink,fontSize:18,letterSpacing:5}} />
+        <TextInput value={pinEntry} onChangeText={v=>setPinEntry(v.replace(/\D/g,'').slice(0,8))} keyboardType="number-pad" secureTextEntry placeholder="PIN" style={{borderWidth:1,borderColor:C.line,borderRadius:12,padding:14,color:C.ink,fontSize:18,letterSpacing:5}} />
         {pinMode==='set-chat'||pinMode==='set-app'?<TextInput value={pinConfirm} onChangeText={v=>setPinConfirm(v.replace(/\\D/g,'').slice(0,8))} keyboardType="number-pad" secureTextEntry placeholder="Confirm PIN" style={{borderWidth:1,borderColor:C.line,borderRadius:12,padding:14,color:C.ink,fontSize:18,letterSpacing:5}}/>:null}
         <Btn disabled={pinBusy} onPress={()=>void (async()=>{setPinBusy(true);try{if(pinMode==='unlock-chat'||pinMode==='unlock-app')await unlockPin();else await savePin();}finally{setPinBusy(false);}})()} style={{backgroundColor:C.green,padding:14,borderRadius:13}}><Text style={{color:'#fff',fontWeight:'900',textAlign:'center'}}>{pinBusy?'Please wait…':(pinMode==='unlock-chat'||pinMode==='unlock-app'?'Unlock':'Save PIN')}</Text></Btn>
         {(pinMode==='unlock-chat'||pinMode==='unlock-app')?<Btn onPress={()=>void resetPinByEmail()} style={{padding:10}}><Text style={{color:C.green,fontWeight:'800',textAlign:'center'}}>Forgot / Reset PIN</Text></Btn>:null}
