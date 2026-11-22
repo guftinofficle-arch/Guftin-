@@ -11,7 +11,7 @@ A paid custom domain is not required. The free HTTPS hostname assigned by Cloudf
 5. Set:
    - Framework preset: **None**
    - Build command: leave empty
-   - Build output directory: `. ` (a single dot, without a space)
+   - Build output directory: `.` (a single dot)
    - Root directory (advanced): `channel-links`
 6. Deploy. Cloudflare assigns an HTTPS hostname such as `your-project.pages.dev`.
 7. Copy the hostname only (no `https://`, no path, no trailing slash).
