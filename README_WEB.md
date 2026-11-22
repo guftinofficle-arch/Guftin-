@@ -42,3 +42,14 @@ Set the Supabase Auth Site URL and allowed redirect URLs to the deployed Guftin 
 7. Verify Storage RLS and signed profile-photo access.
 8. Review Supabase security advisors and complete an independent cryptography review.
 9. Confirm Cloudflare Pages deployment and mobile PWA installation, then add the official Guftin logo assets when available.
+
+
+## Upload using Cloudflare Pages Direct Upload
+
+1. In Cloudflare Dashboard, open **Workers & Pages** and choose **Create application** → **Pages** → **Upload assets** (wording can vary).
+2. Use the ZIP named `GUFTIN-Cloudflare-Pages.zip` from the GitHub Actions artifact. Extract it first if the uploader requests a folder rather than a ZIP.
+3. Upload the extracted folder contents, where `index.html` is at the root (not inside another nested folder).
+4. Publish the deployment. Connect the official custom domain only after confirming the new deployment works.
+5. In the existing Supabase project's Authentication URL configuration, set the deployed website URL as the Site URL and add it to the allowed redirect URLs. Keep the existing project and mail provider settings.
+
+Do not upload the Android project or Gradle files to Cloudflare Pages. The Cloudflare package includes only the static browser site.
