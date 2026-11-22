@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 import NetInfo from '@react-native-community/netinfo';
 import {
   ActivityIndicator, Alert, Animated, AppState, BackHandler, FlatList, Image, KeyboardAvoidingView, Modal,
@@ -856,6 +857,14 @@ function GuftinApp() {
   const [recording,setRecording]=useState<Audio.Recording|null>(null);
   const [recordingBusy,setRecordingBusy]=useState(false);
   const [settingsOpen,setSettingsOpen]=useState(false);
+  const [pinModalVisible,setPinModalVisible]=useState(false);
+  const [pinEntry,setPinEntry]=useState('');
+  const [pinConfirm,setPinConfirm]=useState('');
+  const [pinMode,setPinMode]=useState<'set-chat'|'unlock-chat'|'set-app'|'unlock-app'|'reset-chat'|'reset-app'>('set-chat');
+  const [pinTargetChat,setPinTargetChat]=useState<Chat|null>(null);
+  const [appLocked,setAppLocked]=useState(false);
+  const [appLockEnabled,setAppLockEnabled]=useState(false);
+  const [pinBusy,setPinBusy]=useState(false);
   const [showReadReceipts,setShowReadReceipts]=useState(true);
   const [mediaAutoDownload,setMediaAutoDownload]=useState(false);
   const [onlineVisibility,setOnlineVisibility]=useState(true);
@@ -2110,7 +2119,45 @@ function GuftinApp() {
     setRefreshing(false);
   };
 
+  const pinStorageKey=(scope:string,id?:string)=>'guftin-pin-'+scope+(id?'-'+id:'');
+  const hashPin=async(value:string)=>ExpoCrypto.digestStringAsync(ExpoCrypto.CryptoDigestAlgorithm.SHA256,'guftin-pin-v1:'+value);
+  const startPinFlow=(mode:any,chat?:Chat|null)=>{setPinMode(mode);setPinTargetChat(chat||null);setPinEntry('');setPinConfirm('');setPinModalVisible(true);};
+  const savePin=async()=>{
+    if(!/^\\d{4,8}$/.test(pinEntry)){Alert.alert('Invalid PIN','Enter a PIN with 4 to 8 digits.');return;}
+    if(pinEntry!==pinConfirm){Alert.alert('PIN mismatch','The PIN entries do not match.');return;}
+    const scope=pinMode==='set-app'?'app':'chat';
+    const key=pinStorageKey(scope,scope==='chat'?pinTargetChat?.id:undefined);
+    await SecureStore.setItemAsync(key,await hashPin(pinEntry));
+    if(scope==='app'){await AsyncStorage.setItem('guftin-app-lock-enabled','1');setAppLockEnabled(true);setAppLocked(false);}
+    setPinModalVisible(false);setPinEntry('');setPinConfirm('');
+    if(scope==='chat'&&pinTargetChat){setActive(pinTargetChat);setPeerLastReadAt(null);}
+  };
+  const unlockPin=async()=>{
+    const scope=pinMode==='unlock-app'?'app':'chat';
+    const key=pinStorageKey(scope,scope==='chat'?pinTargetChat?.id:undefined);
+    const stored=await SecureStore.getItemAsync(key);
+    if(stored&&stored===await hashPin(pinEntry)){
+      setPinModalVisible(false);setPinEntry('');
+      if(scope==='app')setAppLocked(false);
+      else if(pinTargetChat){setActive(pinTargetChat);setPeerLastReadAt(null);}
+      return;
+    }
+    Alert.alert('Incorrect PIN','Please try again or use Reset PIN.');
+  };
+  const resetPinByEmail=async()=>{
+    const emailAddress=String(session?.user?.email||'');
+    if(!emailAddress){Alert.alert('Email unavailable','Sign in again to reset your PIN.');return;}
+    try{
+      const {error}=await supabase.auth.resetPasswordForEmail(emailAddress);
+      if(error)throw error;
+      Alert.alert('Reset email sent','A password recovery code was sent to '+emailAddress+'. Verify it in the password recovery flow, then set a new PIN. PIN reset is not yet enabled in this build.');
+    }catch(e:any){Alert.alert('Could not send reset email',e?.message||'Please try again.');}
+  };
+  useEffect(()=>{if(!session?.user?.id)return;let live=true;(async()=>{const enabled=await AsyncStorage.getItem('guftin-app-lock-enabled');if(!live)return;setAppLockEnabled(enabled==='1');if(enabled==='1'&&await SecureStore.getItemAsync(pinStorageKey('app')))setAppLocked(true);})();return()=>{live=false;};},[session?.user?.id]);
+
   const openChat=async(chat:Chat)=>{
+    const chatPin=await SecureStore.getItemAsync(pinStorageKey('chat',chat.id));
+    if(chatPin){startPinFlow('unlock-chat',chat);return;}
     setPeerLastReadAt(null);
     setActive(chat);
     // The active-chat effect performs the single initial load; do not fetch twice.
@@ -3867,6 +3914,7 @@ function GuftinApp() {
         </>):null}
         <Btn onPress={()=>active.kind==='channel'?showChannelOptions():Alert.alert('Chat options',active.name,[
           {text:'Chat info',onPress:()=>void openChatDetails()},
+          {text:'Lock Chat',onPress:()=>startPinFlow('set-chat',active)},
           {text:'Clear Chat',style:'destructive',onPress:()=>Alert.alert('Clear this chat?', 'This removes the messages from your Guftin account on this phone. The other participant keeps their chat history.',[
             {text:'Cancel',style:'cancel'},
             {text:'Clear Chat',style:'destructive',onPress:()=>void clearChatForMe(active)}
@@ -4151,10 +4199,25 @@ function GuftinApp() {
       </View>
     </Modal>
 
+    <Modal visible={pinModalVisible} transparent animationType="fade" onRequestClose={()=>{if(pinMode==='unlock-app'||pinMode==='unlock-chat')return;setPinModalVisible(false);}}>
+      <View style={{flex:1,backgroundColor:'#0009',justifyContent:'center',padding:24}}><View style={{backgroundColor:C.white,borderRadius:22,padding:22,gap:12}}>
+        <Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>{pinMode==='unlock-chat'?'Unlock Chat':pinMode==='unlock-app'?'Unlock Guftin':'Create PIN'}</Text>
+        <Text style={{fontSize:12,color:C.muted}}>{pinMode==='unlock-chat'?'Enter this chat’s PIN.':pinMode==='unlock-app'?'Enter your app PIN.':'Choose a 4–8 digit PIN and confirm it.'}</Text>
+        <TextInput value={pinEntry} onChangeText={v=>setPinEntry(v.replace(/\\D/g,'').slice(0,8))} keyboardType="number-pad" secureTextEntry placeholder="PIN" style={{borderWidth:1,borderColor:C.line,borderRadius:12,padding:14,color:C.ink,fontSize:18,letterSpacing:5}} />
+        {pinMode==='set-chat'||pinMode==='set-app'?<TextInput value={pinConfirm} onChangeText={v=>setPinConfirm(v.replace(/\\D/g,'').slice(0,8))} keyboardType="number-pad" secureTextEntry placeholder="Confirm PIN" style={{borderWidth:1,borderColor:C.line,borderRadius:12,padding:14,color:C.ink,fontSize:18,letterSpacing:5}}/>:null}
+        <Btn disabled={pinBusy} onPress={()=>void (async()=>{setPinBusy(true);try{if(pinMode==='unlock-chat'||pinMode==='unlock-app')await unlockPin();else await savePin();}finally{setPinBusy(false);}})()} style={{backgroundColor:C.green,padding:14,borderRadius:13}}><Text style={{color:'#fff',fontWeight:'900',textAlign:'center'}}>{pinBusy?'Please wait…':(pinMode==='unlock-chat'||pinMode==='unlock-app'?'Unlock':'Save PIN')}</Text></Btn>
+        {(pinMode==='unlock-chat'||pinMode==='unlock-app')?<Btn onPress={()=>void resetPinByEmail()} style={{padding:10}}><Text style={{color:C.green,fontWeight:'800',textAlign:'center'}}>Forgot / Reset PIN</Text></Btn>:null}
+        {(pinMode!=='unlock-app'&&pinMode!=='unlock-chat')?<Btn onPress={()=>setPinModalVisible(false)} style={{padding:8}}><Text style={{color:C.muted,textAlign:'center'}}>Cancel</Text></Btn>:null}
+      </View></View>
+    </Modal>
+    <Modal visible={appLocked} transparent animationType="fade" onRequestClose={()=>{}}>
+      <View style={{flex:1,backgroundColor:C.white,justifyContent:'center',alignItems:'center',padding:24}}><Text style={{fontSize:25,fontWeight:'900',color:C.ink,marginBottom:12}}>Guftin is locked</Text><Btn onPress={()=>startPinFlow('unlock-app')} style={{backgroundColor:C.green,padding:15,borderRadius:13,width:'100%'}}><Text style={{color:'#fff',fontWeight:'900',textAlign:'center'}}>Enter App PIN</Text></Btn></View>
+    </Modal>
     <Modal visible={settingsOpen} transparent animationType="slide" onRequestClose={()=>setSettingsOpen(false)}>
       <View style={{flex:1,backgroundColor:'#0008',justifyContent:'flex-end'}}><View style={{backgroundColor:C.white,borderTopLeftRadius:24,borderTopRightRadius:24,padding:22}}>
         <Text style={{fontSize:21,fontWeight:'900',color:C.ink}}>Guftin settings</Text>
         <Text style={{color:C.muted,fontSize:12,marginTop:5,marginBottom:15}}>Privacy and connection preferences</Text>
+        <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingVertical:12}}><View style={{flex:1,paddingRight:12}}><Text style={{color:C.ink,fontWeight:'800'}}>App Lock</Text><Text style={{color:C.muted,fontSize:11}}>Require a PIN to open Guftin</Text></View><Switch value={appLockEnabled} onValueChange={async enabled=>{if(enabled){startPinFlow('set-app');}else{await AsyncStorage.removeItem('guftin-app-lock-enabled');setAppLockEnabled(false);}}} trackColor={{true:C.green}}/></View>
         <Btn onPress={()=>{setSettingsOpen(false);setPermissionSetupStep(0);setPermissionSetupAutoSave(mediaAutoDownload);setPermissionSetupFullScreenOpened(false);setPermissionSetupNotice('');setPermissionSetupVisible(true);}} style={{backgroundColor:C.mint,padding:12,borderRadius:13,marginBottom:7}}>
           <Text style={{color:C.green,fontWeight:'900',textAlign:'center'}}>Review app permissions</Text>
         </Btn>
