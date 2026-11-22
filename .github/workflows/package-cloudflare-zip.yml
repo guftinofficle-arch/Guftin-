@@ -1,0 +1,40 @@
+name: Package Guftin Cloudflare Pages ZIP
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "index.html"
+      - "site.webmanifest"
+      - "sw.js"
+      - "README_WEB.md"
+      - ".github/workflows/package-cloudflare-zip.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out Guftin
+        uses: actions/checkout@v4
+      - name: Prepare Cloudflare Pages folder
+        run: |
+          mkdir -p dist
+          cp index.html site.webmanifest sw.js dist/
+          cp README_WEB.md dist/
+          printf '%s\n' 'GUFTIN Cloudflare Pages upload package' > dist/UPLOAD-README.txt
+          printf '%s\n' 'Upload the contents of this folder to Cloudflare Pages as a static site. Set the build command to none and output directory to dist if using Git integration.' >> dist/UPLOAD-README.txt
+      - name: Create ZIP
+        run: |
+          cd dist
+          zip -r ../GUFTIN-Cloudflare-Pages.zip .
+      - name: Upload ZIP artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: GUFTIN-Cloudflare-Pages
+          path: GUFTIN-Cloudflare-Pages.zip
+          if-no-files-found: error
+          retention-days: 30
