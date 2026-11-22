@@ -230,7 +230,7 @@ function showSignupOtp(email) {
 }
 $("signupOtpForm").addEventListener("submit", async (event) => {
   event.preventDefault();
-  const token = $("signupOtp").value.replace(/\\D/g, "");
+  const token = $("signupOtp").value.replace(/\D/g, "");
   if (token.length !== 6) {
     setAuthMessage("Enter the complete 6-digit verification code.", "error");
     return;
