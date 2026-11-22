@@ -3281,6 +3281,17 @@ function GuftinApp() {
         }
         throw error;
       }
+      // Supabase intentionally returns an empty identities array for an
+      // already-registered email to prevent account enumeration. Do not show
+      // an OTP screen in this case: confirmed accounts will not receive a new
+      // signup confirmation code.
+      if(data.user && Array.isArray(data.user.identities) && data.user.identities.length===0){
+        setAuthMode('login');
+        setEmail(cleanEmail);
+        setEmailOtpPending(false);
+        setAuthError('This email already has a Guftin account. Please sign in with your password, or use Forgot password if needed.');
+        return;
+      }
       if(data.session){
         // Projects with email confirmation disabled may return a session immediately.
         setPassword('');
