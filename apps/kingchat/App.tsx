@@ -259,6 +259,11 @@ const THEMES:any = {
 type Chat = { id:string; name:string; avatar:string; avatarUrl?:string; color:string; last:string; time:string; unread:number; online:boolean; kind:string; lastAt:number; isOfficial?:boolean; isVerified?:boolean; isChannelOwner?:boolean; inviteCode?:string; isPublic?:boolean; ownerId?:string; description?:string; hasConversationActivity?:boolean; hasCallActivity?:boolean; pendingContactId?:string; hasPendingActivity?:boolean };
 type Message = { id:string; conversation_id:string; sender_id:string|null; body:string|null; message_type:string; attachment_url?:string|null; created_at:string; mine:boolean; deleted_at?:string|null; pending?:boolean };
 const sortInboxChats=(items:Chat[])=>items.slice().sort((a,b)=>(Number(!!b.isOfficial)-Number(!!a.isOfficial))||((Number(b.lastAt)||0)-(Number(a.lastAt)||0)));
+const extractChannelInviteCode=(url:string)=>{
+  const match=url.match(/(?:^|\\/)channel\\/([^/?#]+)/i);
+  if(!match)return '';
+  try{return decodeURIComponent(match[1]);}catch{return match[1];}
+};
 const palette = ['#d49a91','#8796c7','#81ad98','#bd8aa8','#c4a47c','#9a91bd'];
 // Supabase chat-media is currently configured for 50 MB per object. Keep encrypted
 // uploads below that ceiling because authenticated encryption adds a small overhead.
@@ -363,6 +368,9 @@ function Avatar({label,color,size=52,online=false,uri}:any) {
     {uri?<Image source={{uri}} style={{width:size,height:size,borderRadius:size*.34}}/>:<Text style={{color:'#fff',fontWeight:'900',fontSize:size*.25}}>{label}</Text>}
     {online?<View style={{position:'absolute',right:-1,bottom:-1,width:13,height:13,borderRadius:8,backgroundColor:'#29b77e',borderWidth:2,borderColor:C.white}}/>:null}
   </View>;
+}
+function BrandLogo({size=78}:any) {
+  return <Image source={require('./assets/guftin-official-logo.webp')} style={{width:size,height:size}} resizeMode="contain"/>;
 }
 function Heading({children}:any) { return <Text style={{fontSize:25,fontWeight:'900',color:C.ink,letterSpacing:-.6}}>{children}</Text>; }
 
@@ -959,6 +967,7 @@ function GuftinApp() {
   const [groupContactsLoading,setGroupContactsLoading]=useState(false);
   const [groupCreating,setGroupCreating]=useState(false);
   const [channels,setChannels]=useState<any[]>([]);
+  const [pendingChannelInvite,setPendingChannelInvite]=useState<string|null>(null);
   const [channelsLoading,setChannelsLoading]=useState(false);
   const [channelSearch,setChannelSearch]=useState('');
   const [channelCreateOpen,setChannelCreateOpen]=useState(false);
@@ -1074,8 +1083,13 @@ function GuftinApp() {
       setSession(next);
       setAuthRestoring(false);
     });
-    const linkSub=Linking.addEventListener('url',({url})=>{void completeAuthUrl(url);});
-    Linking.getInitialURL().then(url=>{if(url) void completeAuthUrl(url);});
+    const handleIncomingUrl=(url:string)=>{
+      void completeAuthUrl(url);
+      const inviteCode=extractChannelInviteCode(url);
+      if(inviteCode)setPendingChannelInvite(inviteCode);
+    };
+    const linkSub=Linking.addEventListener('url',({url})=>handleIncomingUrl(url));
+    Linking.getInitialURL().then(url=>{if(url)handleIncomingUrl(url);});
     return ()=>{mounted=false;subscription.unsubscribe();linkSub.remove();};
   },[completeAuthUrl]);
 
@@ -1180,7 +1194,7 @@ function GuftinApp() {
     const inboxCacheKey='guftin-cache-inbox:'+session.user.id;
     try{
       const cached=await AsyncStorage.getItem(inboxCacheKey);
-      if(cached){const parsed=JSON.parse(cached);if(Array.isArray(parsed)){const safeCached=(parsed as Chat[]).filter(chat=>chat.kind!=='direct'||chat.hasConversationActivity===true||chat.hasCallActivity===true||chat.hasPendingActivity===true);setChats(sortInboxChats(safeCached));setLoading(false);}}
+      if(cached){const parsed=JSON.parse(cached);if(Array.isArray(parsed)){const safeCached=(parsed as Chat[]).filter(chat=>chat.kind!=='channel'&&(chat.kind!=='direct'||chat.hasConversationActivity===true||chat.hasCallActivity===true||chat.hasPendingActivity===true));setChats(sortInboxChats(safeCached));setLoading(false);}}
     }catch{ /* Ignore a damaged local inbox cache and try the server. */ }
     try{
       const {data:memberships,error}=await supabase.from('kc_conversation_members')
@@ -1264,7 +1278,7 @@ function GuftinApp() {
           inviteCode:channel?.invite_code,isPublic:channel?.is_public!==false,ownerId:channel?.owner_id,description:channel?.description||'',
           hasConversationActivity:!!last&&!!last.sender_id&&last.message_type!=='system',hasCallActivity:callActivityIds.has(row.conversation_id)};
       }));
-      const mapped:Chat[]=sortInboxChats(mappedRows.filter(chat=>!!chat&&(chat.kind!=='direct'||chat.hasConversationActivity===true||chat.hasCallActivity===true)) as Chat[]);
+      const mapped:Chat[]=sortInboxChats(mappedRows.filter(chat=>!!chat&&chat.kind!=='channel'&&(chat.kind!=='direct'||chat.hasConversationActivity===true||chat.hasCallActivity===true)) as Chat[]);
       setChats(prev=>{
         const pending=prev.filter(chat=>chat.kind==='direct'&&chat.hasPendingActivity===true&&!mapped.some(item=>item.id===chat.id));
         const next=sortInboxChats([...mapped,...pending]);
@@ -2310,6 +2324,14 @@ function GuftinApp() {
     finally{setChannelBusy(false);}
   },[session,channelBusy,loadChannels,loadInbox]);
 
+  useEffect(()=>{
+    if(!session?.user?.id||!pendingChannelInvite||channelBusy)return;
+    const inviteCode=pendingChannelInvite;
+    setPendingChannelInvite(null);
+    setTab('Channels');
+    void joinChannelByInvite(inviteCode,false);
+  },[session?.user?.id,pendingChannelInvite,channelBusy,joinChannelByInvite]);
+
   const followPublicChannel=async(channel:any)=>{
     if(!channel?.conversation_id||channelBusy)return;
     setChannelBusy(true);
@@ -2329,7 +2351,7 @@ function GuftinApp() {
 
   const shareChannelInvite=async(channel:any)=>{
     if(!channel?.invite_code)return;
-    const link=Linking.createURL('channel/'+channel.invite_code);
+    const link='kingchat://channel/'+encodeURIComponent(channel.invite_code);
     try{await Share.share({message:'Follow '+(channel.title||'this Guftin channel')+' on Guftin:\n'+link});}
     catch(error:any){Alert.alert('Could not share invite',error?.message||'Invite code: '+channel.invite_code);}
   };
@@ -3749,7 +3771,7 @@ function GuftinApp() {
       <StatusBar barStyle="dark-content"/>
       <ScrollView contentContainerStyle={{flexGrow:1,justifyContent:'center'}}>
         <View style={{alignItems:'center',marginBottom:34}}>
-          <Avatar label="K" color={C.green} size={78}/>
+          <BrandLogo size={78}/>
           <Heading>{otpPurpose==='recovery'?'Reset your password':'Verify your email'}</Heading>
           <Text style={{color:C.muted,marginTop:10,textAlign:'center',lineHeight:22}}>We sent a 6-digit {otpPurpose==='recovery'?'password reset':'verification'} code to</Text>
           <Text style={{color:C.ink,fontWeight:'800',marginTop:4}}>{email}</Text>
@@ -3774,7 +3796,7 @@ function GuftinApp() {
       <StatusBar barStyle="dark-content"/>
       <ScrollView contentContainerStyle={{flexGrow:1,justifyContent:'center'}}>
         <View style={{alignItems:'center',marginBottom:34}}>
-          <Avatar label="K" color={C.green} size={78}/>
+          <BrandLogo size={78}/>
           <Heading>Guftin</Heading>
           <Text style={{color:C.muted,marginTop:8}}>Your world. Your people. One place.</Text>
         </View>
@@ -3804,7 +3826,7 @@ function GuftinApp() {
   if(!profile?.username){
     return <SafeAreaView style={{flex:1,backgroundColor:C.paper,padding:24,justifyContent:'center'}}>
       <StatusBar barStyle="dark-content"/>
-      <View style={{alignItems:'center',marginBottom:28}}><Avatar label="K" color={C.green} size={70}/><Heading>Set your Guftin ID</Heading></View>
+      <View style={{alignItems:'center',marginBottom:28}}><BrandLogo size={70}/><Heading>Set your Guftin ID</Heading></View>
       <Text style={{fontSize:22,fontWeight:'900',color:C.ink,marginBottom:8}}>Complete your profile</Text>
       <Text style={{color:C.muted,lineHeight:20,marginBottom:18}}>Choose a username that people can search to find and add you.</Text>
       <TextInput value={profileName} onChangeText={setProfileName} placeholder="Your display name" autoCapitalize="words" style={{backgroundColor:C.white,borderRadius:15,padding:16,marginBottom:10,color:C.ink}}/>
@@ -3821,7 +3843,7 @@ function GuftinApp() {
       <StatusBar barStyle="dark-content"/>
       <ScrollView contentContainerStyle={{flexGrow:1,justifyContent:'center',paddingVertical:28}}>
         <View style={{alignItems:'center',marginBottom:26}}>
-          <Avatar label="K" color={C.green} size={70}/>
+          <BrandLogo size={70}/>
           <Heading>Guftin setup</Heading>
           <Text style={{color:C.muted,fontSize:12,marginTop:7,textAlign:'center'}}>Set your device permissions</Text>
         </View>
@@ -4044,7 +4066,7 @@ function GuftinApp() {
               <Text style={{fontSize:22,color:C.green,fontWeight:'700'}}>›</Text>
             </Btn>
           </View>}
-          ListEmptyComponent={<View style={{alignItems:'center',padding:35,marginTop:34}}><Avatar label="K" color={C.green} size={64}/><Text style={{fontSize:17,fontWeight:'900',color:C.ink,marginTop:15}}>No conversations yet</Text><Text style={{color:C.muted,textAlign:'center',marginTop:7,lineHeight:20}}>Add a contact above using their unique username. Your chat appears when you send the first message or start a call.</Text></View>}
+          ListEmptyComponent={<View style={{alignItems:'center',padding:35,marginTop:34}}><BrandLogo size={64}/><Text style={{fontSize:17,fontWeight:'900',color:C.ink,marginTop:15}}>No conversations yet</Text><Text style={{color:C.muted,textAlign:'center',marginTop:7,lineHeight:20}}>Add a contact above using their unique username. Your chat appears when you send the first message or start a call.</Text></View>}
           renderItem={({item})=><Btn onPress={()=>openChat(item)} onLongPress={()=>Alert.alert('Chat options',item.name,[{text:'Delete chat for me',style:'destructive',onPress:()=>void hideChat(item)},{text:'Cancel',style:'cancel'}])} style={{flexDirection:'row',alignItems:'center',padding:10,gap:12,borderRadius:17}}>
             <Avatar label={item.avatar} color={item.color} online={item.online} uri={item.avatarUrl}/>
             <View style={{flex:1,borderBottomWidth:1,borderColor:C.line,paddingBottom:14,paddingTop:2}}>
