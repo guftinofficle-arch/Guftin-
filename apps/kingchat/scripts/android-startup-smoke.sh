@@ -32,8 +32,8 @@ if [[ -z "$PID" ]]; then
   exit 1
 fi
 
-if grep -E -q 'FATAL EXCEPTION|Fatal signal [0-9]+|TurboModuleInteropUtils|Exception in HostObject' "$LOG"; then
-  echo "::error::Android reported a fatal exception or native-module startup error. Inspect startup-smoke-logcat.txt."
+if grep -E -q 'FATAL EXCEPTION|Fatal signal [0-9]+|TurboModuleInteropUtils|Exception in HostObject|Unable to load script|Make sure you.re running Metro|ReactNativeJS.*(Error|error|Invariant Violation)' "$LOG"; then
+  echo "::error::Android reported a fatal exception, missing JavaScript bundle, or React Native startup error. Inspect startup-smoke-logcat.txt."
   grep -E -i 'FATAL EXCEPTION|Fatal signal|TurboModuleInteropUtils|Exception in HostObject|UnsatisfiedLinkError|AndroidRuntime|ReactNativeJS|SoLoader|LiveKit' "$LOG" | tail -n 160 || true
   exit 1
 fi
