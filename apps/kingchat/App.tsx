@@ -842,7 +842,8 @@ function GuftinApp() {
   const flushPendingMediaRef=useRef<(()=>Promise<void>)|null>(null);
   const flushingPendingMessages=useRef(false);
   const flushingPendingMedia=useRef(false);
-  const onlineRef=useRef(true);
+  const onlineRef=useRef(false);
+  const [isOnline,setIsOnline]=useState(true);
   useEffect(()=>{
     void registerIncomingCallBackgroundTask();
   },[]);
@@ -1171,6 +1172,7 @@ function GuftinApp() {
         setProfileReady(true);
       }
     }catch{ /* Keep the app usable if the local profile cache is unreadable. */ }
+    if(!onlineRef.current){setProfileReady(true);return;}
     const {data,error}=await supabase.from('kc_profiles')
       .select('id,display_name,username,about,avatar_url,is_online')
       .eq('id',session.user.id).maybeSingle();
@@ -1197,6 +1199,7 @@ function GuftinApp() {
       const cached=await AsyncStorage.getItem(inboxCacheKey);
       if(cached){const parsed=JSON.parse(cached);if(Array.isArray(parsed)){const safeCached=(parsed as Chat[]).filter(chat=>chat.kind!=='channel'&&(chat.kind!=='direct'||chat.hasConversationActivity===true||chat.hasCallActivity===true||chat.hasPendingActivity===true));setChats(sortInboxChats(safeCached));setLoading(false);}}
     }catch{ /* Ignore a damaged local inbox cache and try the server. */ }
+    if(!onlineRef.current){setLoading(false);return;}
     try{
       const {data:memberships,error}=await supabase.from('kc_conversation_members')
         .select('conversation_id,joined_at,last_read_at,hidden_at,conversation:kc_conversations!inner(id,kind,title,photo_url,updated_at)')
@@ -1923,10 +1926,17 @@ function GuftinApp() {
     let mounted=true;
     const applyNetworkState=(state:any)=>{
       const online=state?.isConnected===true&&state?.isInternetReachable!==false;
+      const wasOnline=onlineRef.current;
       onlineRef.current=online;
+      if(mounted)setIsOnline(online);
       if(online&&mounted){
         void flushPendingMessagesRef.current?.();
         void flushPendingMediaRef.current?.();
+        if(!wasOnline){
+          void loadProfile();
+          void loadInbox();
+          if(activeConversationIdRef.current)void loadMessagesRef.current?.(activeConversationIdRef.current);
+        }
       }
     };
     void NetInfo.fetch().then(applyNetworkState).catch(()=>{});
@@ -1935,7 +1945,7 @@ function GuftinApp() {
       mounted=false;
       unsubscribe();
     };
-  },[]);
+  },[loadProfile,loadInbox]);
 
   useEffect(()=>{
     let mounted=true;
@@ -2076,6 +2086,7 @@ function GuftinApp() {
         return {...prev,[conversationId]:merged.sort((a,b)=>new Date(a.created_at).getTime()-new Date(b.created_at).getTime())};
       });
     }
+    if(!onlineRef.current)return;
     const {data,error}=await supabase.from('kc_messages')
       .select('id,conversation_id,sender_id,body,message_type,attachment_url,created_at,deleted_at')
       .eq('conversation_id',conversationId)
@@ -2472,6 +2483,7 @@ function GuftinApp() {
   const sendMessage=async()=>{
     const body=draft.trim();
     if(!body||!active||!session||sending||clearingConversationIds.current.has(active.id))return;
+    if(!onlineRef.current){Alert.alert('You are offline','Messages cannot be sent until your internet connection returns.');return;}
     if(active.kind==='channel'){
       if(!active.isChannelOwner){Alert.alert('Channel is read-only','Only the channel owner can publish updates.');return;}
       setSending(true);
@@ -3004,6 +3016,7 @@ function GuftinApp() {
   };
 
   const sendMedia=()=>{
+    if(!onlineRef.current){Alert.alert('You are offline','Media cannot be sent until your internet connection returns.');return;}
     if(active?.kind==='channel'){
       if(!active.isChannelOwner){Alert.alert('Channel is read-only','Only the channel owner can publish media.');return;}
       void sendChannelMedia();return;
@@ -3945,6 +3958,7 @@ function GuftinApp() {
           {text:'Cancel',style:'cancel'}
         ])} style={{width:36,height:52,borderRadius:13,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:26,fontWeight:'900',color:C.ink}}>⋮</Text></Btn>
       </View>
+      {!isOnline?<View style={{backgroundColor:'#fff1d6',paddingHorizontal:14,paddingVertical:8}}><Text style={{color:'#815500',fontSize:11,fontWeight:'800',textAlign:'center'}}>You are offline · Showing saved messages. Sending is unavailable.</Text></View>:null}
       <FlatList ref={chatMessagesListRef} data={list} keyExtractor={m=>m.id} keyboardShouldPersistTaps="handled" style={{flex:1}} contentContainerStyle={{padding:18,gap:12,flexGrow:1,justifyContent:list.length?'flex-end':'center'}}
         ListEmptyComponent={<Text style={{textAlign:'center',color:C.muted}}>No messages yet. Send the first message.</Text>}
         renderItem={({item})=><TouchableOpacity activeOpacity={1} onLongPress={active.kind==='channel'&&!active.isChannelOwner?undefined:()=>deleteMessage(item)} delayLongPress={420} style={{alignSelf:item.mine?'flex-end':'flex-start',maxWidth:'84%',backgroundColor:item.mine?'#dff4e8':C.white,padding:13,borderRadius:17,borderTopRightRadius:item.mine?5:17,borderTopLeftRadius:item.mine?17:5}}>
@@ -3967,8 +3981,8 @@ function GuftinApp() {
           :<>
             <Btn disabled={mediaPreparing} onPress={sendMedia} style={{width:42,height:42,borderRadius:15,backgroundColor:C.paper,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:23,color:C.green}}>＋</Text></Btn>
             {active.kind!=='channel'?<Btn disabled={sending||recordingBusy} onPress={recording?stopVoiceRecording:startVoiceRecording} style={{width:42,height:42,borderRadius:15,backgroundColor:recording?'#fde8e8':C.paper,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:18,color:recording?C.red:C.green}}>{recording?'■':'🎙'}</Text></Btn>:null}
-            <TextInput value={draft} onChangeText={setDraft} onFocus={()=>requestAnimationFrame(()=>chatMessagesListRef.current?.scrollToEnd({animated:true}))} placeholder={active.kind==='channel'?'Write a channel update…':recording?'Recording… tap ■ to send':'Write a message...'} multiline maxLength={4000} style={{flex:1,minHeight:46,maxHeight:110,backgroundColor:C.paper,borderRadius:16,paddingHorizontal:15,paddingVertical:12,color:C.ink,textAlignVertical:'center'}}/>
-            <Btn disabled={!draft.trim()||sending} onPress={sendMessage} style={{backgroundColor:C.green,width:46,height:46,borderRadius:16,alignItems:'center',justifyContent:'center'}}>
+            <TextInput editable={isOnline} value={draft} onChangeText={setDraft} onFocus={()=>requestAnimationFrame(()=>chatMessagesListRef.current?.scrollToEnd({animated:true}))} placeholder={!isOnline?'Offline · messages unavailable':active.kind==='channel'?'Write a channel update…':recording?'Recording… tap ■ to send':'Write a message...'} multiline maxLength={4000} style={{flex:1,minHeight:46,maxHeight:110,backgroundColor:C.paper,borderRadius:16,paddingHorizontal:15,paddingVertical:12,color:C.ink,textAlignVertical:'center'}}/>
+            <Btn disabled={!isOnline||!draft.trim()||sending} onPress={sendMessage} style={{backgroundColor:C.green,width:46,height:46,borderRadius:16,alignItems:'center',justifyContent:'center'}}>
               {sending?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontSize:20}}>➤</Text>}
             </Btn>
           </>}
@@ -4053,6 +4067,7 @@ function GuftinApp() {
         {tab==='Channels'?<Btn onPress={()=>setChannelCreateOpen(true)} style={{backgroundColor:C.green,width:42,height:42,borderRadius:15,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:24,color:'#fff'}}>＋</Text></Btn>:null}
       </View>
     </View>
+    {!isOnline?<View style={{backgroundColor:'#fff1d6',paddingHorizontal:16,paddingVertical:8}}><Text style={{color:'#815500',fontSize:11,fontWeight:'800',textAlign:'center'}}>Offline mode · Saved Guftin information is available. Messages and live updates need internet.</Text></View>:null}
     {tab==='Chats'?<>
       {searching?<TextInput value={search} onChangeText={setSearch} placeholder="Search your conversations..." autoFocus style={{marginHorizontal:20,marginBottom:12,padding:14,backgroundColor:C.paper,borderRadius:14,color:C.ink}}/>:null}
       {loading&&chats.length===0?<View style={{flex:1,alignItems:'center',justifyContent:'center'}}><ActivityIndicator color={C.green}/><Text style={{color:C.muted,marginTop:10}}>Loading your conversations…</Text></View>:
