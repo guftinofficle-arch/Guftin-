@@ -107,7 +107,7 @@ begin
     from public.kc_conversation_members m
     where m.conversation_id = p_conversation_id and m.user_id = auth.uid();
 
-  if v_conversation.created_by <> auth.uid()
+  if v_conversation.created_by is distinct from auth.uid()
      and coalesce(v_role, '') not in ('admin','owner') then
     raise exception 'Only this group creator or group admins can edit its branding'
       using errcode = '42501';
@@ -152,6 +152,28 @@ end;
 $$;
 revoke all on function public.kc_ensure_official_channel_membership() from public, anon;
 grant execute on function public.kc_ensure_official_channel_membership() to authenticated;
+
+
+-- Group-logo objects are uploaded under <uploader>/<conversation-id>/group-logo/.
+-- Only members of that specific group may read the logo; uploads remain owner-scoped.
+create policy "group members read group branding media" on storage.objects
+for select to authenticated
+using (
+  bucket_id = 'chat-media'
+  and (storage.foldername(name))[3] = 'group-logo'
+  and case
+    when (storage.foldername(name))[2] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12} to this private allowlist
+-- through a trusted service-role migration/console operation. Never expose this table
+-- or a service-role key to the mobile application.
+
+    then exists (
+      select 1 from public.kc_conversation_members m
+      where m.conversation_id = ((storage.foldername(name))[2])::uuid
+        and m.user_id = auth.uid()
+    )
+    else false
+  end
+);
 
 -- Add the official Guftin administrator's verified email to this private allowlist
 -- through a trusted service-role migration/console operation. Never expose this table
