@@ -2158,7 +2158,17 @@ function GuftinApp() {
     setPinModalVisible(false);setPinEntry('');setPinConfirm('');
     if(scope==='chat'&&pinTargetChat){setActive(pinTargetChat);setPeerLastReadAt(null);}
   };
-  const removePinLock=async()=>{\n    const scope=pinMode==='unlock-app'?'app':'chat';\n    const key=pinStorageKey(scope,scope==='chat'?pinTargetChat?.id:undefined);\n    const stored=await SecureStore.getItemAsync(key);\n    if(!stored||stored!==await hashPin(pinEntry)){Alert.alert('Incorrect PIN','Enter your current PIN to turn off this lock.');return;}\n    await SecureStore.deleteItemAsync(key);\n    if(scope==='app'){await AsyncStorage.removeItem('guftin-app-lock-enabled');setAppLockEnabled(false);setAppLocked(false);}\n    setPinModalVisible(false);setPinEntry('');\n    if(scope==='chat'&&pinTargetChat){setActive(pinTargetChat);setPeerLastReadAt(null);}\n  };\n  const unlockPin=async()=>{
+  const removePinLock=async()=>{
+    const scope=pinMode==='unlock-app'?'app':'chat';
+    const key=pinStorageKey(scope,scope==='chat'?pinTargetChat?.id:undefined);
+    const stored=await SecureStore.getItemAsync(key);
+    if(!stored||stored!==await hashPin(pinEntry)){Alert.alert('Incorrect PIN','Enter your current PIN to turn off this lock.');return;}
+    await SecureStore.deleteItemAsync(key);
+    if(scope==='app'){await AsyncStorage.removeItem('guftin-app-lock-enabled');setAppLockEnabled(false);setAppLocked(false);}
+    setPinModalVisible(false);setPinEntry('');
+    if(scope==='chat'&&pinTargetChat){setActive(pinTargetChat);setPeerLastReadAt(null);}
+  };
+  const unlockPin=async()=>{
     const scope=pinMode==='unlock-app'?'app':'chat';
     const key=pinStorageKey(scope,scope==='chat'?pinTargetChat?.id:undefined);
     const stored=await SecureStore.getItemAsync(key);
@@ -2242,7 +2252,16 @@ function GuftinApp() {
     }finally{setChannelsLoading(false);}
   },[session,getSignedMediaUrl]);
 
-  useEffect(()=>{if(session&&tab==='Channels')void loadChannels();},[session?.user?.id,tab,loadChannels]);\n  useEffect(()=>{\n    if(!session?.user?.id)return;\n    let live=true;\n    void supabase.rpc('kc_ensure_official_channel_membership').then(({error}:any)=>{\n      if(error){console.warn('Official Guftin channel auto-join:',error.message);return;}\n      if(live&&activeTabRef.current==='Channels')void loadChannels();\n    });\n    return()=>{live=false;};\n  },[session?.user?.id,loadChannels]);
+  useEffect(()=>{if(session&&tab==='Channels')void loadChannels();},[session?.user?.id,tab,loadChannels]);
+  useEffect(()=>{
+    if(!session?.user?.id)return;
+    let live=true;
+    void supabase.rpc('kc_ensure_official_channel_membership').then(({error}:any)=>{
+      if(error){console.warn('Official Guftin channel auto-join:',error.message);return;}
+      if(live&&activeTabRef.current==='Channels')void loadChannels();
+    });
+    return()=>{live=false;};
+  },[session?.user?.id,loadChannels]);
 
   const openChannelEditor=(channel:any)=>{
     const target=channel||channels.find(row=>row.conversation_id===active?.id)||active;
