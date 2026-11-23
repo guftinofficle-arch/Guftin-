@@ -46,3 +46,27 @@ fi
 
 echo "Guftin remained alive for 60 seconds and its launcher activity stayed resumed (PID $PID)."
 echo "$RESUMED_ACTIVITY"
+
+# Verify a true cold launch while the emulator has no network connection.
+adb shell svc wifi disable || true
+adb shell svc data disable || true
+sleep 3
+adb shell am force-stop com.guftin.app
+adb logcat -c
+timeout 30s adb shell monkey -p com.guftin.app -c android.intent.category.LAUNCHER 1
+sleep 20
+capture_logs
+OFFLINE_PID="$(adb shell pidof -s com.guftin.app | tr -d '\r' || true)"
+OFFLINE_ACTIVITY="$(adb shell dumpsys activity activities | grep -E 'mResumedActivity|topResumedActivity' | grep -F 'com.guftin.app' || true)"
+if [[ -z "$OFFLINE_PID" || -z "$OFFLINE_ACTIVITY" ]]; then
+  echo "::error::Guftin did not remain open after a cold launch with Wi-Fi and mobile data disabled."
+  grep -E -i 'FATAL EXCEPTION|Fatal signal|AndroidRuntime|ReactNativeJS|Unable to load script' "$LOG" | tail -n 160 || true
+  exit 1
+fi
+if grep -E -q 'FATAL EXCEPTION|Fatal signal [0-9]+|Unable to load script|ReactNativeJS.*(Error|error|Invariant Violation)' "$LOG"; then
+  echo "::error::Guftin reported a fatal React Native error during offline cold launch."
+  grep -E -i 'FATAL EXCEPTION|Fatal signal|AndroidRuntime|ReactNativeJS|Unable to load script' "$LOG" | tail -n 160 || true
+  exit 1
+fi
+echo "Guftin cold-launched offline and stayed in the foreground (PID $OFFLINE_PID)."
+echo "$OFFLINE_ACTIVITY"
