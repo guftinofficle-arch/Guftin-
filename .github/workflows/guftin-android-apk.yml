@@ -7,6 +7,7 @@ on:
     branches:
       - release/guftin-v1.5.8-no-email-verification
       - release/guftin-v1.5.7-no-email-verification
+      - feat/guftin-group-admin-verification-pin-channel
     paths:
       - "apps/kingchat/**"
       - ".github/workflows/guftin-android-apk.yml"
