@@ -101,18 +101,18 @@ jobs:
         working-directory: apps/kingchat
         run: npx expo prebuild --platform android --no-install
 
-      - name: Compile Android debug APK
+      - name: Compile self-contained Android release APK
         working-directory: apps/kingchat/android
         shell: bash
         run: |
           chmod +x ./gradlew
-          ./gradlew --no-daemon --stacktrace assembleDebug
+          ./gradlew --no-daemon --stacktrace assembleRelease
 
       - name: Verify APK output and package metadata
         working-directory: apps/kingchat
         shell: bash
         run: |
-          APK="android/app/build/outputs/apk/debug/app-debug.apk"
+          APK="android/app/build/outputs/apk/release/app-release.apk"
           test -s "$APK" || { echo "::error::APK output was not created"; exit 1; }
           ls -lh "$APK"
           if command -v apkanalyzer >/dev/null 2>&1; then
@@ -130,7 +130,7 @@ jobs:
       - name: Install and smoke-test APK on Android 36 emulator
         uses: reactivecircus/android-emulator-runner@v2
         env:
-          APK_PATH: android/app/build/outputs/apk/debug/app-debug.apk
+          APK_PATH: android/app/build/outputs/apk/release/app-release.apk
         with:
           working-directory: apps/kingchat
           api-level: 36
@@ -154,6 +154,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Guftin-Android-QA-${{ github.run_number }}
-          path: apps/kingchat/android/app/build/outputs/apk/debug/app-debug.apk
+          path: apps/kingchat/android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
           retention-days: 14
