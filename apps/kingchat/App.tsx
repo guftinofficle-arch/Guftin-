@@ -2352,7 +2352,7 @@ function GuftinApp() {
 
   const shareChannelInvite=async(channel:any)=>{
     if(!channel?.invite_code)return;
-    const link='kingchat://channel/'+encodeURIComponent(channel.invite_code);
+    const link='https://guftin-official.pages.dev/channel/'+encodeURIComponent(channel.invite_code);
     try{await Share.share({message:'Follow '+(channel.title||'this Guftin channel')+' on Guftin:\n'+link});}
     catch(error:any){Alert.alert('Could not share invite',error?.message||'Invite code: '+channel.invite_code);}
   };
