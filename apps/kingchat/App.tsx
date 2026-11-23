@@ -1128,6 +1128,15 @@ function GuftinApp() {
         ToastAndroid.show('End the call with the in-app button first.',ToastAndroid.SHORT);
         return true;
       }
+      if(pinModalVisible){
+        if(pinMode==='unlock-app'||pinMode==='unlock-chat'){
+          ToastAndroid.show('Enter your PIN to unlock Guftin.',ToastAndroid.SHORT);
+          return true;
+        }
+        setPinModalVisible(false);setPinEntry('');setPinConfirm('');
+        return true;
+      }
+      if(permissionSetupVisible){setPermissionSetupVisible(false);return true;}
       if(statusComposer){setStatusComposer(false);return true;}
       if(addOpen){setAddOpen(false);return true;}
       if(settingsOpen){setSettingsOpen(false);return true;}
@@ -1139,7 +1148,7 @@ function GuftinApp() {
     };
     const subscription=BackHandler.addEventListener('hardwareBackPress',onHardwareBack);
     return ()=>subscription.remove();
-  },[liveCall,statusComposer,addOpen,settingsOpen,active,searching,tab]);
+  },[liveCall,pinModalVisible,pinMode,permissionSetupVisible,statusComposer,addOpen,settingsOpen,active,searching,tab]);
 
   useEffect(()=>{
     const userId=session?.user?.id;
@@ -4261,7 +4270,10 @@ function GuftinApp() {
     </Modal>
     <Modal visible={pinModalVisible} transparent animationType="fade" onRequestClose={()=>{if(pinMode==='unlock-app'||pinMode==='unlock-chat')return;setPinModalVisible(false);}}>
       <View style={{flex:1,backgroundColor:'#0009',justifyContent:'center',padding:24}}><View style={{backgroundColor:C.white,borderRadius:22,padding:22,gap:12}}>
-        <Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>{pinMode==='unlock-chat'?'Unlock Chat':pinMode==='unlock-app'?'Unlock Guftin':'Create PIN'}</Text>
+        <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',gap:12}}>
+          <Text style={{fontSize:20,fontWeight:'900',color:C.ink,flex:1}}>{pinMode==='unlock-chat'?'Unlock Chat':pinMode==='unlock-app'?'Unlock Guftin':'Create PIN'}</Text>
+          {(pinMode==='unlock-app'||pinMode==='unlock-chat')?null:<Btn onPress={()=>{setPinModalVisible(false);setPinEntry('');setPinConfirm('');}} style={{padding:6,minWidth:34,alignItems:'center'}}><Text style={{fontSize:22,color:C.muted,fontWeight:'900'}}>×</Text></Btn>}
+        </View>
         <Text style={{fontSize:12,color:C.muted}}>{pinMode==='unlock-chat'?'Enter this chat’s PIN.':pinMode==='unlock-app'?'Enter your app PIN.':'Choose a 4–8 digit PIN and confirm it.'}</Text>
         <TextInput value={pinEntry} onChangeText={v=>setPinEntry(v.replace(/\D/g,'').slice(0,8))} keyboardType="number-pad" secureTextEntry placeholder="PIN" style={{borderWidth:1,borderColor:C.line,borderRadius:12,padding:14,color:C.ink,fontSize:18,letterSpacing:5}} />
         {pinMode==='set-chat'||pinMode==='set-app'?<TextInput value={pinConfirm} onChangeText={v=>setPinConfirm(v.replace(/\\D/g,'').slice(0,8))} keyboardType="number-pad" secureTextEntry placeholder="Confirm PIN" style={{borderWidth:1,borderColor:C.line,borderRadius:12,padding:14,color:C.ink,fontSize:18,letterSpacing:5}}/>:null}
@@ -4273,7 +4285,10 @@ function GuftinApp() {
 
     <Modal visible={settingsOpen} transparent animationType="slide" onRequestClose={()=>setSettingsOpen(false)}>
       <View style={{flex:1,backgroundColor:'#0008',justifyContent:'flex-end'}}><View style={{backgroundColor:C.white,borderTopLeftRadius:24,borderTopRightRadius:24,padding:22}}>
-        <Text style={{fontSize:21,fontWeight:'900',color:C.ink}}>Guftin settings</Text>
+        <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',gap:12}}>
+          <Text style={{fontSize:21,fontWeight:'900',color:C.ink}}>Guftin settings</Text>
+          <Btn onPress={()=>setSettingsOpen(false)} style={{padding:4,minWidth:34,alignItems:'center'}}><Text style={{fontSize:24,color:C.muted,fontWeight:'900'}}>×</Text></Btn>
+        </View>
         <Text style={{color:C.muted,fontSize:12,marginTop:5,marginBottom:15}}>Privacy and connection preferences</Text>
         <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingVertical:12}}><View style={{flex:1,paddingRight:12}}><Text style={{color:C.ink,fontWeight:'800'}}>App Lock</Text><Text style={{color:C.muted,fontSize:11}}>Require a PIN to open Guftin</Text></View><Switch value={appLockEnabled} onValueChange={async enabled=>{if(enabled){startPinFlow('set-app');}else{startPinFlow('unlock-app');}}} trackColor={{true:C.green}}/></View>
         <Btn onPress={()=>{setSettingsOpen(false);setPermissionSetupStep(0);setPermissionSetupAutoSave(mediaAutoDownload);setPermissionSetupFullScreenOpened(false);setPermissionSetupNotice('');setPermissionSetupVisible(true);}} style={{backgroundColor:C.mint,padding:12,borderRadius:13,marginBottom:7}}>
