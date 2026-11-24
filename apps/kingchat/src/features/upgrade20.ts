@@ -34,7 +34,7 @@ export const upgrade20 = {
   },
   async registerPushDevice(token: string, platform: 'ios' | 'android' | 'web') {
     const userId = await requireUserId();
-    return unwrap(await db.from('kc_device_tokens').upsert({ user_id: userId, token, platform }, { onConflict: 'user_id,token' }).select().maybeSingle());
+    return unwrap(await db.from('kc_device_tokens').upsert({ user_id: userId, token, platform }, { onConflict: 'token' }).select().maybeSingle());
   },
 
   // 5: privacy preferences. Per-person exceptions remain in their dedicated RLS table.
