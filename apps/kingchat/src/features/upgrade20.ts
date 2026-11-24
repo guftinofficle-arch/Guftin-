@@ -182,7 +182,7 @@ export const upgrade20 = {
   },
   async createQuickReply(shortcut: string, replyText: string) {
     const userId = await requireUserId();
-    const key = shortcut.trim().replace(/^\\//, '').slice(0, 32);
+    const key = shortcut.trim().replace(/^\\/+/, '').slice(0, 32);
     const value = replyText.trim().slice(0, 2000);
     if (!key || !value) throw new Error('Shortcut and reply text are required.');
     return unwrap(await db.from('kc_business_quick_replies').insert({ user_id: userId, shortcut: key, reply_text: value }).select().single());
