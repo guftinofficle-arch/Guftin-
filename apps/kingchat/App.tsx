@@ -3259,6 +3259,7 @@ function GuftinApp() {
         return;
       }
       const chatToSend=await ensureActiveDirectConversation(active);
+      await assertDirectConversationAllowed(chatToSend.id);
       const conversationId=chatToSend.id;
       const id=ExpoCrypto.randomUUID();
       const localId='pending:'+id;
@@ -3342,6 +3343,7 @@ function GuftinApp() {
         return;
       }
       const chatToSend=await ensureActiveDirectConversation(active);
+      await assertDirectConversationAllowed(chatToSend.id);
       const conversationId=chatToSend.id;
       const id=ExpoCrypto.randomUUID();
       const localId='pending:'+id;
@@ -5450,6 +5452,7 @@ export default function App(){
 
     try{
       const chatToSend=await ensureActiveDirectConversation(active);
+      await assertDirectConversationAllowed(chatToSend.id);
       const conversationId=chatToSend.id;
       const {data,error}=await supabase.from('kc_messages').insert({
         conversation_id:conversationId,sender_id:session.user.id,body:encrypted.body,
@@ -5526,6 +5529,7 @@ export default function App(){
         return;
       }
       const chatToSend=await ensureActiveDirectConversation(active);
+      await assertDirectConversationAllowed(chatToSend.id);
       const conversationId=chatToSend.id;
       const id=ExpoCrypto.randomUUID();
       const localId='pending:'+id;
@@ -5609,6 +5613,7 @@ export default function App(){
         return;
       }
       const chatToSend=await ensureActiveDirectConversation(active);
+      await assertDirectConversationAllowed(chatToSend.id);
       const conversationId=chatToSend.id;
       const id=ExpoCrypto.randomUUID();
       const localId='pending:'+id;
