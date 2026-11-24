@@ -6,7 +6,7 @@ create table if not exists private.kc_optional_phone_numbers (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint kc_optional_phone_numbers_e164
-    check (phone_number ~ '^\\+[1-9][0-9]{7,14}$')
+    check (phone_number ~ '^\+[1-9][0-9]{7,14}$')
 );
 
 create index if not exists kc_optional_phone_numbers_phone_idx
@@ -44,7 +44,7 @@ begin
   end if;
 
   v_phone := pg_catalog.regexp_replace(pg_catalog.btrim(p_phone), '[^0-9+]', '', 'g');
-  if v_phone !~ '^\\+[1-9][0-9]{7,14}$' then
+  if v_phone !~ '^\+[1-9][0-9]{7,14}$' then
     raise exception 'Enter a valid international mobile number';
   end if;
 
@@ -103,7 +103,7 @@ begin
     select pg_catalog.regexp_replace(pg_catalog.btrim(value), '[^0-9+]', '', 'g') as phone
     from pg_catalog.unnest(p_phone_numbers) as supplied(value)
   ) as normalized
-  where normalized.phone ~ '^\\+[1-9][0-9]{7,14}$';
+  where normalized.phone ~ '^\+[1-9][0-9]{7,14}$';
 
   if v_numbers is null or cardinality(v_numbers) = 0 then
     raise exception 'No valid international phone numbers were found';
