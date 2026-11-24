@@ -50,7 +50,7 @@ module.exports = ({ config }) => ({
   },
   name: "Guftin",
   slug: "guftin-",
-  version: "1.6.1",
+  version: "1.6.2",
   description: "Guftin is a messaging and channel app. For complaints, feedback, feature requests or support, contact Guftin Official at guftinofficle@gmail.com.",
   orientation: "portrait",
   userInterfaceStyle: "light",
@@ -60,7 +60,7 @@ module.exports = ({ config }) => ({
   android: {
     ...config.android,
     package: "com.guftin.app",
-    versionCode: 47,
+    versionCode: 48,
     softwareKeyboardLayoutMode: "resize",
     // Google Mobile Ads 16.0.3 requires the New Architecture; CallKeep overloads are patched during CI install.
     newArchEnabled: true,
@@ -117,7 +117,7 @@ module.exports = ({ config }) => ({
   ios: {
     ...config.ios,
     bundleIdentifier: "com.guftin.app",
-    buildNumber: "17",
+    buildNumber: "18",
     icon: "./assets/guftin-icon.png",
     supportsTablet: true,
     infoPlist: {
