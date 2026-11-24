@@ -2149,7 +2149,8 @@ function GuftinApp() {
     const options:any[]=[];
     if(active?.kind!=='channel'&&item.mine&&item.message_type==='text'&&!item.deleted_at&&!item.pending&&Date.now()-new Date(item.created_at).getTime()<=15*60*1000)options.push({text:'Edit message',onPress:()=>startEditMessage(item)});
     if(active?.kind!=='channel'&&item.mine&&item.edited_at)options.push({text:'View edit history',onPress:()=>void loadMessageEditHistory(item)});
-    options.push({text:'Save to Saved Items',onPress:()=>void (async()=>{const {error}=await supabase.from('kc_saved_items').upsert({user_id:session.user.id,message_id:item.id,conversation_id:item.conversation_id},{onConflict:'user_id,message_id'});if(error){Alert.alert('Could not save message',error.message);return;}Alert.alert('Saved','This message is now in Saved Items.');})()},{text:'Delete for me',onPress:()=>void hideForMe()}];
+    options.push({text:'Save to Saved Items',onPress:()=>void (async()=>{const {error}=await supabase.from('kc_saved_items').upsert({user_id:session.user.id,message_id:item.id,conversation_id:item.conversation_id},{onConflict:'user_id,message_id'});if(error){Alert.alert('Could not save message',error.message);return;}Alert.alert('Saved','This message is now in Saved Items.');})()});
+    options.push({text:'Delete for me',onPress:()=>void hideForMe()});
     if(item.mine&&!item.deleted_at)options.push({text:'Delete for everyone',style:'destructive',onPress:()=>void deleteForEveryone()});
     if(!item.mine&&item.sender_id){
       options.push({text:'Report message',style:'destructive',onPress:()=>{
