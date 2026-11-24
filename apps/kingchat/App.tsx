@@ -912,6 +912,9 @@ function GuftinApp() {
   const [profilePhotoVisibility,setProfilePhotoVisibility]=useState<'everyone'|'contacts'|'nobody'|'selected'>('everyone');
   const [aboutVisibility,setAboutVisibility]=useState<'everyone'|'contacts'|'nobody'|'selected'>('everyone');
   const [privacySettingsLoaded,setPrivacySettingsLoaded]=useState(false);
+  const [deviceManagerOpen,setDeviceManagerOpen]=useState(false);
+  const [registeredDevices,setRegisteredDevices]=useState<any[]>([]);
+  const [devicesLoading,setDevicesLoading]=useState(false);
   const [mediaAutoDownload,setMediaAutoDownload]=useState(false);
   const [onlineVisibility,setOnlineVisibility]=useState(true);
   const [autoSync,setAutoSync]=useState(true);
@@ -1816,6 +1819,33 @@ function GuftinApp() {
     const {error}=await supabase.from('kc_saved_items').delete().eq('id',id).eq('user_id',session.user.id);
     if(error){Alert.alert('Could not remove saved item',error.message);return;}
     setSavedItems((items:any[])=>items.filter(item=>item.id!==id));
+  };
+
+  const loadRegisteredDevices=async()=>{
+    if(!session?.user?.id)return;
+    setDevicesLoading(true);
+    try{
+      const {data,error}=await supabase.from('kc_e2ee_devices')
+        .select('id,device_label,platform,created_at,last_active_at,revoked_at')
+        .eq('user_id',session.user.id).order('created_at',{ascending:false}).limit(50);
+      if(error)throw error;
+      setRegisteredDevices(data||[]);
+    }catch(error:any){Alert.alert('Devices unavailable',error?.message||'Could not load registered devices.');}
+    finally{setDevicesLoading(false);}
+  };
+
+  const revokeEncryptionDevice=async(device:any)=>{
+    if(!session?.user?.id||!device?.id||device.id===deviceIdentity?.deviceId)return;
+    Alert.alert('Revoke encryption device?','This device will stop receiving newly encrypted messages. It will not erase its local chat history or remotely sign out its Supabase session.',[
+      {text:'Cancel',style:'cancel'},
+      {text:'Revoke device',style:'destructive',onPress:()=>void (async()=>{
+        const {error}=await supabase.from('kc_e2ee_devices')
+          .update({revoked_at:new Date().toISOString()})
+          .eq('id',device.id).eq('user_id',session.user.id).is('revoked_at',null);
+        if(error){Alert.alert('Device not revoked',error.message);return;}
+        await loadRegisteredDevices();
+      })()}
+    ]);
   };
 
   const loadChatFolders=async()=>{
@@ -4719,6 +4749,24 @@ function GuftinApp() {
       </View></View>
     </Modal>
 
+    <Modal visible={deviceManagerOpen} animationType="slide" onRequestClose={()=>setDeviceManagerOpen(false)}>
+      <SafeAreaView style={{flex:1,backgroundColor:C.paper}}>
+        <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',padding:18,backgroundColor:C.white,borderBottomWidth:1,borderColor:C.line}}>
+          <View><Text style={{fontSize:21,fontWeight:'900',color:C.ink}}>Linked encryption devices</Text><Text style={{fontSize:11,color:C.muted,marginTop:3}}>Devices that can receive new E2EE message keys</Text></View>
+          <Btn onPress={()=>setDeviceManagerOpen(false)} style={{padding:8}}><Text style={{fontSize:24,color:C.ink}}>×</Text></Btn>
+        </View>
+        <ScrollView contentContainerStyle={{padding:16,gap:10}}>
+          {devicesLoading?<ActivityIndicator color={C.green}/>:null}
+          {registeredDevices.map((device:any)=><View key={device.id} style={{backgroundColor:C.white,borderRadius:14,padding:14,borderWidth:1,borderColor:C.line}}>
+            <Text style={{fontWeight:'900',color:C.ink}}>{device.device_label||'Guftin device'} {device.id===deviceIdentity?.deviceId?'· This device':''}</Text>
+            <Text style={{fontSize:11,color:C.muted,marginTop:4}}>{String(device.platform||'unknown').toUpperCase()} · Added {timeLabel(device.created_at)} · Last active {timeLabel(device.last_active_at||device.created_at)}</Text>
+            {device.revoked_at?<Text style={{color:C.red,fontSize:11,fontWeight:'900',marginTop:8}}>Revoked</Text>:device.id===deviceIdentity?.deviceId?<Text style={{color:C.green,fontSize:11,fontWeight:'900',marginTop:8}}>This device is active</Text>:<Btn onPress={()=>void revokeEncryptionDevice(device)} style={{alignSelf:'flex-start',backgroundColor:'#fde8e8',paddingHorizontal:12,paddingVertical:8,borderRadius:9,marginTop:9}}><Text style={{color:C.red,fontWeight:'900',fontSize:11}}>Revoke encryption device</Text></Btn>}
+          </View>)}
+          {!devicesLoading&&!registeredDevices.length?<Text style={{color:C.muted,textAlign:'center',padding:30}}>No registered encryption devices.</Text>:null}
+        </ScrollView>
+      </SafeAreaView>
+    </Modal>
+
     <Modal visible={folderModalVisible} transparent animationType="fade" onRequestClose={()=>setFolderModalVisible(false)}>
       <View style={{flex:1,backgroundColor:'#0008',justifyContent:'center',padding:24}}>
         <View style={{backgroundColor:C.white,borderRadius:20,padding:20,gap:12}}>
@@ -4757,6 +4805,9 @@ function GuftinApp() {
         <Text style={{color:C.muted,fontSize:12,marginTop:5,marginBottom:15}}>Privacy and connection preferences</Text>
         <Btn onPress={()=>{setSettingsOpen(false);setSavedItemsOpen(true);void loadSavedItems();}} style={{backgroundColor:C.mint,borderRadius:12,padding:13,marginBottom:12}}>
           <Text style={{color:C.green,fontWeight:'900'}}>★  Open Saved Items</Text>
+        </Btn>
+        <Btn onPress={()=>{setSettingsOpen(false);setDeviceManagerOpen(true);void loadRegisteredDevices();}} style={{backgroundColor:C.mint,borderRadius:12,padding:13,marginBottom:12}}>
+          <Text style={{color:C.green,fontWeight:'900'}}>⌁  Linked encryption devices</Text>
         </Btn>
         <View style={{backgroundColor:C.mint,borderRadius:15,padding:13,marginBottom:10}}>
           <Text style={{color:C.green,fontWeight:'900',marginBottom:5}}>Account sign-in methods</Text>
