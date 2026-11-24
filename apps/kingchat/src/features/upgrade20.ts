@@ -176,9 +176,53 @@ export const upgrade20 = {
     const userId = await requireUserId();
     return unwrap(await db.from('kc_poll_votes').upsert({ poll_id: pollId, option_id: optionId, user_id: userId }, { onConflict: 'poll_id,option_id,user_id' }).select().single());
   },
-  async respondToGroupEvent(eventId: string, response: 'yes' | 'no' | 'maybe') {
+  async respondToGroupEvent(eventId: string, response: 'going' | 'maybe' | 'not_going') {
     const userId = await requireUserId();
     return unwrap(await db.from('kc_group_event_rsvps').upsert({ event_id: eventId, user_id: userId, response, updated_at: new Date().toISOString() }, { onConflict: 'event_id,user_id' }).select().single());
+  },
+  async createGroupEvent(input: { conversation_id: string; title_envelope: string; details_envelope?: string | null; location_envelope?: string | null; starts_at: string; ends_at?: string | null; reminder_minutes?: number }) {
+    const creatorId = await requireUserId();
+    const start = new Date(input.starts_at);
+    const end = input.ends_at ? new Date(input.ends_at) : null;
+    if (!input.title_envelope.trim() || !Number.isFinite(start.getTime()) || (end && (!Number.isFinite(end.getTime()) || end <= start))) {
+      throw new Error('Enter a valid event title and start/end time.');
+    }
+    const reminder = input.reminder_minutes ?? 15;
+    if (!Number.isInteger(reminder) || reminder < 0 || reminder > 10080) throw new Error('Reminder must be between 0 and 10080 minutes.');
+    return unwrap(await db.from('kc_group_events').insert({
+      ...input, creator_id: creatorId, reminder_minutes: reminder
+    }).select().single());
+  },
+  async listMyReports() {
+    const userId = await requireUserId();
+    return unwrap(await db.from('kc_spam_reports').select('id,target_user_id,message_id,reason,details,status,created_at').eq('reporter_id', userId).order('created_at', { ascending: false }));
+  },
+  async listReportsAboutMe() {
+    const userId = await requireUserId();
+    return unwrap(await db.from('kc_spam_reports').select('id,reporter_id,message_id,reason,status,created_at').eq('target_user_id', userId).order('created_at', { ascending: false }));
+  },
+  async listMyAppeals() {
+    const userId = await requireUserId();
+    return unwrap(await db.from('kc_spam_appeals').select('*').eq('appellant_id', userId).order('created_at', { ascending: false }));
+  },
+  async submitAppeal(reportId: string, appealText: string) {
+    const userId = await requireUserId();
+    const cleanText = appealText.trim().slice(0, 3000);
+    if (cleanText.length < 10) throw new Error('An appeal must contain at least 10 characters.');
+    return unwrap(await db.from('kc_spam_appeals').insert({ report_id: reportId, appellant_id: userId, appeal_text: cleanText }).select().single());
+  },
+  async listBlockedUsers() {
+    const userId = await requireUserId();
+    return unwrap(await db.from('kc_user_blocks').select('blocked_user_id,created_at').eq('blocker_id', userId).order('created_at', { ascending: false }));
+  },
+  async blockUser(blockedUserId: string) {
+    const userId = await requireUserId();
+    if (!blockedUserId || blockedUserId === userId) throw new Error('Choose another Guftin user to block.');
+    return unwrap(await db.from('kc_user_blocks').upsert({ blocker_id: userId, blocked_user_id: blockedUserId }, { onConflict: 'blocker_id,blocked_user_id' }).select().single());
+  },
+  async unblockUser(blockedUserId: string) {
+    const userId = await requireUserId();
+    return unwrap(await db.from('kc_user_blocks').delete().eq('blocker_id', userId).eq('blocked_user_id', blockedUserId));
   },
   async createQuickReply(shortcut: string, replyText: string) {
     const userId = await requireUserId();
