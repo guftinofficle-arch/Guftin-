@@ -134,4 +134,71 @@ export const upgrade20 = {
     const userId = await requireUserId();
     return unwrap(await db.from('kc_spam_reports').select('*').eq('reporter_id', userId).order('created_at', { ascending: false }));
   },
+
+  async getFeaturePreferences() {
+    const userId = await requireUserId();
+    return unwrap(await db.from('kc_feature_preferences').select('*').eq('user_id', userId).maybeSingle());
+  },
+  async saveFeaturePreferences(patch: Record<string, boolean>) {
+    const userId = await requireUserId();
+    const allowed = ['scheduled_messages_enabled','voice_transcription_enabled','automatic_translation_enabled','biometric_lock_enabled','encrypted_backup_enabled','anti_spam_protection_enabled'];
+    const safePatch = Object.fromEntries(Object.entries(patch).filter(([key, value]) => allowed.includes(key) && typeof value === 'boolean'));
+    return unwrap(await db.from('kc_feature_preferences').upsert({ user_id: userId, ...safePatch, updated_at: new Date().toISOString() }, { onConflict: 'user_id' }).select().single());
+  },
+  async registerEncryptionDevice(input: { public_key: string; device_label: string; platform: 'ios' | 'android' | 'web' }) {
+    const userId = await requireUserId();
+    if (!input.public_key.trim() || !input.device_label.trim()) throw new Error('A device key and label are required.');
+    return unwrap(await db.from('kc_e2ee_devices').insert({ user_id: userId, ...input, last_active_at: new Date().toISOString() }).select().single());
+  },
+  async createScheduledMessage(input: { conversation_id: string; body_envelope: string; message_type: string; attachment_path?: string | null; scheduled_at: string }) {
+    const senderId = await requireUserId();
+    const when = new Date(input.scheduled_at);
+    if (!Number.isFinite(when.getTime()) || when.getTime() <= Date.now()) throw new Error('Choose a future delivery time.');
+    return unwrap(await db.from('kc_scheduled_messages').insert({ ...input, sender_id: senderId, delivery_status: 'pending' }).select().single());
+  },
+  async createPoll(input: { conversation_id: string; question_envelope: string; options: string[]; allows_multiple?: boolean; is_anonymous?: boolean; expires_at?: string | null }) {
+    const creatorId = await requireUserId();
+    const options = input.options.map(x => x.trim()).filter(Boolean);
+    if (options.length < 2 || options.length > 12) throw new Error('A poll needs 2 to 12 options.');
+    const poll = unwrap(await db.from('kc_polls').insert({
+      conversation_id: input.conversation_id, creator_id: creatorId, question_envelope: input.question_envelope,
+      allows_multiple: input.allows_multiple ?? false, is_anonymous: input.is_anonymous ?? false, expires_at: input.expires_at ?? null
+    }).select().single()) as { id: string };
+    const rows = options.map((option_envelope, sort_order) => ({ poll_id: poll.id, option_envelope, sort_order }));
+    const inserted = await db.from('kc_poll_options').insert(rows);
+    if (inserted.error) {
+      await db.from('kc_polls').delete().eq('id', poll.id).eq('creator_id', creatorId);
+      throw inserted.error;
+    }
+    return poll;
+  },
+  async castPollVote(pollId: string, optionId: string) {
+    const userId = await requireUserId();
+    return unwrap(await db.from('kc_poll_votes').upsert({ poll_id: pollId, option_id: optionId, user_id: userId }, { onConflict: 'poll_id,option_id,user_id' }).select().single());
+  },
+  async respondToGroupEvent(eventId: string, response: 'yes' | 'no' | 'maybe') {
+    const userId = await requireUserId();
+    return unwrap(await db.from('kc_group_event_rsvps').upsert({ event_id: eventId, user_id: userId, response, updated_at: new Date().toISOString() }, { onConflict: 'event_id,user_id' }).select().single());
+  },
+  async createQuickReply(shortcut: string, replyText: string) {
+    const userId = await requireUserId();
+    const key = shortcut.trim().replace(/^\\//, '').slice(0, 32);
+    const value = replyText.trim().slice(0, 2000);
+    if (!key || !value) throw new Error('Shortcut and reply text are required.');
+    return unwrap(await db.from('kc_business_quick_replies').insert({ user_id: userId, shortcut: key, reply_text: value }).select().single());
+  },
+  async deleteQuickReply(id: string) {
+    const userId = await requireUserId();
+    return unwrap(await db.from('kc_business_quick_replies').delete().eq('id', id).eq('user_id', userId));
+  },
+  async createCommunity(title: string, descriptionEnvelope?: string) {
+    const ownerId = await requireUserId();
+    const cleanTitle = title.trim().slice(0, 80);
+    if (!cleanTitle) throw new Error('Community name is required.');
+    return unwrap(await db.from('kc_communities').insert({ owner_id: ownerId, title: cleanTitle, description_envelope: descriptionEnvelope ?? null }).select().single());
+  },
+  async addGroupToCommunity(communityId: string, conversationId: string) {
+    const userId = await requireUserId();
+    return unwrap(await db.from('kc_community_groups').insert({ community_id: communityId, conversation_id: conversationId, added_by: userId }).select().single());
+  },
 };
