@@ -885,6 +885,9 @@ function GuftinApp() {
   const [recording,setRecording]=useState<Audio.Recording|null>(null);
   const [recordingBusy,setRecordingBusy]=useState(false);
   const [settingsOpen,setSettingsOpen]=useState(false);
+  const [savedItemsOpen,setSavedItemsOpen]=useState(false);
+  const [savedItems,setSavedItems]=useState<any[]>([]);
+  const [savedItemsLoading,setSavedItemsLoading]=useState(false);
   const [accountEmailInput,setAccountEmailInput]=useState('');
   const [accountEmailPassword,setAccountEmailPassword]=useState('');
   const [accountEmailBusy,setAccountEmailBusy]=useState(false);
@@ -1718,6 +1721,40 @@ function GuftinApp() {
     }
   };
 
+  const loadSavedItems=async()=>{
+    if(!session?.user?.id)return;
+    setSavedItemsLoading(true);
+    try{
+      const {data,error}=await supabase.from('kc_saved_items')
+        .select('id,created_at,message:kc_messages!inner(id,conversation_id,body,message_type,created_at),conversation:kc_conversations!inner(id,title,kind)')
+        .eq('user_id',session.user.id).order('created_at',{ascending:false}).limit(200);
+      if(error)throw error;
+      const mapped=(data||[]).map((row:any)=>{
+        const message=Array.isArray(row.message)?row.message[0]:row.message;
+        const conversation=Array.isArray(row.conversation)?row.conversation[0]:row.conversation;
+        let preview='Saved item';
+        if(message?.message_type==='image')preview='Photo';
+        else if(message?.message_type==='video')preview='Video';
+        else if(message?.message_type==='audio')preview='Voice message';
+        else if(message?.message_type==='file')preview='Document';
+        else if(typeof message?.body==='string'){
+          try{preview=message.body.startsWith(E2EE_PREFIX)&&deviceIdentity?decryptMessageForDevice(message.body,deviceIdentity):message.body.startsWith(E2EE_PREFIX)?'Encrypted message':message.body;}
+          catch{preview='Encrypted message';}
+        }
+        return {id:row.id,created_at:row.created_at,conversationTitle:conversation?.title||'Saved chat',kind:message?.message_type||'text',preview};
+      });
+      setSavedItems(mapped);
+    }catch(error:any){Alert.alert('Saved Items unavailable',error?.message||'Please try again.');}
+    finally{setSavedItemsLoading(false);}
+  };
+
+  const removeSavedItem=async(id:string)=>{
+    if(!session?.user?.id)return;
+    const {error}=await supabase.from('kc_saved_items').delete().eq('id',id).eq('user_id',session.user.id);
+    if(error){Alert.alert('Could not remove saved item',error.message);return;}
+    setSavedItems((items:any[])=>items.filter(item=>item.id!==id));
+  };
+
   const deleteMessage=async(item:Message)=>{
     if(!session)return;
     const hideForMe=async()=>{
@@ -1738,7 +1775,7 @@ function GuftinApp() {
         if(storageError)console.warn('Message removed but its stored media cleanup failed:',storageError.message);
       }
     };
-    const options:any[]=[{text:'Delete for me',onPress:()=>void hideForMe()}];
+    const options:any[]=[{text:'Save to Saved Items',onPress:()=>void (async()=>{const {error}=await supabase.from('kc_saved_items').upsert({user_id:session.user.id,message_id:item.id,conversation_id:item.conversation_id},{onConflict:'user_id,message_id'});if(error){Alert.alert('Could not save message',error.message);return;}Alert.alert('Saved','This message is now in Saved Items.');})()},{text:'Delete for me',onPress:()=>void hideForMe()}];
     if(item.mine&&!item.deleted_at)options.push({text:'Delete for everyone',style:'destructive',onPress:()=>void deleteForEveryone()});
     options.push({text:'Cancel',style:'cancel'});
     Alert.alert('Delete message','Choose where to delete this message.',options);
@@ -4570,10 +4607,34 @@ function GuftinApp() {
       </View></View>
     </Modal>
 
+    <Modal visible={savedItemsOpen} animationType="slide" onRequestClose={()=>setSavedItemsOpen(false)}>
+      <SafeAreaView style={{flex:1,backgroundColor:C.paper}}>
+        <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',padding:18,borderBottomWidth:1,borderColor:C.line,backgroundColor:C.white}}>
+          <View><Text style={{fontSize:21,fontWeight:'900',color:C.ink}}>Saved Items</Text><Text style={{fontSize:11,color:C.muted,marginTop:3}}>Your saved messages and attachments</Text></View>
+          <Btn onPress={()=>setSavedItemsOpen(false)} style={{padding:8}}><Text style={{fontSize:25,color:C.ink}}>×</Text></Btn>
+        </View>
+        {savedItemsLoading?<ActivityIndicator color={C.green} style={{marginTop:30}}/>:null}
+        <ScrollView contentContainerStyle={{padding:16,gap:10}}>
+          {!savedItemsLoading&&!savedItems.length?<Text style={{textAlign:'center',color:C.muted,padding:30}}>No saved items yet. Long-press a message and choose Save to Saved Items.</Text>:null}
+          {savedItems.map((item:any)=><View key={item.id} style={{backgroundColor:C.white,borderRadius:14,padding:14,borderWidth:1,borderColor:C.line}}>
+            <Text style={{color:C.green,fontWeight:'900',fontSize:11}}>{item.conversationTitle} · {String(item.kind).toUpperCase()}</Text>
+            <Text style={{color:C.ink,fontSize:14,marginTop:6}}>{item.preview}</Text>
+            <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginTop:9}}>
+              <Text style={{color:C.muted,fontSize:10}}>{timeLabel(item.created_at)}</Text>
+              <Btn onPress={()=>void removeSavedItem(item.id)} style={{paddingHorizontal:11,paddingVertical:6,borderRadius:9,backgroundColor:'#fde8e8'}}><Text style={{color:C.red,fontWeight:'800',fontSize:11}}>Remove</Text></Btn>
+            </View>
+          </View>)}
+        </ScrollView>
+      </SafeAreaView>
+    </Modal>
+
     <Modal visible={settingsOpen} transparent animationType="slide" onRequestClose={()=>setSettingsOpen(false)}>
       <View style={{flex:1,backgroundColor:'#0008',justifyContent:'flex-end'}}><View style={{backgroundColor:C.white,borderTopLeftRadius:24,borderTopRightRadius:24,padding:22}}>
         <Text style={{fontSize:21,fontWeight:'900',color:C.ink}}>Guftin settings</Text>
         <Text style={{color:C.muted,fontSize:12,marginTop:5,marginBottom:15}}>Privacy and connection preferences</Text>
+        <Btn onPress={()=>{setSettingsOpen(false);setSavedItemsOpen(true);void loadSavedItems();}} style={{backgroundColor:C.mint,borderRadius:12,padding:13,marginBottom:12}}>
+          <Text style={{color:C.green,fontWeight:'900'}}>★  Open Saved Items</Text>
+        </Btn>
         <View style={{backgroundColor:C.mint,borderRadius:15,padding:13,marginBottom:10}}>
           <Text style={{color:C.green,fontWeight:'900',marginBottom:5}}>Account sign-in methods</Text>
           <Text style={{color:C.ink,fontSize:11,lineHeight:17}}>Linked email: {session?.user?.email||'Not linked'}{session?.user?.email_confirmed_at?' · verified':' · not verified'}</Text>
