@@ -1,5 +1,5 @@
 name: Guftin Android APK — Build and Startup QA
-# QA Guftin 1.6.1 email OTP signup, OTP password recovery and native Android call notification fixes.
+# QA Guftin 1.6.2 optional email/phone signup, account linking and contact discovery.
 
 on:
   workflow_dispatch:
@@ -68,13 +68,13 @@ jobs:
           const fs = require('node:fs');
           const pkg = require('./package.json');
           const appConfig = fs.readFileSync('app.config.js', 'utf8');
-          if (pkg.version !== '1.6.1' ||
-              !/version:\s*"1\.6\.1"/.test(appConfig) ||
-              !/versionCode:\s*47/.test(appConfig) ||
+          if (pkg.version !== '1.6.2' ||
+              !/version:\s*"1\.6\.2"/.test(appConfig) ||
+              !/versionCode:\s*48/.test(appConfig) ||
               !/package:\s*"com\.guftin\.app"/.test(appConfig)) {
-            throw new Error('Guftin package/version metadata does not match the expected 1.6.1 / Android 47 release.');
+            throw new Error('Guftin package/version metadata does not match the expected 1.6.2 / Android 48 release.');
           }
-          console.log('Validated Guftin 1.6.1, Android versionCode 47, package com.guftin.app.');
+          console.log('Validated Guftin 1.6.2, Android versionCode 48, package com.guftin.app.');
           NODE
 
       - name: Install JavaScript dependencies
