@@ -961,10 +961,18 @@ function GuftinApp() {
 
   const [authBusy,setAuthBusy]=useState(false);
   const [authMode,setAuthMode]=useState<'login'|'signup'>('signup');
+  const [signupMethod,setSignupMethod]=useState<'email'|'phone'|'both'>('email');
+  const [loginMethod,setLoginMethod]=useState<'email'|'phone'>('email');
   const [fullName,setFullName]=useState('');
   const [username,setUsername]=useState('');
   const [email,setEmail]=useState('');
   const [password,setPassword]=useState('');
+  const [authPhone,setAuthPhone]=useState('');
+  const [phoneAuthNumber,setPhoneAuthNumber]=useState('');
+  const [phoneAuthPending,setPhoneAuthPending]=useState(false);
+  const [phoneAuthMode,setPhoneAuthMode]=useState<'signup'|'login'>('signup');
+  const [phoneAuthOtp,setPhoneAuthOtp]=useState('');
+  const [phoneAuthBusy,setPhoneAuthBusy]=useState(false);
   const [authError,setAuthError]=useState('');
   const [emailOtpPending,setEmailOtpPending]=useState(false);
   const [emailOtp,setEmailOtp]=useState('');
@@ -3360,19 +3368,18 @@ function GuftinApp() {
     const cleanEmail=email.trim().toLowerCase();
     const cleanUsername=username.trim().toLowerCase().replace(/^@/,'');
     const cleanName=fullName.trim();
+    const normalizedPhone=signupMethod==='both'?normalizeGuftinPhone(authPhone):null;
     if(cleanName.length<2||cleanName.length>40){setAuthError('Enter your display name (2-40 characters).');return;}
     if(!/^[a-z0-9_]{3,24}$/.test(cleanUsername)){setAuthError('Username must be 3-24 characters using letters, numbers or underscore.');return;}
     if(!/^\S+@\S+\.\S+$/.test(cleanEmail)){setAuthError('Enter a valid email address.');return;}
     if(password.length<8){setAuthError('Password must be at least 8 characters.');return;}
-    setAuthBusy(true);
-    setAuthError('');
+    if(signupMethod==='both'&&!normalizedPhone){setAuthError('Enter a valid mobile number, such as +923001234567, or use 03xxxxxxxxx.');return;}
+    setAuthBusy(true);setAuthError('');
     try{
       const {data:usernameAvailable,error:usernameCheckError}=await supabase.rpc('kc_is_username_available',{p_username:cleanUsername});
       if(usernameCheckError)throw usernameCheckError;
-      if(usernameAvailable!==true){
-        setAuthError('This username is already taken. Please choose a different username.');
-        return;
-      }
+      if(usernameAvailable!==true){setAuthError('This username is already taken. Please choose a different username.');return;}
+      setProfilePhone(normalizedPhone||'');
       const {data,error}=await supabase.auth.signUp({
         email:cleanEmail,
         password,
@@ -3382,44 +3389,97 @@ function GuftinApp() {
         if(/already registered|already been registered|user already exists/i.test(error.message||'')){
           const {error:resendError}=await supabase.auth.resend({type:'signup',email:cleanEmail});
           if(resendError)throw resendError;
-          setEmail(cleanEmail);
-          setEmailOtp('');
-          setEmailOtpPending(true);
-          setAuthError('This email already has a pending Guftin signup. A fresh verification code has been requested. If the account was created earlier, use the password you chose then.');
+          setEmail(cleanEmail);setEmailOtp('');setOtpPurpose('signup');setEmailOtpPending(true);
+          setAuthError('This email already has a pending Guftin signup. A fresh verification code has been requested. If the account was created earlier, sign in with your password.');
           return;
         }
         throw error;
       }
-      // Supabase intentionally returns an empty identities array for an
-      // already-registered email to prevent account enumeration. Do not show
-      // an OTP screen in this case: confirmed accounts will not receive a new
-      // signup confirmation code.
-      if(data.user && Array.isArray(data.user.identities) && data.user.identities.length===0){
-        setAuthMode('login');
-        setEmail(cleanEmail);
-        setEmailOtpPending(false);
+      if(data.user&&Array.isArray(data.user.identities)&&data.user.identities.length===0){
+        setAuthMode('login');setLoginMethod('email');setEmail(cleanEmail);setEmailOtpPending(false);setProfilePhone('');
         setAuthError('This email already has a Guftin account. Please sign in with your password, or use Forgot password if needed.');
         return;
       }
       if(data.session){
-        // Projects with email confirmation disabled may return a session immediately.
-        setPassword('');
-        setAuthError('');
+        void supabase.rpc('kc_set_email_discoverable',{p_enabled:true});
+        setPassword('');setAuthError('');
         return;
       }
-      if(!data.user){
-        throw new Error('Guftin could not start email verification. Please try again.');
-      }
-      setEmail(cleanEmail);
-      setEmailOtp('');
-      setOtpPurpose('signup');
-      setEmailOtpPending(true);
-      setAuthError('');
+      if(!data.user)throw new Error('Guftin could not start email verification. Please try again.');
+      setEmail(cleanEmail);setEmailOtp('');setOtpPurpose('signup');setEmailOtpPending(true);setAuthError('');
     }catch(e:any){
       setAuthError(e?.message||'Account creation failed. Please try again.');
-    }finally{
-      setAuthBusy(false);
-    }
+    }finally{setAuthBusy(false);}
+  };
+
+  const signUpPhone=async()=>{
+    const normalizedPhone=normalizeGuftinPhone(authPhone);
+    const cleanUsername=username.trim().toLowerCase().replace(/^@/,'');
+    const cleanName=fullName.trim();
+    if(cleanName.length<2||cleanName.length>40){setAuthError('Enter your display name (2-40 characters).');return;}
+    if(!/^[a-z0-9_]{3,24}$/.test(cleanUsername)){setAuthError('Username must be 3-24 characters using letters, numbers or underscore.');return;}
+    if(!normalizedPhone){setAuthError('Enter a valid mobile number, such as +923001234567, or use 03xxxxxxxxx.');return;}
+    setAuthBusy(true);setAuthError('');
+    try{
+      const {data:usernameAvailable,error:usernameCheckError}=await supabase.rpc('kc_is_username_available',{p_username:cleanUsername});
+      if(usernameCheckError)throw usernameCheckError;
+      if(usernameAvailable!==true)throw new Error('This username is already taken. Please choose a different username.');
+      const {error}=await supabase.auth.signInWithOtp({
+        phone:normalizedPhone,
+        options:{shouldCreateUser:true,data:{display_name:cleanName,username:cleanUsername}}
+      });
+      if(error)throw error;
+      setPhoneAuthNumber(normalizedPhone);setPhoneAuthMode('signup');setPhoneAuthOtp('');setPhoneAuthPending(true);setProfilePhone('');
+    }catch(e:any){
+      setAuthError(e?.message||'Could not send the phone verification code. Check that phone authentication and an SMS provider are enabled for Guftin.');
+    }finally{setAuthBusy(false);}
+  };
+
+  const signInPhone=async()=>{
+    const normalizedPhone=normalizeGuftinPhone(authPhone);
+    if(!normalizedPhone){setAuthError('Enter the mobile number linked to your Guftin account.');return;}
+    setAuthBusy(true);setAuthError('');
+    try{
+      const {error}=await supabase.auth.signInWithOtp({phone:normalizedPhone,options:{shouldCreateUser:false}});
+      if(error)throw error;
+      setPhoneAuthNumber(normalizedPhone);setPhoneAuthMode('login');setPhoneAuthOtp('');setPhoneAuthPending(true);
+    }catch(e:any){
+      setAuthError(e?.message||'Could not send a sign-in code. Check the number and SMS service.');
+    }finally{setAuthBusy(false);}
+  };
+
+  const verifyPhoneAuthOtp=async()=>{
+    const token=phoneAuthOtp.replace(/\D/g,'');
+    if(token.length!==6){setAuthError('Enter the complete 6-digit SMS code.');return;}
+    setPhoneAuthBusy(true);setAuthError('');
+    try{
+      const {data,error}=await supabase.auth.verifyOtp({phone:phoneAuthNumber,token,type:'sms'});
+      if(error)throw error;
+      if(!data.session)throw new Error('The SMS code was accepted but Guftin did not receive a sign-in session. Please request a new code.');
+      if(phoneAuthMode==='signup'){
+        const {error:discoveryError}=await supabase.rpc('kc_set_phone_discoverable',{p_enabled:true});
+        if(discoveryError)console.warn('Phone verified, but phone discovery could not be enabled:',discoveryError.message);
+      }
+      setPhoneAuthPending(false);setPhoneAuthOtp('');setAuthError('');
+    }catch(e:any){
+      setAuthError(e?.message||'Phone verification failed. Check the code and try again.');
+    }finally{setPhoneAuthBusy(false);}
+  };
+
+  const resendPhoneAuthOtp=async()=>{
+    setPhoneAuthBusy(true);setAuthError('');
+    try{
+      const {error}=await supabase.auth.signInWithOtp({
+        phone:phoneAuthNumber,
+        options:phoneAuthMode==='signup'
+          ?{shouldCreateUser:true,data:{display_name:fullName.trim(),username:username.trim().toLowerCase().replace(/^@/,'')}}
+          :{shouldCreateUser:false}
+      });
+      if(error)throw error;
+      setPhoneAuthOtp('');setAuthError('A new SMS code has been requested.');
+    }catch(e:any){
+      setAuthError(e?.message||'Could not resend the SMS code. Please try again later.');
+    }finally{setPhoneAuthBusy(false);}
   };
 
   const verifyCurrentOtp=async()=>{
@@ -3436,6 +3496,8 @@ function GuftinApp() {
       const {data,error}=await supabase.auth.verifyOtp({email:cleanEmail,token,type:'signup'});
       if(error)throw error;
       if(!data.session)throw new Error('The code was accepted but Guftin did not receive a sign-in session. Please sign in with your email and password.');
+      const {error:discoveryError}=await supabase.rpc('kc_set_email_discoverable',{p_enabled:true});
+      if(discoveryError)console.warn('Email verified, but email discovery could not be enabled:',discoveryError.message);
       setEmailOtpPending(false);
       setEmailOtp('');
       setPassword('');
@@ -3548,6 +3610,10 @@ function GuftinApp() {
       setPhoneVerificationPending(false);
       setPhoneVerificationSent(false);
       setProfilePhone('');
+      if(session.user?.phone&&session.user?.phone_confirmed_at){
+        const {error:phoneDiscoveryError}=await supabase.rpc('kc_set_phone_discoverable',{p_enabled:true});
+        if(phoneDiscoveryError)console.warn('Verified phone discovery not enabled:',phoneDiscoveryError.message);
+      }
       await loadProfile();
       return;
     }
@@ -3610,23 +3676,45 @@ function GuftinApp() {
 
   const addContact=async()=>{
     if(!session||adding)return;
-    const cleanUsername=contactUsername.trim().toLowerCase().replace(/^@/,'');
-    if(!/^[a-z0-9_]{3,24}$/.test(cleanUsername)){Alert.alert('Username not valid','Enter a username such as ali_786.');return;}
+    const raw=contactUsername.trim();
+    if(!raw){Alert.alert('Contact search','Enter a Guftin username, email address or mobile number.');return;}
     setAdding(true);
-    const {data,error}=await supabase.rpc('kc_save_contact_by_username',{p_username:cleanUsername});
-    setAdding(false);
-    if(error){Alert.alert('Could not find contact',error.message);return;}
-    const row=Array.isArray(data)?data[0]:data;
-    if(!row?.contact_id){Alert.alert('Contact not found','No registered Guftin account uses this username yet.');return;}
-    setAddOpen(false);setContactUsername('');
-    const name=row.display_name||row.username||'Guftin member';
-    const chat:Chat={
-      id:'pending:'+row.contact_id,pendingContactId:row.contact_id,
-      name,avatar:initials(name),color:colorFor(name),
-      last:'Start a conversation',time:'',unread:0,online:false,kind:'direct',lastAt:0
-    };
-    setPeerLastReadAt(null);
-    setActive(chat);
+    try{
+      let row:any=null;
+      if(raw.includes('@')){
+        const emailQuery=raw.toLowerCase();
+        if(!/^\S+@\S+\.\S+$/.test(emailQuery))throw new Error('Enter a valid email address.');
+        const {data,error}=await supabase.rpc('kc_lookup_email_contact',{p_email:emailQuery});
+        if(error)throw error;
+        row=Array.isArray(data)?data[0]:data;
+        if(!row?.contact_id)throw new Error('No verified, discoverable Guftin account was found for that email address.');
+      }else{
+        const normalizedPhone=normalizeGuftinPhone(raw);
+        if(normalizedPhone){
+          const {data,error}=await supabase.rpc('kc_lookup_phone_contacts',{p_phone_numbers:[normalizedPhone]});
+          if(error)throw error;
+          row=Array.isArray(data)?data[0]:data;
+          if(!row?.contact_id)throw new Error('No verified, discoverable Guftin account was found for that phone number.');
+        }else{
+          const cleanUsername=raw.toLowerCase().replace(/^@/,'');
+          if(!/^[a-z0-9_]{3,24}$/.test(cleanUsername))throw new Error('Use a valid username, full email address or mobile number with country code.');
+          const {data,error}=await supabase.rpc('kc_save_contact_by_username',{p_username:cleanUsername});
+          if(error)throw error;
+          row=Array.isArray(data)?data[0]:data;
+          if(!row?.contact_id)throw new Error('No registered Guftin account uses this username yet.');
+        }
+      }
+      const name=row.display_name||row.username||'Guftin member';
+      const avatarUrl=row.avatar_url?await getSignedMediaUrl(row.avatar_url):null;
+      const chat:Chat={
+        id:'pending:'+row.contact_id,pendingContactId:row.contact_id,name,
+        avatar:initials(name),avatarUrl:avatarUrl||undefined,color:colorFor(name),
+        last:'Start a conversation',time:'',unread:0,online:false,kind:'direct',lastAt:0
+      };
+      setAddOpen(false);setContactUsername('');setPhoneContactMatches([]);setPeerLastReadAt(null);setActive(chat);
+    }catch(e:any){
+      Alert.alert('Could not find contact',e?.message||'Check the username, email or phone number and try again.');
+    }finally{setAdding(false);}
   };
 
   const findPhoneContacts=async()=>{
@@ -3948,6 +4036,27 @@ function GuftinApp() {
     </SafeAreaView>;
   }
 
+  if(!session&&phoneAuthPending){
+    return <SafeAreaView style={{flex:1,backgroundColor:C.paper,padding:25,justifyContent:'center'}}>
+      <StatusBar barStyle="dark-content"/>
+      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{flexGrow:1,justifyContent:'center'}}>
+        <View style={{alignItems:'center',marginBottom:34}}>
+          <BrandLogo size={78}/>
+          <Heading>{phoneAuthMode==='signup'?'Verify your mobile number':'Sign in with your mobile number'}</Heading>
+          <Text style={{color:C.muted,marginTop:10,textAlign:'center',lineHeight:22}}>Guftin sent a 6-digit SMS code to</Text>
+          <Text style={{color:C.ink,fontWeight:'800',marginTop:4}}>{phoneAuthNumber}</Text>
+        </View>
+        <Text style={{fontSize:23,fontWeight:'900',color:C.ink,marginBottom:8}}>Enter SMS verification code</Text>
+        <Text style={{color:C.muted,marginBottom:18,lineHeight:20}}>Use the code sent to this number. Do not share it with anyone.</Text>
+        <TextInput value={phoneAuthOtp} onChangeText={v=>{setPhoneAuthOtp(v.replace(/\D/g,'').slice(0,6));setAuthError('');}} placeholder="6-digit SMS code" keyboardType="number-pad" textContentType="oneTimeCode" autoComplete="sms-otp" maxLength={6} style={{backgroundColor:C.white,borderRadius:15,padding:18,marginBottom:12,color:C.ink,fontSize:25,fontWeight:'800',letterSpacing:8,textAlign:'center'}}/>
+        {authError?<Text style={{color:C.red,fontSize:12,lineHeight:18,marginBottom:12}}>{authError}</Text>:null}
+        <Btn disabled={phoneAuthBusy||phoneAuthOtp.length!==6} onPress={verifyPhoneAuthOtp} style={{backgroundColor:C.green,padding:17,borderRadius:16,alignItems:'center'}}>{phoneAuthBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Verify and continue</Text>}</Btn>
+        <Btn disabled={phoneAuthBusy} onPress={resendPhoneAuthOtp} style={{padding:16,alignItems:'center'}}><Text style={{color:C.green,fontWeight:'800'}}>Resend SMS code</Text></Btn>
+        <Btn disabled={phoneAuthBusy} onPress={()=>{setPhoneAuthPending(false);setPhoneAuthOtp('');setAuthError('');}} style={{padding:12,alignItems:'center'}}><Text style={{color:C.muted,fontWeight:'700'}}>Back to sign in</Text></Btn>
+      </ScrollView>
+    </SafeAreaView>;
+  }
+
   if(!session&&emailOtpPending){
     return <SafeAreaView style={{flex:1,backgroundColor:C.paper,padding:25,justifyContent:'center'}}>
       <StatusBar barStyle="dark-content"/>
@@ -3983,19 +4092,40 @@ function GuftinApp() {
           <Text style={{color:C.muted,marginTop:8}}>Your world. Your people. One place.</Text>
         </View>
         <Text style={{fontSize:23,fontWeight:'900',color:C.ink,marginBottom:8}}>{authMode==='signup'?'Create your Guftin ID':'Welcome back'}</Text>
-        <Text style={{color:C.muted,marginBottom:18,lineHeight:20}}>{authMode==='signup'?'Create an account with email and choose your unique username.':'Sign in with the email and password linked to your account.'}</Text>
-
+        <Text style={{color:C.muted,marginBottom:14,lineHeight:20}}>{authMode==='signup'?'Choose email, mobile number, or both for one Guftin account.':'Sign in using the email/password or mobile number linked to your Guftin account.'}</Text>
           {authMode==='signup'?<>
+            <Text style={{fontSize:12,fontWeight:'900',color:C.ink,marginBottom:7}}>Account method</Text>
+            <View style={{flexDirection:'row',gap:7,marginBottom:12}}>
+              {(['email','phone','both'] as const).map(method=><Btn key={method} onPress={()=>{setSignupMethod(method);setAuthError('');}} style={{flex:1,paddingVertical:12,borderRadius:12,alignItems:'center',backgroundColor:signupMethod===method?C.green:C.mint}}><Text style={{fontSize:12,fontWeight:'900',color:signupMethod===method?'#fff':C.green}}>{method==='email'?'Gmail':method==='phone'?'Mobile':'Both'}</Text></Btn>)}
+            </View>
             <TextInput value={fullName} onChangeText={setFullName} placeholder="Your full name" autoCapitalize="words" style={{backgroundColor:C.white,borderRadius:15,padding:16,marginBottom:10,color:C.ink}}/>
             <TextInput value={username} onChangeText={v=>setUsername(v.toLowerCase().replace(/[^a-z0-9_]/g,''))} placeholder="Choose username (e.g. ali_786)" autoCapitalize="none" style={{backgroundColor:C.white,borderRadius:15,padding:16,marginBottom:10,color:C.ink}}/>
-          </>:null}
-          <TextInput value={email} onChangeText={setEmail} placeholder="Email address" keyboardType="email-address" autoCapitalize="none" autoComplete="email" style={{backgroundColor:C.white,borderRadius:15,padding:16,marginBottom:10,color:C.ink}}/>
-          <TextInput value={password} onChangeText={setPassword} placeholder="Password (at least 8 characters)" secureTextEntry autoCapitalize="none" autoComplete={authMode==='signup'?'new-password':'password'} style={{backgroundColor:C.white,borderRadius:15,padding:16,marginBottom:12,color:C.ink}}/>
+            {signupMethod!=='phone'?<>
+              <TextInput value={email} onChangeText={setEmail} placeholder="Gmail / email address" keyboardType="email-address" autoCapitalize="none" autoComplete="email" style={{backgroundColor:C.white,borderRadius:15,padding:16,marginBottom:10,color:C.ink}}/>
+              <TextInput value={password} onChangeText={setPassword} placeholder="Password (at least 8 characters)" secureTextEntry autoCapitalize="none" autoComplete="new-password" style={{backgroundColor:C.white,borderRadius:15,padding:16,marginBottom:10,color:C.ink}}/>
+            </>:null}
+            {signupMethod!=='email'?<TextInput value={authPhone} onChangeText={setAuthPhone} placeholder="Mobile number (e.g. +92 300 1234567)" keyboardType="phone-pad" autoComplete="tel" style={{backgroundColor:C.white,borderRadius:15,padding:16,marginBottom:10,color:C.ink}}/>:null}
+          </>:<>
+            <Text style={{fontSize:12,fontWeight:'900',color:C.ink,marginBottom:7}}>Sign-in method</Text>
+            <View style={{flexDirection:'row',gap:7,marginBottom:12}}>
+              {(['email','phone'] as const).map(method=><Btn key={method} onPress={()=>{setLoginMethod(method);setAuthError('');}} style={{flex:1,paddingVertical:12,borderRadius:12,alignItems:'center',backgroundColor:loginMethod===method?C.green:C.mint}}><Text style={{fontSize:12,fontWeight:'900',color:loginMethod===method?'#fff':C.green}}>{method==='email'?'Gmail + Password':'Mobile + SMS code'}</Text></Btn>)}
+            </View>
+            {loginMethod==='email'?<>
+              <TextInput value={email} onChangeText={setEmail} placeholder="Gmail / email address" keyboardType="email-address" autoCapitalize="none" autoComplete="email" style={{backgroundColor:C.white,borderRadius:15,padding:16,marginBottom:10,color:C.ink}}/>
+              <TextInput value={password} onChangeText={setPassword} placeholder="Password" secureTextEntry autoCapitalize="none" autoComplete="password" style={{backgroundColor:C.white,borderRadius:15,padding:16,marginBottom:10,color:C.ink}}/>
+            </>:<TextInput value={authPhone} onChangeText={setAuthPhone} placeholder="Mobile number (e.g. +92 300 1234567)" keyboardType="phone-pad" autoComplete="tel" style={{backgroundColor:C.white,borderRadius:15,padding:16,marginBottom:10,color:C.ink}}/>}
+          </>}
           {authError?<Text style={{color:C.red,fontSize:12,lineHeight:18,marginBottom:12}}>{authError}</Text>:null}
-          {authMode==='login'?<Btn disabled={authBusy} onPress={requestPasswordReset} style={{padding:10,alignItems:'center'}}><Text style={{color:C.green,fontWeight:'800'}}>Forgot password?</Text></Btn>:null}
-          <Btn disabled={authBusy} onPress={authMode==='signup'?signUpEmail:signInEmail} style={{backgroundColor:C.green,padding:17,borderRadius:16,alignItems:'center'}}>{authBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>{authMode==='signup'?'Create account':'Sign in with email'}</Text>}</Btn>
-          <Btn onPress={()=>{setAuthMode(authMode==='signup'?'login':'signup');setAuthError('');}} style={{padding:16,alignItems:'center'}}><Text style={{color:C.green,fontWeight:'800'}}>{authMode==='signup'?'Already have an account? Sign in':'New to Guftin? Create account'}</Text></Btn>
-          <Text style={{color:C.muted,fontSize:10,textAlign:'center',marginTop:8,lineHeight:16}}>A 6-digit email verification code is required to activate your new Guftin account.</Text>
+          {authMode==='login'&&loginMethod==='email'?<Btn disabled={authBusy} onPress={requestPasswordReset} style={{padding:10,alignItems:'center'}}><Text style={{color:C.green,fontWeight:'800'}}>Forgot password?</Text></Btn>:null}
+          <Btn disabled={authBusy} onPress={()=>{
+            if(authMode==='signup'){
+              if(signupMethod==='phone')void signUpPhone(); else void signUpEmail();
+            }else{
+              if(loginMethod==='phone')void signInPhone(); else void signInEmail();
+            }
+          }} style={{backgroundColor:C.green,padding:17,borderRadius:16,alignItems:'center'}}>{authBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>{authMode==='signup'?'Create account':loginMethod==='phone'?'Send SMS sign-in code':'Sign in with email'}</Text>}</Btn>
+          <Btn onPress={()=>{setAuthMode(authMode==='signup'?'login':'signup');setAuthError('');setEmailOtpPending(false);setPhoneAuthPending(false);}} style={{padding:16,alignItems:'center'}}><Text style={{color:C.green,fontWeight:'800'}}>{authMode==='signup'?'Already have an account? Sign in':'New to Guftin? Create account'}</Text></Btn>
+          {authMode==='signup'?<Text style={{color:C.muted,fontSize:10,textAlign:'center',marginTop:8,lineHeight:16}}>Gmail accounts use email verification and password. Phone-only accounts use an SMS code. Both mode verifies each address separately.</Text>:null}
 
       </ScrollView>
     </SafeAreaView>;
@@ -4023,9 +4153,11 @@ function GuftinApp() {
           <TextInput value={profileName} onChangeText={setProfileName} placeholder="Your display name" autoCapitalize="words" style={{backgroundColor:C.white,borderRadius:15,padding:16,marginBottom:10,color:C.ink}}/>
           <TextInput value={profileUsername} onChangeText={v=>setProfileUsername(v.toLowerCase().replace(/[^a-z0-9_]/g,''))} placeholder="Username (3-24 characters)" autoCapitalize="none" style={{backgroundColor:C.white,borderRadius:15,padding:16,marginBottom:10,color:C.ink}}/>
           <Text style={{fontSize:11,color:C.muted,marginBottom:14}}>Allowed: lowercase letters, numbers and underscore.</Text>
-          <Text style={{fontSize:13,fontWeight:'900',color:C.ink,marginBottom:7}}>Mobile number (optional)</Text>
-          <TextInput value={profilePhone} onChangeText={v=>{setProfilePhone(v);setPhoneVerifyError('');}} placeholder="+92 300 1234567" keyboardType="phone-pad" autoComplete="tel" style={{backgroundColor:C.white,borderRadius:15,padding:16,marginBottom:8,color:C.ink}}/>
-          <Text style={{fontSize:11,color:C.muted,lineHeight:17,marginBottom:14}}>You can skip this. Add a number only if you want people who have it saved in their phone contacts to find your Guftin account. It must be verified by SMS; your number stays private.</Text>
+          {!session?.user?.phone?<>
+            <Text style={{fontSize:13,fontWeight:'900',color:C.ink,marginBottom:7}}>Mobile number (optional)</Text>
+            <TextInput value={profilePhone} onChangeText={v=>{setProfilePhone(v);setPhoneVerifyError('');}} placeholder="+92 300 1234567" keyboardType="phone-pad" autoComplete="tel" style={{backgroundColor:C.white,borderRadius:15,padding:16,marginBottom:8,color:C.ink}}/>
+            <Text style={{fontSize:11,color:C.muted,lineHeight:17,marginBottom:14}}>Add a number only if you want others to find your Guftin account using it. Guftin verifies it by SMS and does not show it to contacts. You can skip this.</Text>
+          </>:<Text style={{fontSize:11,color:C.green,lineHeight:17,marginBottom:14}}>Your mobile number is already verified and linked to this Guftin account.</Text>}
           <Btn disabled={savingProfile} onPress={()=>void finishProfile(false)} style={{backgroundColor:C.green,padding:17,borderRadius:16,alignItems:'center'}}>{savingProfile?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>{profilePhone.trim()?'Save and verify number':'Save and continue'}</Text>}</Btn>
           <Btn disabled={savingProfile} onPress={()=>void finishProfile(true)} style={{padding:14,alignItems:'center'}}><Text style={{color:C.muted,fontWeight:'800'}}>Skip phone number</Text></Btn>
         </>}
@@ -4552,8 +4684,8 @@ function GuftinApp() {
       <View style={{flex:1,backgroundColor:'#0008',justifyContent:'center',padding:22}}>
         <View style={{backgroundColor:C.white,borderRadius:22,padding:20,maxHeight:'88%'}}>
           <Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>Add a new Guftin contact</Text>
-          <Text style={{color:C.muted,lineHeight:19,marginTop:7,marginBottom:12}}>Find someone by their Guftin username, or check your phone contacts for verified Guftin accounts.</Text>
-          <TextInput value={contactUsername} onChangeText={v=>setContactUsername(v.toLowerCase().replace(/[^a-z0-9_]/g,''))} autoCapitalize="none" placeholder="Username (without @)" style={{backgroundColor:C.paper,borderRadius:14,padding:15,color:C.ink}}/>
+          <Text style={{color:C.muted,lineHeight:19,marginTop:7,marginBottom:12}}>Search by Guftin username, Gmail/email address, or the mobile number linked to that account.</Text>
+          <TextInput value={contactUsername} onChangeText={setContactUsername} autoCapitalize="none" autoCorrect={false} placeholder="Username, email or mobile number" style={{backgroundColor:C.paper,borderRadius:14,padding:15,color:C.ink}}/>
           <Text style={{color:C.muted,fontSize:11,lineHeight:16,marginTop:8}}>A conversation is created only when you open the person and send your first message or place a call.</Text>
           <Btn disabled={phoneContactsLoading} onPress={()=>void findPhoneContacts()} style={{backgroundColor:C.mint,padding:13,borderRadius:13,marginTop:12,alignItems:'center'}}>
             {phoneContactsLoading?<ActivityIndicator color={C.green}/>:<Text style={{color:C.green,fontWeight:'900'}}>Find Guftin accounts in phone contacts</Text>}
@@ -4573,7 +4705,7 @@ function GuftinApp() {
           <Btn onPress={()=>{setAddOpen(false);void openGroupCreator();}} style={{padding:10,alignSelf:'flex-start',marginTop:8}}><Text style={{color:C.green,fontWeight:'800'}}>👥 Create a group instead</Text></Btn>
           <View style={{flexDirection:'row',justifyContent:'flex-end',gap:10,marginTop:12}}>
             <Btn onPress={()=>setAddOpen(false)} style={{padding:13}}><Text style={{color:C.muted,fontWeight:'700'}}>Cancel</Text></Btn>
-            <Btn disabled={adding} onPress={addContact} style={{backgroundColor:C.green,paddingHorizontal:18,paddingVertical:13,borderRadius:13}}>{adding?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'800'}}>Add by username</Text>}</Btn>
+            <Btn disabled={adding} onPress={addContact} style={{backgroundColor:C.green,paddingHorizontal:18,paddingVertical:13,borderRadius:13}}>{adding?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'800'}}>Find and open chat</Text>}</Btn>
           </View>
         </View>
       </View>
