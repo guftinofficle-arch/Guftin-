@@ -917,6 +917,9 @@ function GuftinApp() {
   const [aboutVisibility,setAboutVisibility]=useState<'everyone'|'contacts'|'nobody'|'selected'>('everyone');
   const [privacySettingsLoaded,setPrivacySettingsLoaded]=useState(false);
   const [deviceManagerOpen,setDeviceManagerOpen]=useState(false);
+  const [blockedUsers,setBlockedUsers]=useState<any[]>([]);
+  const [blockedUsersOpen,setBlockedUsersOpen]=useState(false);
+  const [blockedUsersLoading,setBlockedUsersLoading]=useState(false);
   const [registeredDevices,setRegisteredDevices]=useState<any[]>([]);
   const [devicesLoading,setDevicesLoading]=useState(false);
   const [mediaAutoDownload,setMediaAutoDownload]=useState(false);
@@ -2847,6 +2850,25 @@ function GuftinApp() {
     if(data===true)throw new Error('Messaging is unavailable because one of the participants has blocked the other.');
   };
 
+  const loadBlockedUsers=async()=>{
+    if(!session?.user?.id)return;
+    setBlockedUsersLoading(true);
+    try{
+      const {data,error}=await supabase.from('kc_user_blocks').select('blocked_user_id,created_at').eq('blocker_id',session.user.id).order('created_at',{ascending:false});
+      if(error)throw error;
+      setBlockedUsers(data||[]);
+    }catch(error:any){Alert.alert('Blocked users unavailable',error?.message||'Please try again.');}
+    finally{setBlockedUsersLoading(false);}
+  };
+  const unblockContact=async(userId:string)=>{
+    try{
+      const {error}=await supabase.from('kc_user_blocks').delete().eq('blocker_id',session.user.id).eq('blocked_user_id',userId);
+      if(error)throw error;
+      setBlockedUsers(prev=>prev.filter(item=>item.blocked_user_id!==userId));
+      Alert.alert('Contact unblocked','This user is no longer on your blocked list.');
+    }catch(error:any){Alert.alert('Could not unblock contact',error?.message||'Please try again.');}
+  };
+
   const blockCurrentContact=async(chat:Chat)=>{
     if(!session?.user?.id||chat.kind!=='direct')return;
     try{
@@ -4404,14 +4426,6 @@ function GuftinApp() {
         {authError?<Text style={{color:C.red,fontSize:12,lineHeight:18,marginBottom:12}}>{authError}</Text>:null}
         {authMode==='login'?<Btn disabled={authBusy} onPress={requestPasswordReset} style={{padding:10,alignItems:'center'}}><Text style={{color:C.green,fontWeight:'800'}}>Forgot password?</Text></Btn>:null}
         <Btn disabled={authBusy} onPress={()=>authMode==='signup'?void signUpEmail():void signInEmail()} style={{backgroundColor:C.green,padding:17,borderRadius:16,alignItems:'center'}}>{authBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>{authMode==='signup'?'Create account':'Sign in'}</Text>}</Btn>
-        <View style={{flexDirection:'row',alignItems:'center',gap:12,marginVertical:14}}>
-          <View style={{flex:1,height:1,backgroundColor:C.line}}/><Text style={{color:C.muted,fontSize:11,fontWeight:'700'}}>OR</Text><View style={{flex:1,height:1,backgroundColor:C.line}}/>
-        </View>
-        <Btn disabled={googleBusy||authBusy} onPress={()=>void signInGoogle()} style={{backgroundColor:C.white,borderWidth:1,borderColor:C.line,padding:16,borderRadius:16,alignItems:'center',flexDirection:'row',justifyContent:'center',gap:10}}>
-          {googleBusy?<ActivityIndicator color={C.green}/>:<Text style={{fontSize:17,fontWeight:'900',color:'#4285F4'}}>G</Text>}
-          <Text style={{color:C.ink,fontWeight:'900'}}>{googleBusy?'Connecting to Google...':'Continue with Google'}</Text>
-        </Btn>
-        <Text style={{color:C.muted,fontSize:10,textAlign:'center',marginTop:7}}>Create a new Guftin account or sign in securely with Google.</Text>
         <Btn onPress={()=>{setAuthMode(authMode==='signup'?'login':'signup');setAuthError('');setEmailOtpPending(false);}} style={{padding:16,alignItems:'center'}}><Text style={{color:C.green,fontWeight:'800'}}>{authMode==='signup'?'Already have an account? Sign in':'New to Guftin? Create account'}</Text></Btn>
         {authMode==='signup'?<Text style={{color:C.muted,fontSize:10,textAlign:'center',marginTop:8,lineHeight:16}}>Email verification is required for email signup. A mobile number is optional and is never used to sign in.</Text>:null}
 
@@ -4921,6 +4935,8 @@ function GuftinApp() {
         <Btn onPress={()=>{setSettingsOpen(false);setSavedItemsOpen(true);void loadSavedItems();}} style={{backgroundColor:C.mint,borderRadius:12,padding:13,marginBottom:12}}>
           <Text style={{color:C.green,fontWeight:'900'}}>★  Open Saved Items</Text>
         </Btn>
+        <Btn onPress={()=>{setBlockedUsersOpen(v=>!v);if(!blockedUsersOpen)void loadBlockedUsers();}} style={{backgroundColor:C.mint,borderRadius:12,padding:13,marginBottom:12}}><Text style={{color:C.green,fontWeight:'900'}}>Manage blocked users　›</Text></Btn>
+        {blockedUsersOpen?<View style={{backgroundColor:C.white,borderRadius:12,padding:12,marginBottom:12,borderWidth:1,borderColor:C.line}}><Text style={{color:C.ink,fontWeight:'900',marginBottom:8}}>Blocked accounts ({blockedUsers.length})</Text>{blockedUsersLoading?<ActivityIndicator color={C.green}/>:blockedUsers.length===0?<Text style={{color:C.muted,fontSize:12}}>You have not blocked anyone.</Text>:blockedUsers.map(item=><View key={item.blocked_user_id} style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingVertical:8,borderBottomWidth:1,borderColor:C.line}}><Text numberOfLines={1} style={{color:C.ink,flex:1,fontSize:11}}>{item.blocked_user_id}</Text><Btn onPress={()=>void unblockContact(item.blocked_user_id)} style={{paddingHorizontal:12,paddingVertical:7,backgroundColor:C.paper,borderRadius:9}}><Text style={{color:C.green,fontWeight:'900'}}>Unblock</Text></Btn></View>)}</View>:null}
         <Btn onPress={()=>{setSettingsOpen(false);setDeviceManagerOpen(true);void loadRegisteredDevices();}} style={{backgroundColor:C.mint,borderRadius:12,padding:13,marginBottom:12}}>
           <Text style={{color:C.green,fontWeight:'900'}}>⌁  Linked encryption devices</Text>
         </Btn>
