@@ -3612,7 +3612,7 @@ function GuftinApp() {
   const linkEmailToAccount=async()=>{
     const cleanEmail=accountEmailInput.trim().toLowerCase();
     if(!session){setAccountEmailNotice('Sign in before linking an email address.');return;}
-    if(!/^\\S+@\\S+\\.\\S+$/.test(cleanEmail)){setAccountEmailNotice('Enter a valid email address.');return;}
+    if(!/^\S+@\S+\.\S+$/.test(cleanEmail)){setAccountEmailNotice('Enter a valid email address.');return;}
     if(accountEmailPassword.length<8){setAccountEmailNotice('Create a password with at least 8 characters.');return;}
     setAccountEmailBusy(true);setAccountEmailNotice('');
     try{
@@ -4438,7 +4438,7 @@ function GuftinApp() {
               <Text style={{fontSize:22,color:C.green,fontWeight:'700'}}>›</Text>
             </Btn>
           </View>}
-          ListEmptyComponent={<View style={{alignItems:'center',padding:35,marginTop:34}}><BrandLogo size={64}/><Text style={{fontSize:17,fontWeight:'900',color:C.ink,marginTop:15}}>No conversations yet</Text><Text style={{color:C.muted,textAlign:'center',marginTop:7,lineHeight:20}}>Add a contact above using their unique username. Your chat appears when you send the first message or start a call.</Text></View>}
+          ListEmptyComponent={<View style={{alignItems:'center',padding:35,marginTop:34}}><BrandLogo size={64}/><Text style={{fontSize:17,fontWeight:'900',color:C.ink,marginTop:15}}>No conversations yet</Text><Text style={{color:C.muted,textAlign:'center',marginTop:7,lineHeight:20}}>Add a contact above using their username, verified email address or verified mobile number. Your chat appears when you send the first message or start a call.</Text></View>}
           renderItem={({item})=><Btn onPress={()=>openChat(item)} onLongPress={()=>Alert.alert('Chat options',item.name,[{text:'Delete chat for me',style:'destructive',onPress:()=>void hideChat(item)},{text:'Cancel',style:'cancel'}])} style={{flexDirection:'row',alignItems:'center',padding:10,gap:12,borderRadius:17}}>
             <Avatar label={item.avatar} color={item.color} online={item.online} uri={item.avatarUrl}/>
             <View style={{flex:1,borderBottomWidth:1,borderColor:C.line,paddingBottom:14,paddingTop:2}}>
