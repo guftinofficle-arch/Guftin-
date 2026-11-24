@@ -2036,7 +2036,8 @@ function GuftinApp() {
     if(!session?.user?.id||!deviceIdentity)throw new Error('Secure chat is not ready.');
     const {data:members,error:membersError}=await supabase.from('kc_conversation_members').select('user_id').eq('conversation_id',conversationId);
     if(membersError)throw membersError;
-    const memberIds=[...new Set((members||[]).map((row:any)=>row.user_id))] as string[];
+    const memberRows:any[]=(members||[]) as any[];
+    const memberIds=[...new Set(memberRows.map((row:any)=>row.user_id))] as string[];
     if(!memberIds.includes(session.user.id))throw new Error('You are no longer a member of this group.');
     const {data:devices,error:devicesError}=await supabase.from('kc_e2ee_devices').select('id,user_id,public_key').in('user_id',memberIds).is('revoked_at',null);
     if(devicesError)throw devicesError;
@@ -2049,8 +2050,8 @@ function GuftinApp() {
     if(!session?.user?.id||!deviceIdentity)return;
     setGroupCollabLoading(true);
     try{
-      const rows=await upgrade20.listPolls(conversationId);
-      const mapped=(rows||[]).map((poll:any)=>{
+      const rows:any[]=(await upgrade20.listPolls(conversationId)) as any[];
+      const mapped=rows.map((poll:any)=>{
         const open=(value:string)=>{try{return value?.startsWith(E2EE_PREFIX)?decryptMessageForDevice(value,deviceIdentity):'Encrypted poll';}catch{return 'Could not decrypt poll on this device.';}};
         const votes=Array.isArray(poll.kc_poll_votes)?poll.kc_poll_votes:[];
         const options=(poll.kc_poll_options||[]).slice().sort((a:any,b:any)=>a.sort_order-b.sort_order).map((option:any)=>({id:option.id,label:open(option.option_envelope),voteCount:votes.filter((vote:any)=>vote.option_id===option.id).length}));
@@ -2064,9 +2065,9 @@ function GuftinApp() {
   const loadGroupEvents=async(conversationId:string)=>{
     if(!session?.user?.id||!deviceIdentity)return;
     try{
-      const rows=await upgrade20.listGroupEvents(conversationId);
+      const rows:any[]=(await upgrade20.listGroupEvents(conversationId)) as any[];
       const open=(value:string)=>{try{return value?.startsWith(E2EE_PREFIX)?decryptMessageForDevice(value,deviceIdentity):'Encrypted event';}catch{return 'Could not decrypt event on this device.';}};
-      setGroupEvents((rows||[]).map((event:any)=>({...event,title:open(event.title_envelope),details:event.details_envelope?open(event.details_envelope):''})));
+      setGroupEvents(rows.map((event:any)=>({...event,title:open(event.title_envelope),details:event.details_envelope?open(event.details_envelope):''})));
     }catch(error:any){console.warn('Group events could not load:',error?.message||error);setGroupEvents([]);}
   };
 
