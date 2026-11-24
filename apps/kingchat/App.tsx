@@ -897,6 +897,13 @@ function GuftinApp() {
   const [editHistoryVisible,setEditHistoryVisible]=useState(false);
   const [editHistoryLoading,setEditHistoryLoading]=useState(false);
   const [editHistoryRows,setEditHistoryRows]=useState<any[]>([]);
+  const [groupPolls,setGroupPolls]=useState<any[]>([]);
+  const [groupCollabLoading,setGroupCollabLoading]=useState(false);
+  const [pollCreateVisible,setPollCreateVisible]=useState(false);
+  const [pollQuestion,setPollQuestion]=useState('');
+  const [pollOptionsText,setPollOptionsText]=useState('');
+  const [pollAllowsMultiple,setPollAllowsMultiple]=useState(false);
+  const [pollBusy,setPollBusy]=useState(false);
   const [savedItemsOpen,setSavedItemsOpen]=useState(false);
   const [savedItems,setSavedItems]=useState<any[]>([]);
   const [savedItemsLoading,setSavedItemsLoading]=useState(false);
@@ -2017,6 +2024,63 @@ function GuftinApp() {
     }catch(error:any){Alert.alert('Edit history unavailable',error?.message||'Please try again.');}
     finally{setEditHistoryLoading(false);}
   };
+
+  const encryptConversationText=async(conversationId:string,plainText:string)=>{
+    if(!session?.user?.id||!deviceIdentity)throw new Error('Secure chat is not ready.');
+    const {data:members,error:membersError}=await supabase.from('kc_conversation_members').select('user_id').eq('conversation_id',conversationId);
+    if(membersError)throw membersError;
+    const memberIds=[...new Set((members||[]).map((row:any)=>row.user_id))] as string[];
+    if(!memberIds.includes(session.user.id))throw new Error('You are no longer a member of this group.');
+    const {data:devices,error:devicesError}=await supabase.from('kc_e2ee_devices').select('id,user_id,public_key').in('user_id',memberIds).is('revoked_at',null);
+    if(devicesError)throw devicesError;
+    const registeredUsers=new Set((devices||[]).map((device:any)=>device.user_id));
+    if(memberIds.some(id=>!registeredUsers.has(id)))throw new Error('Every group member must register a secure device before creating an encrypted poll.');
+    return encryptMessageForDevices(plainText,devices||[],deviceIdentity);
+  };
+
+  const loadGroupPolls=async(conversationId:string)=>{
+    if(!session?.user?.id||!deviceIdentity)return;
+    setGroupCollabLoading(true);
+    try{
+      const rows=await upgrade20.listPolls(conversationId);
+      const mapped=(rows||[]).map((poll:any)=>{
+        const open=(value:string)=>{try{return value?.startsWith(E2EE_PREFIX)?decryptMessageForDevice(value,deviceIdentity):'Encrypted poll';}catch{return 'Could not decrypt poll on this device.';}};
+        const votes=Array.isArray(poll.kc_poll_votes)?poll.kc_poll_votes:[];
+        const options=(poll.kc_poll_options||[]).slice().sort((a:any,b:any)=>a.sort_order-b.sort_order).map((option:any)=>({id:option.id,label:open(option.option_envelope),voteCount:votes.filter((vote:any)=>vote.option_id===option.id).length}));
+        return {...poll,question:open(poll.question_envelope),options,myVoteOptionIds:votes.filter((vote:any)=>vote.user_id===session.user.id).map((vote:any)=>vote.option_id)};
+      });
+      setGroupPolls(mapped);
+    }catch(error:any){console.warn('Group polls could not load:',error?.message||error);setGroupPolls([]);}
+    finally{setGroupCollabLoading(false);}
+  };
+
+  const createGroupPoll=async()=>{
+    if(!active||active.kind!=='group'||pollBusy)return;
+    const question=pollQuestion.trim();
+    const options=pollOptionsText.split('\\n').map(value=>value.trim()).filter(Boolean);
+    if(!question||options.length<2||options.length>12){Alert.alert('Poll needs more information','Enter a question and between 2 and 12 options, one per line.');return;}
+    setPollBusy(true);
+    try{
+      const questionEnvelope=await encryptConversationText(active.id,question);
+      const optionEnvelopes=await Promise.all(options.map(option=>encryptConversationText(active.id,option)));
+      await upgrade20.createPoll({conversation_id:active.id,question_envelope:questionEnvelope,options:optionEnvelopes,allows_multiple:pollAllowsMultiple});
+      setPollQuestion('');setPollOptionsText('');setPollAllowsMultiple(false);setPollCreateVisible(false);
+      await loadGroupPolls(active.id);
+      Alert.alert('Poll created','Your encrypted group poll is now available to group members.');
+    }catch(error:any){Alert.alert('Poll not created',error?.message||'Please try again.');}
+    finally{setPollBusy(false);}
+  };
+
+  const voteInGroupPoll=async(pollId:string,optionId:string)=>{
+    if(!active||active.kind!=='group')return;
+    try{await upgrade20.castPollVote(pollId,optionId);await loadGroupPolls(active.id);}
+    catch(error:any){Alert.alert('Vote not saved',error?.message||'This poll may be closed or you may have already voted.');}
+  };
+
+  useEffect(()=>{
+    if(active?.kind==='group'&&deviceIdentity)void loadGroupPolls(active.id);
+    else setGroupPolls([]);
+  },[active?.id,active?.kind,deviceIdentity?.deviceId,session?.user?.id]);
 
   const deleteMessage=async(item:Message)=>{
     if(!session)return;
@@ -4632,6 +4696,7 @@ function GuftinApp() {
         </>):null}
         <Btn onPress={()=>active.kind==='channel'?showChannelOptions():Alert.alert('Chat options',active.name,[
           {text:'Chat info',onPress:()=>void openChatDetails()},
+          ...(active.kind==='group'?[{text:'Create group poll',onPress:()=>{setPollQuestion('');setPollOptionsText('');setPollCreateVisible(true);}}]:[]),
           ...(active.kind==='direct'?[{text:'Block contact',style:'destructive' as const,onPress:()=>Alert.alert('Block this contact?', 'They will be added to your blocked users. Existing chat history will remain.',[{text:'Cancel',style:'cancel' as const},{text:'Block',style:'destructive' as const,onPress:()=>void blockCurrentContact(active)}])}]:[]),
           {text:'Chat PIN settings',onPress:()=>void (async()=>{const key=pinStorageKey('chat',active.id);const stored=await SecureStore.getItemAsync(key);const disabled=await AsyncStorage.getItem('guftin-chat-lock-disabled:'+active.id);Alert.alert('Chat PIN',active.name,stored&&disabled!=='1'?[{text:'Unlock Chat',onPress:()=>startPinFlow('unlock-chat',active)},{text:'Permanently Unlock',style:'destructive',onPress:()=>startPinFlow('remove-chat-lock',active)},{text:'Cancel',style:'cancel'}]:[{text:'Lock Chat',onPress:()=>void (async()=>{await AsyncStorage.removeItem('guftin-chat-lock-disabled:'+active.id);startPinFlow('set-chat',active);})()},{text:'Cancel',style:'cancel'}]);})()},
           {text:'Clear Chat',style:'destructive',onPress:()=>Alert.alert('Clear this chat?', 'This removes the messages from your Guftin account on this phone. The other participant keeps their chat history.',[
@@ -4643,6 +4708,7 @@ function GuftinApp() {
       </View>
       {!isOnline?<View style={{backgroundColor:'#fff1d6',paddingHorizontal:14,paddingVertical:8}}><Text style={{color:'#815500',fontSize:11,fontWeight:'800',textAlign:'center'}}>You are offline · Showing saved messages. Sending is unavailable.</Text></View>:null}
       <FlatList ref={chatMessagesListRef} data={list} keyExtractor={m=>m.id} keyboardShouldPersistTaps="handled" style={{flex:1}} contentContainerStyle={{padding:18,gap:12,flexGrow:1,justifyContent:list.length?'flex-end':'center'}}
+        ListHeaderComponent={active.kind==='group'&&(groupPolls.length>0||groupCollabLoading)?<View style={{gap:10,marginBottom:10}}>{groupCollabLoading?<ActivityIndicator color={C.green}/>:null}{groupPolls.map(poll=><View key={poll.id} style={{backgroundColor:C.white,borderWidth:1,borderColor:C.line,borderRadius:15,padding:13}}><Text style={{fontSize:13,fontWeight:'900',color:C.ink}}>{poll.question}</Text><Text style={{fontSize:10,color:C.muted,marginTop:3}}>{poll.allows_multiple?'Multiple choices allowed':'Choose one option'} · {poll.kc_poll_votes?.length||0} votes</Text>{poll.options.map((option:any)=><Btn key={option.id} disabled={!!poll.closed_at||!!poll.myVoteOptionIds.length&&!poll.allows_multiple} onPress={()=>void voteInGroupPoll(poll.id,option.id)} style={{backgroundColor:poll.myVoteOptionIds.includes(option.id)?C.mint:C.paper,borderRadius:10,padding:10,marginTop:7,alignItems:'flex-start'}}><Text style={{color:C.ink,fontSize:12,fontWeight:'800'}}>{option.label}　·　{option.voteCount}</Text></Btn>)}{poll.closed_at?<Text style={{fontSize:10,color:C.muted,marginTop:7}}>Poll closed</Text>:null}</View>)}</View>:null}
         ListEmptyComponent={<Text style={{textAlign:'center',color:C.muted}}>No messages yet. Send the first message.</Text>}
         renderItem={({item})=><TouchableOpacity activeOpacity={1} onLongPress={active.kind==='channel'&&!active.isChannelOwner?undefined:()=>deleteMessage(item)} delayLongPress={420} style={{alignSelf:item.mine?'flex-end':'flex-start',maxWidth:'84%',backgroundColor:item.mine?'#dff4e8':C.white,padding:13,borderRadius:17,borderTopRightRadius:item.mine?5:17,borderTopLeftRadius:item.mine?17:5}}>
           {item.deleted_at?<Text style={{fontSize:12,color:C.muted,fontStyle:'italic'}}>This message was deleted</Text>:item.message_type==='image'&&item.attachment_url?<Image source={{uri:item.attachment_url}} style={{width:210,height:210,borderRadius:12}} resizeMode="cover"/>:item.message_type==='video'&&item.attachment_url?<VideoBubble uri={item.attachment_url}/>:item.message_type==='audio'&&item.attachment_url?<AudioBubble uri={item.attachment_url}/>:item.message_type==='file'&&item.attachment_url?<View style={{minWidth:225,maxWidth:270,backgroundColor:C.paper,borderRadius:13,padding:12}}>
@@ -5018,6 +5084,19 @@ function GuftinApp() {
           </View>)}
         </ScrollView>
       </SafeAreaView>
+    </Modal>
+
+    <Modal visible={pollCreateVisible} transparent animationType="fade" onRequestClose={()=>{if(!pollBusy)setPollCreateVisible(false);}}>
+      <View style={{flex:1,backgroundColor:'#0009',justifyContent:'center',padding:22}}>
+        <View style={{backgroundColor:C.white,borderRadius:20,padding:18}}>
+          <Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>Create group poll</Text>
+          <Text style={{fontSize:11,color:C.muted,marginTop:5,marginBottom:12}}>The question and every option are encrypted for group devices.</Text>
+          <TextInput value={pollQuestion} onChangeText={setPollQuestion} placeholder="Ask a question" maxLength={300} style={{backgroundColor:C.paper,borderRadius:12,padding:12,color:C.ink,marginBottom:9}}/>
+          <TextInput value={pollOptionsText} onChangeText={setPollOptionsText} placeholder={'Option 1\\nOption 2\\nOption 3'} multiline maxLength={1200} style={{minHeight:110,backgroundColor:C.paper,borderRadius:12,padding:12,color:C.ink,textAlignVertical:'top'}}/>
+          <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingVertical:10}}><View style={{flex:1}}><Text style={{color:C.ink,fontWeight:'800'}}>Allow multiple choices</Text><Text style={{color:C.muted,fontSize:10}}>Members may vote for more than one option</Text></View><Switch value={pollAllowsMultiple} onValueChange={setPollAllowsMultiple} trackColor={{true:C.green}}/></View>
+          <View style={{flexDirection:'row',justifyContent:'flex-end',gap:10,marginTop:8}}><Btn disabled={pollBusy} onPress={()=>setPollCreateVisible(false)} style={{padding:12}}><Text style={{color:C.muted,fontWeight:'800'}}>Cancel</Text></Btn><Btn disabled={pollBusy||!pollQuestion.trim()||pollOptionsText.split('\\n').filter(x=>x.trim()).length<2} onPress={()=>void createGroupPoll()} style={{backgroundColor:C.green,paddingHorizontal:16,paddingVertical:12,borderRadius:11}}>{pollBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Create poll</Text>}</Btn></View>
+        </View>
+      </View>
     </Modal>
 
     <Modal visible={advancedCenterOpen} animationType="slide" onRequestClose={()=>setAdvancedCenterOpen(false)}>
