@@ -4242,7 +4242,7 @@ function GuftinApp() {
         </>):null}
         <Btn onPress={()=>active.kind==='channel'?showChannelOptions():Alert.alert('Chat options',active.name,[
           {text:'Chat info',onPress:()=>void openChatDetails()},
-          {text:'Lock / Unlock Chat',onPress:()=>void (async()=>{const key=pinStorageKey('chat',active.id);const stored=await SecureStore.getItemAsync(key);if(stored)startPinFlow('unlock-chat',active);else startPinFlow('set-chat',active);})()},
+          {text:'Chat PIN settings',onPress:()=>void (async()=>{const key=pinStorageKey('chat',active.id);const stored=await SecureStore.getItemAsync(key);Alert.alert('Chat PIN',active.name,[{text:stored?'Unlock Chat':'Lock Chat',onPress:()=>stored?startPinFlow('unlock-chat',active):startPinFlow('set-chat',active)},{text:'Cancel',style:'cancel'}]);})()},
           {text:'Clear Chat',style:'destructive',onPress:()=>Alert.alert('Clear this chat?', 'This removes the messages from your Guftin account on this phone. The other participant keeps their chat history.',[
             {text:'Cancel',style:'cancel'},
             {text:'Clear Chat',style:'destructive',onPress:()=>void clearChatForMe(active)}
