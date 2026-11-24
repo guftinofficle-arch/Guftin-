@@ -80,10 +80,10 @@ begin
   if not exists(select 1 from public.kc_conversation_members where conversation_id=p_conversation_id and user_id=p_new_owner_id) then
     raise exception 'The new owner must already be a group member.';
   end if;
-  update public.kc_conversations set created_by=p_new_owner_id,updated_at=now() where id=p_conversation_id;
   update public.kc_conversation_members set role=case when p_keep_old_owner_admin then 'admin' else 'member' end
   where conversation_id=p_conversation_id and user_id=v_owner;
   update public.kc_conversation_members set role='owner' where conversation_id=p_conversation_id and user_id=p_new_owner_id;
+  update public.kc_conversations set created_by=p_new_owner_id,updated_at=now() where id=p_conversation_id;
 end;
 $$;
 revoke all on function public.kc_transfer_group_ownership(uuid,uuid,boolean) from public, anon;\ngrant execute on function public.kc_transfer_group_ownership(uuid,uuid,boolean) to authenticated;
@@ -103,7 +103,7 @@ using(kind='group' and (created_by=(select auth.uid()) or exists(
 )))
 with check(kind='group' and exists(
   select 1 from public.kc_conversation_members m
-  where m.conversation_id=id and m.user_id=(select auth.uid()) and m.role in ('owner','admin')
+  where m.conversation_id=id and m.user_id=created_by and m.role in ('owner','admin')
 ));
 grant update(title,photo_url,updated_at,created_by) on public.kc_conversations to authenticated;
 
