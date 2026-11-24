@@ -2825,7 +2825,2291 @@ function GuftinApp() {
     setDraft('');
   };
 
+  const assertDirectConversationAllowed=async(conversationId:string)=>{
+    if(!session?.user?.id)throw new Error('Sign in required.');
+    const {data:members,error:membersError}=await supabase.from('kc_conversation_members')
+      .select('user_id').eq('conversation_id',conversationId);
+    if(membersError)throw membersError;
+    const ids=[...new Set((members||[]).map((row:any)=>row.user_id))] as string[];
+    if(ids.length!==2)return;
+    const peer=ids.find(id=>id!==session.user.id);
+    if(!peer)return;
+    const {data,error}=await supabase.rpc('kc_is_user_blocked',{p_other_user_id:peer});
+    if(error)throw error;
+    if(data===true)throw new Error('Messaging is unavailable because one of the participants has blocked the other.');
+  };
+
   const blockCurrentContact=async(chat:Chat)=>{
+    if(!session?.user?.id||chat.kind!=='direct')return;
+    try{
+      const {data:members,error:membersError}=await supabase.from('kc_conversation_members')
+        .select('user_id').eq('conversation_id',chat.id);
+      if(membersError)throw membersError;
+      const peer=(members||[]).map((row:any)=>row.user_id).find((id:string)=>id!==session.user.id);
+      if(!peer)throw new Error('Could not identify the other participant.');
+      const {error}=await supabase.from('kc_user_blocks').upsert(
+        {blocker_id:session.user.id,blocked_user_id:peer},
+        {onConflict:'blocker_id,blocked_user_id'}
+      );
+      if(error)throw error;
+      Alert.alert('Contact blocked','This contact has been added to your blocked users. Existing chat history has not been deleted.');
+    }catch(error:any){
+      Alert.alert('Could not block contact',error?.message||'Please try again.');
+    }
+  };
+
+  const sendMessage=async()=>{
+    const body=draft.trim();
+    if(!body||!active||!session||sending||clearingConversationIds.current.has(active.id))return;
+    if(active.kind==='channel'){
+      if(!active.isChannelOwner){Alert.alert('Channel is read-only','Only the channel owner can publish updates.');return;}
+      setSending(true);
+      try{
+        const {data,error}=await supabase.from('kc_messages').insert({conversation_id:active.id,sender_id:session.user.id,body,message_type:'text'})
+          .select('id,conversation_id,sender_id,body,message_type,created_at').single();
+        if(error)throw error;
+        const item:Message={...data,mine:true};
+        setMessages(prev=>({...prev,[active.id]:[...(prev[active.id]||[]),item]}));
+        setDraft('');
+        setChats(prev=>prev.map(chat=>chat.id===active.id?{...chat,last:body,time:timeLabel(data.created_at),lastAt:Date.now()}:chat));
+        void dispatchPush(active.isOfficial?'official_broadcast':'message',data.id);
+      }catch(error:any){Alert.alert('Channel update not sent',error?.message||'Please try again.');}
+      finally{setSending(false);}
+      return;
+    }
+    // Text can be stored locally before the encryption roster is online.
+    // The background sender waits for the device key and network before delivery.
+    setSending(true);
+    try{
+      const chatToSend=await ensureActiveDirectConversation(active);
+      await assertDirectConversationAllowed(chatToSend.id);
+      // Save locally first. The composer clears as soon as the message is safely queued;
+      // server encryption, upload, and push delivery happen in the background.
+      await queueOfflineTextMessage(chatToSend.id,body,chatToSend);
+      setSending(false);
+      void flushPendingMessagesRef.current?.();
+    }catch(error:any){
+      setSending(false);
+      Alert.alert('Message could not be saved',error?.message||'Your draft is still available. Please try again.');
+    }
+  };
+
+  const flushPendingMessages=useCallback(async(force=false)=>{
+    if(!session||!deviceIdentity||e2eeStatus!=='ready'||!onlineRef.current||flushingPendingMessages.current)return;
+    flushingPendingMessages.current=true;
+    try{
+      const queueKey='guftin-pending-messages:'+session.user.id;
+      let queue:any[]=[];
+      try{const raw=await AsyncStorage.getItem(queueKey);queue=raw?JSON.parse(raw):[];}catch{return;}
+      if(!Array.isArray(queue)||queue.length===0)return;
+      const remaining:any[]=[];
+      for(let index=0;index<queue.length;index++){
+        const pending=queue[index];
+        if(clearingConversationIds.current.has(pending.conversation_id))continue;
+        if(!force&&Number(pending.nextAttemptAt||0)>Date.now()){remaining.push(pending);continue;}
+        try{
+          await assertDirectConversationAllowed(pending.conversation_id);
+          const {data:members,error:membersError}=await supabase.from('kc_conversation_members')
+            .select('user_id').eq('conversation_id',pending.conversation_id);
+          if(membersError)throw membersError;
+          const memberIds=[...new Set((members||[]).map((row:any)=>row.user_id))] as string[];
+          if(!memberIds.includes(session.user.id))throw new Error('You are no longer a member of this conversation.');
+          const {data:devices,error:devicesError}=await supabase.from('kc_e2ee_devices')
+            .select('id,user_id,public_key').in('user_id',memberIds).is('revoked_at',null);
+          if(devicesError)throw devicesError;
+          const registeredUsers=new Set((devices||[]).map((device:any)=>device.user_id));
+          if(memberIds.some(id=>!registeredUsers.has(id)))throw new Error('A conversation member has not registered a secure device yet.');
+          const encryptedBody=encryptMessageForDevices(pending.text,devices||[],deviceIdentity);
+          if(clearingConversationIds.current.has(pending.conversation_id))continue;
+          const inserted=await supabase.from('kc_messages').insert({
+            id:pending.id,conversation_id:pending.conversation_id,sender_id:session.user.id,
+            body:encryptedBody,message_type:'text'
+          }).select('id,conversation_id,sender_id,message_type,created_at').single();
+          let saved=inserted.data;
+          if(inserted.error){
+            if(inserted.error.code==='23505'){
+              const existing=await supabase.from('kc_messages')
+                .select('id,conversation_id,sender_id,message_type,created_at').eq('id',pending.id).maybeSingle();
+              if(existing.error||!existing.data)throw inserted.error;
+              saved=existing.data;
+            }else throw inserted.error;
+          }
+          if(!saved)throw new Error('The queued message was not confirmed by the server.');
+          const sentItem:Message={...saved,body:pending.text,mine:true,pending:false};
+          setMessages(prev=>({...prev,[pending.conversation_id]:[
+            ...(prev[pending.conversation_id]||[]).filter(item=>item.id!==pending.localId&&item.id!==pending.id),sentItem
+          ]}));
+          void dispatchPush('message',saved.id);
+        }catch(error:any){
+          const attempts=(Number(pending.attempts)||0)+1;
+          const transient=isConnectivityFailure(error);
+          const delay=Math.min(transient?120000:900000,(transient?5000:30000)*Math.pow(2,Math.min(attempts-1,6)));
+          remaining.push({...pending,attempts,nextAttemptAt:Date.now()+delay,lastError:String(error?.message||error||'Send failed').slice(0,180)});
+          remaining.push(...queue.slice(index+1));
+          if(!transient)console.warn('Pending message paused with backoff:',error?.message||error);
+          break;
+        }
+      }
+      // Preserve any messages appended while this batch was uploading.
+      let concurrentItems:any[]=[];
+      try{
+        const latestRaw=await AsyncStorage.getItem(queueKey);
+        const latest=latestRaw?JSON.parse(latestRaw):[];
+        if(Array.isArray(latest)){
+          const originalIds=new Set(queue.map((item:any)=>item.id));
+          concurrentItems=latest.filter((item:any)=>!originalIds.has(item.id));
+        }
+      }catch{}
+      await AsyncStorage.setItem(queueKey,JSON.stringify([...remaining,...concurrentItems])).catch(()=>{});
+      if(remaining.length<queue.length)void loadInbox();
+    }finally{
+      flushingPendingMessages.current=false;
+    }
+  },[session,deviceIdentity,e2eeStatus,loadInbox]);
+  flushPendingMessagesRef.current=flushPendingMessages;
+
+  const queueOfflineMedia=async(conversationId:string,asset:any,messageType:'image'|'video'|'file',contentType:string,id:string,localId:string)=>{
+    if(!session||!deviceIdentity)throw new Error('Secure chat is not ready.');
+    if(clearingConversationIds.current.has(conversationId))throw new Error('This chat is being cleared. Please try again in a moment.');
+    const sourceFile=new File(asset.uri);
+    const plainBytes=new Uint8Array(await sourceFile.arrayBuffer());
+    const selfDevice={id:deviceIdentity.deviceId,user_id:session.user.id,public_key:deviceIdentity.publicKeyHex};
+    const localEncrypted=encryptMediaForDevices(
+      plainBytes,[selfDevice],deviceIdentity,contentType,
+      asset.fileName||('attachment.'+(messageType==='video'?'mp4':messageType==='image'?'jpg':'bin'))
+    );
+    plainBytes.fill(0);
+    const localPath=new File(Paths.document,'guftin-pending-'+id+'.enc');
+    if(localPath.exists)localPath.delete();
+    localPath.create();
+    await localPath.write(localEncrypted.ciphertext);
+    localEncrypted.ciphertext.fill(0);
+    const entry={
+      id,localId,conversation_id:conversationId,message_type:messageType,contentType,
+      fileName:asset.fileName||('attachment.'+(messageType==='video'?'mp4':messageType==='image'?'jpg':'bin')),
+      localBody:localEncrypted.body,localFileUri:localPath.uri,created_at:new Date().toISOString()
+    };
+    if(clearingConversationIds.current.has(conversationId))throw new Error('This chat is being cleared. Please try again in a moment.');
+    const queueKey='guftin-pending-media:'+session.user.id;
+    let queue:any[]=[];
+    try{const raw=await AsyncStorage.getItem(queueKey);queue=raw?JSON.parse(raw):[];if(!Array.isArray(queue))queue=[];}catch{queue=[];}
+    if(clearingConversationIds.current.has(conversationId))throw new Error('This chat is being cleared. Please try again in a moment.');
+    queue.push(entry);
+    await AsyncStorage.setItem(queueKey,JSON.stringify(queue));
+    void AsyncStorage.setItem('guftin-cache-messages:'+session.user.id+':'+conversationId,
+      JSON.stringify(messages[conversationId]||[])).catch(()=>{});
+  };
+
+  const flushPendingMedia=useCallback(async(force=false)=>{
+    if(!session||!deviceIdentity||e2eeStatus!=='ready'||!onlineRef.current||flushingPendingMedia.current)return;
+    flushingPendingMedia.current=true;
+    try{
+      const queueKey='guftin-pending-media:'+session.user.id;
+      let queue:any[]=[];
+      try{const raw=await AsyncStorage.getItem(queueKey);queue=raw?JSON.parse(raw):[];}catch{return;}
+      if(!Array.isArray(queue)||queue.length===0)return;
+      const remaining:any[]=[];
+      for(let index=0;index<queue.length;index++){
+        const pending=queue[index];
+        if(clearingConversationIds.current.has(pending.conversation_id))continue;
+        if(!force&&Number(pending.nextAttemptAt||0)>Date.now()){remaining.push(pending);continue;}
+        let plainBytes:Uint8Array|undefined;
+        let outboundCipher:Uint8Array|undefined;
+        try{
+          let outboundBody=pending.outboundBody as string|undefined;
+          let outboundFileUri=pending.outboundFileUri as string|undefined;
+          let objectPath=pending.objectPath as string|undefined;
+          if(!outboundBody||!outboundFileUri||!objectPath){
+            const {data:members,error:membersError}=await supabase.from('kc_conversation_members')
+              .select('user_id').eq('conversation_id',pending.conversation_id);
+            if(membersError)throw membersError;
+            const memberIds=[...new Set((members||[]).map((row:any)=>row.user_id))] as string[];
+            if(!memberIds.includes(session.user.id))throw new Error('You are no longer a member of this conversation.');
+            const {data:devices,error:devicesError}=await supabase.from('kc_e2ee_devices')
+              .select('id,user_id,public_key').in('user_id',memberIds).is('revoked_at',null);
+            if(devicesError)throw devicesError;
+            const registeredUsers=new Set((devices||[]).map((device:any)=>device.user_id));
+            if(memberIds.some(id=>!registeredUsers.has(id)))throw new Error('A chat member has not registered a secure device yet.');
+            const encryptedLocal=new File(pending.localFileUri);
+            if(!encryptedLocal.exists)throw new Error('The saved offline media file is missing on this phone.');
+            const localCipher=new Uint8Array(await encryptedLocal.arrayBuffer());
+            const opened=decryptMediaForDevice(localCipher,pending.localBody,deviceIdentity);
+            localCipher.fill(0);
+            plainBytes=opened.bytes;
+            const outgoing=encryptMediaForDevices(plainBytes,devices||[],deviceIdentity,pending.contentType,pending.fileName);
+            outboundBody=outgoing.body;
+            objectPath=session.user.id+'/'+pending.conversation_id+'/queued_'+pending.id+'.enc';
+            const outboundFile=new File(Paths.document,'guftin-outbound-'+pending.id+'.enc');
+            if(outboundFile.exists)outboundFile.delete();
+            outboundFile.create();
+            await outboundFile.write(outgoing.ciphertext);
+            outboundFileUri=outboundFile.uri;
+            outgoing.ciphertext.fill(0);
+            pending.outboundBody=outboundBody;
+            pending.outboundFileUri=outboundFileUri;
+            pending.objectPath=objectPath;
+            queue[index]=pending;
+            await AsyncStorage.setItem(queueKey,JSON.stringify(queue));
+          }
+          const outboundFile=new File(outboundFileUri);
+          if(!outboundFile.exists)throw new Error('The encrypted upload file is missing on this phone.');
+          outboundCipher=new Uint8Array(await outboundFile.arrayBuffer());
+          const existing=await supabase.from('kc_messages')
+            .select('id,conversation_id,sender_id,message_type,attachment_url,created_at')
+            .eq('id',pending.id).maybeSingle();
+          if(existing.error)throw existing.error;
+          let saved=existing.data;
+          if(!saved){
+            if(clearingConversationIds.current.has(pending.conversation_id))continue;
+            const {data:signed}=await supabase.storage.from('chat-media').createSignedUrl(objectPath,60);
+            if(!signed?.signedUrl){
+              const {error:uploadError}=await supabase.storage.from('chat-media').upload(objectPath,outboundCipher,{
+                contentType:'application/octet-stream',cacheControl:'3600',upsert:false
+              });
+              if(uploadError&&String(uploadError.message||'').toLowerCase().includes('already exists')===false)throw uploadError;
+            }
+            if(clearingConversationIds.current.has(pending.conversation_id))continue;
+            const inserted=await supabase.from('kc_messages').insert({
+              id:pending.id,conversation_id:pending.conversation_id,sender_id:session.user.id,
+              body:outboundBody,message_type:pending.message_type,attachment_url:objectPath
+            }).select('id,conversation_id,sender_id,message_type,attachment_url,created_at').single();
+            saved=inserted.data;
+            if(inserted.error){
+              if(inserted.error.code==='23505'){
+                const duplicate=await supabase.from('kc_messages')
+                  .select('id,conversation_id,sender_id,message_type,attachment_url,created_at')
+                  .eq('id',pending.id).maybeSingle();
+                if(duplicate.error||!duplicate.data)throw inserted.error;
+                saved=duplicate.data;
+              }else throw inserted.error;
+            }
+          }
+          if(!saved)throw new Error('The media message was not confirmed by the server.');
+          const localEncrypted=new File(pending.localFileUri);
+          const localCipher=new Uint8Array(await localEncrypted.arrayBuffer());
+          const opened=decryptMediaForDevice(localCipher,pending.localBody,deviceIdentity);
+          localCipher.fill(0);
+          const safeExtension=(opened.fileName.split('.').pop()|| (pending.message_type==='video'?'mp4':pending.message_type==='image'?'jpg':'bin')).toLowerCase().replace(/[^a-z0-9]/g,'')||'bin';
+          const previewFile=new File(Paths.document,'guftin_media_'+pending.id+'.'+safeExtension);
+          if(previewFile.exists)previewFile.delete();
+          previewFile.create();
+          await previewFile.write(opened.bytes);
+          opened.bytes.fill(0);
+          const sentItem:Message={
+            ...saved,body:pending.message_type==='video'?'Video':(pending.fileName||'Photo'),
+            attachment_url:previewFile.uri,mine:true,pending:false
+          };
+          setMessages(prev=>({...prev,[pending.conversation_id]:[
+            ...(prev[pending.conversation_id]||[]).filter(item=>item.id!==pending.localId&&item.id!==pending.id),sentItem
+          ]}));
+          void dispatchPush('message',saved.id);
+          try{if(localEncrypted.exists)localEncrypted.delete();}catch{}
+          try{if(outboundFile.exists)outboundFile.delete();}catch{}
+        }catch(error:any){
+          const attempts=(Number(pending.attempts)||0)+1;
+          const transient=isConnectivityFailure(error);
+          const delay=Math.min(transient?120000:900000,(transient?5000:30000)*Math.pow(2,Math.min(attempts-1,6)));
+          remaining.push({...pending,attempts,nextAttemptAt:Date.now()+delay,lastError:String(error?.message||error||'Upload failed').slice(0,180)});
+          remaining.push(...queue.slice(index+1));
+          if(!transient)console.warn('Pending media paused with backoff:',error?.message||error);
+          break;
+        }finally{
+          plainBytes?.fill(0);
+          outboundCipher?.fill(0);
+        }
+      }
+      // Preserve media added while this upload batch was running.
+      let concurrentItems:any[]=[];
+      try{
+        const latestRaw=await AsyncStorage.getItem(queueKey);
+        const latest=latestRaw?JSON.parse(latestRaw):[];
+        if(Array.isArray(latest)){
+          const originalIds=new Set(queue.map((item:any)=>item.id));
+          concurrentItems=latest.filter((item:any)=>!originalIds.has(item.id));
+        }
+      }catch{}
+      await AsyncStorage.setItem(queueKey,JSON.stringify([...remaining,...concurrentItems])).catch(()=>{});
+      if(remaining.length<queue.length)void loadInbox();
+    }finally{
+      flushingPendingMedia.current=false;
+    }
+  },[session,deviceIdentity,e2eeStatus,loadInbox]);
+  flushPendingMediaRef.current=flushPendingMedia;
+
+  useEffect(()=>{
+    if(session&&deviceIdentity&&e2eeStatus==='ready'){
+      void flushPendingMessages();
+      void flushPendingMedia();
+    }
+  },[session?.user?.id,deviceIdentity?.deviceId,e2eeStatus,flushPendingMessages,flushPendingMedia]);
+
+  const uploadVoiceMessage=async(uri:string)=>{
+    if(!active||!session||!deviceIdentity||e2eeStatus!=='ready')throw new Error('Secure chat is not ready.');
+    const file=new File(uri);
+    if(file.size>MAX_MEDIA_BYTES)throw new Error('This file is larger than the current 45 MB cloud-storage limit.');
+
+    // A not-yet-started direct chat can validate its peer roster without first
+    // persisting an empty conversation. Create the conversation only after
+    // the media is encrypted and the upload is ready to become a message.
+    let memberIds:string[];
+    if(active.pendingContactId){
+      memberIds=[session.user.id,active.pendingContactId];
+    }else{
+      const {data:members,error:membersError}=await supabase.from('kc_conversation_members')
+        .select('user_id').eq('conversation_id',active.id);
+      if(membersError)throw membersError;
+      memberIds=[...new Set((members||[]).map((row:any)=>row.user_id))] as string[];
+    }
+    if(!memberIds.includes(session.user.id))throw new Error('You are no longer a member of this conversation.');
+
+    const {data:devices,error:devicesError}=await supabase.from('kc_e2ee_devices')
+      .select('id,user_id,public_key').in('user_id',memberIds).is('revoked_at',null);
+    if(devicesError)throw devicesError;
+    const registeredUsers=new Set((devices||[]).map((device:any)=>device.user_id));
+    if(memberIds.some(id=>!registeredUsers.has(id)))throw new Error('All chat members must open the latest Guftin build first.');
+
+    const plain=new Uint8Array(await file.arrayBuffer());
+    const encrypted=encryptMediaForDevices(plain,devices||[],deviceIdentity,'audio/mp4','voice-message.m4a');
+    plain.fill(0);
+
+    const pathSegment=active.pendingContactId||active.id;
+    const objectPath=session.user.id+'/'+pathSegment+'/'+Date.now()+'_'+ExpoCrypto.randomUUID()+'.enc';
+    const {error:uploadError}=await supabase.storage.from('chat-media').upload(
+      objectPath,encrypted.ciphertext,{contentType:'application/octet-stream',upsert:false}
+    );
+    encrypted.ciphertext.fill(0);
+    if(uploadError)throw uploadError;
+
+    try{
+      const chatToSend=await ensureActiveDirectConversation(active);
+      await assertDirectConversationAllowed(chatToSend.id);
+      const conversationId=chatToSend.id;
+      const {data,error}=await supabase.from('kc_messages').insert({
+        conversation_id:conversationId,sender_id:session.user.id,body:encrypted.body,
+        message_type:'audio',attachment_url:objectPath
+      }).select('id,conversation_id,sender_id,message_type,attachment_url,created_at').single();
+      if(error)throw error;
+      void dispatchPush('message',data.id);
+      const item=await resolveMessage({...data,body:encrypted.body});
+      setMessages(prev=>({...prev,[conversationId]:[...(prev[conversationId]||[]),item]}));
+      void loadInbox();
+    }catch(error:any){
+      await supabase.storage.from('chat-media').remove([objectPath]).catch(()=>{});
+      throw error;
+    }
+  };
+
+  const startVoiceRecording=async()=>{
+    if(recording||recordingBusy)return;
+    try{
+      const permission=await Audio.requestPermissionsAsync();if(!permission.granted)throw new Error('Microphone permission is required.');
+      await Audio.setAudioModeAsync({allowsRecordingIOS:true,playsInSilentModeIOS:true,shouldDuckAndroid:true,playThroughEarpieceAndroid:false});
+      const next=new Audio.Recording();await next.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);await next.startAsync();setRecording(next);
+    }catch(e:any){Alert.alert('Recording unavailable',e?.message||'Check microphone permission.');}
+  };
+
+  const stopVoiceRecording=async()=>{
+    if(!recording||recordingBusy)return;setRecordingBusy(true);
+    try{
+      await recording.stopAndUnloadAsync();
+      const uri=recording.getURI();
+      setRecording(null);
+      if(uri)await uploadVoiceMessage(uri);
+    }catch(e:any){
+      Alert.alert('Voice message not sent',e?.message||'Please try again.');
+    }finally{
+      setRecording(null);
+      // Reset Android as well as iOS audio flags even when the upload fails.
+      try{
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS:false,
+          playsInSilentModeIOS:true,
+          shouldDuckAndroid:false,
+          playThroughEarpieceAndroid:false
+        });
+      }catch(audioModeError:any){
+        console.warn('Guftin could not restore media mode after voice recording:',audioModeError?.message||audioModeError);
+      }
+      setRecordingBusy(false);
+    }
+  };
+
+  const sendPhotosVideos=async()=>{
+    if(!active||!session||mediaPreparing)return;
+    if(!deviceIdentity||e2eeStatus!=='ready'){
+      Alert.alert('Secure media is not ready','Guftin is still setting up this device encryption key.');
+      return;
+    }
+    try{
+      const result=await ImagePicker.launchImageLibraryAsync({
+        mediaTypes:['images','videos'],allowsEditing:false,quality:0.85,videoMaxDuration:60
+      });
+      if(result.canceled||!result.assets?.length)return;
+      const asset=result.assets[0];
+      const messageType=asset.type==='video'?'video':'image';
+      const file=new File(asset.uri);
+      if(file.size>MAX_MEDIA_BYTES){
+        Alert.alert('File too large','Encrypted photos and videos can be up to 45 MB with the current cloud-storage limit.');
+        return;
+      }
+      const contentType=asset.mimeType||(messageType==='video'?'video/mp4':'image/jpeg');
+      const allowed=['image/jpeg','image/png','image/webp','video/mp4'];
+      if(!allowed.includes(contentType)){
+        Alert.alert('Unsupported format','Please choose a JPG, PNG, WEBP image or MP4 video.');
+        return;
+      }
+      const chatToSend=await ensureActiveDirectConversation(active);
+      const conversationId=chatToSend.id;
+      const id=ExpoCrypto.randomUUID();
+      const localId='pending:'+id;
+      const createdAt=new Date().toISOString();
+      const optimistic:Message={
+        id:localId,conversation_id:conversationId,sender_id:session.user.id,
+        body:messageType==='video'?(asset.fileName||'Video'):(asset.fileName||'Photo'),
+        message_type:messageType,attachment_url:asset.uri,created_at:createdAt,mine:true,pending:true
+      };
+      // Paint the media bubble immediately; encrypting and uploading are background work.
+      setMessages(prev=>({...prev,[conversationId]:[...(prev[conversationId]||[]),optimistic]}));
+      setMediaPreparing(true);
+      try{
+        await queueOfflineMedia(conversationId,asset,messageType,contentType,id,localId);
+        setChats(prev=>{
+          const exists=prev.some(chat=>chat.id===conversationId);
+          const inboxChat={...chatToSend,last:messageType==='video'?'Video':'Photo',time:timeLabel(createdAt),lastAt:Date.now(),hasPendingActivity:true};
+          const next=exists?prev.map(chat=>chat.id===conversationId?inboxChat:chat):[inboxChat,...prev];
+          const sorted=sortInboxChats(next);
+          void AsyncStorage.setItem('guftin-cache-inbox:'+session.user.id,JSON.stringify(sorted)).catch(()=>{});
+          return sorted;
+        });
+        setMediaPreparing(false);
+        void flushPendingMediaRef.current?.();
+      }catch(queueError:any){
+        setMessages(prev=>({...prev,[conversationId]:(prev[conversationId]||[]).filter(item=>item.id!==localId)}));
+        setMediaPreparing(false);
+        Alert.alert('Media could not be saved',queueError?.message||'The media file could not be kept on this phone.');
+      }
+    }catch(e:any){
+      setMediaPreparing(false);
+      Alert.alert('Encrypted media not sent',e?.message||'Please try another image or video.');
+    }
+  };
+
+  const sendDocument=async()=>{
+    if(!active||!session||mediaPreparing)return;
+    if(!deviceIdentity||e2eeStatus!=='ready'){
+      Alert.alert('Secure document sharing not ready','Guftin is still setting up this device encryption key.');
+      return;
+    }
+    try{
+      const result=await DocumentPicker.getDocumentAsync({
+        type:[
+          'application/pdf',
+          'application/msword',
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          'application/vnd.ms-excel',
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'application/vnd.ms-powerpoint',
+          'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+          'text/plain','text/csv'
+        ],
+        copyToCacheDirectory:true,
+        multiple:false
+      });
+      if(result.canceled||!result.assets?.length)return;
+      const asset=result.assets[0];
+      const fileName=String(asset.name||'document');
+      const extension=(fileName.split('.').pop()||'').toLowerCase();
+      const allowedExtensions=['pdf','doc','docx','xls','xlsx','ppt','pptx','txt','csv'];
+      const contentType=asset.mimeType&&asset.mimeType!=='application/octet-stream'
+        ?asset.mimeType:getDocumentMimeType(fileName);
+      const allowedTypes=[
+        'application/pdf','application/msword',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/vnd.ms-excel',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'application/vnd.ms-powerpoint',
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        'text/plain','text/csv'
+      ];
+      if(!allowedExtensions.includes(extension)||!allowedTypes.includes(contentType)){
+        Alert.alert('Unsupported document','Choose a PDF, Word, Excel, PowerPoint, TXT or CSV document.');
+        return;
+      }
+      const sourceFile=new File(asset.uri);
+      const byteSize=typeof asset.size==='number'?asset.size:sourceFile.size;
+      if(byteSize>MAX_MEDIA_BYTES){
+        Alert.alert('Document too large','Encrypted documents can be up to 45 MB with the current cloud-storage limit.');
+        return;
+      }
+      const chatToSend=await ensureActiveDirectConversation(active);
+      const conversationId=chatToSend.id;
+      const id=ExpoCrypto.randomUUID();
+      const localId='pending:'+id;
+      const createdAt=new Date().toISOString();
+      const optimistic:Message={
+        id:localId,conversation_id:conversationId,sender_id:session.user.id,
+        body:fileName,message_type:'file',attachment_url:asset.uri,
+        created_at:createdAt,mine:true,pending:true
+      };
+      setMessages(prev=>({...prev,[conversationId]:[...(prev[conversationId]||[]),optimistic]}));
+      setMediaPreparing(true);
+      try{
+        await queueOfflineMedia(conversationId,{...asset,fileName},'file',contentType,id,localId);
+        setChats(prev=>{
+          const exists=prev.some(chat=>chat.id===conversationId);
+          const inboxChat={...chatToSend,last:'Document: '+fileName,time:timeLabel(createdAt),lastAt:Date.now(),hasPendingActivity:true};
+          const next=exists?prev.map(chat=>chat.id===conversationId?inboxChat:chat):[inboxChat,...prev];
+          const sorted=sortInboxChats(next);
+          void AsyncStorage.setItem('guftin-cache-inbox:'+session.user.id,JSON.stringify(sorted)).catch(()=>{});
+          return sorted;
+        });
+        setMediaPreparing(false);
+        void flushPendingMediaRef.current?.();
+      }catch(queueError:any){
+        setMessages(prev=>({...prev,[conversationId]:(prev[conversationId]||[]).filter(item=>item.id!==localId)}));
+        setMediaPreparing(false);
+        Alert.alert('Document could not be saved',queueError?.message||'The document could not be kept on this phone.');
+      }
+    }catch(error:any){
+      setMediaPreparing(false);
+      Alert.alert('Document not shared',error?.message||'Please choose another document.');
+    }
+  };
+
+  const sendChannelMedia=async()=>{
+    if(!active||active.kind!=='channel'||!active.isChannelOwner||!session||mediaPreparing)return;
+    try{
+      const result=await ImagePicker.launchImageLibraryAsync({mediaTypes:['images','videos'],allowsEditing:false,quality:0.9,videoMaxDuration:60});
+      if(result.canceled||!result.assets?.length)return;
+      const asset=result.assets[0];
+      const messageType=asset.type==='video'?'video':'image';
+      const contentType=asset.mimeType||(messageType==='video'?'video/mp4':'image/jpeg');
+      if(!['image/jpeg','image/png','image/webp','video/mp4'].includes(contentType))throw new Error('Choose a JPG, PNG, WEBP image or MP4 video.');
+      const source=new File(asset.uri);
+      if(source.size>MAX_MEDIA_BYTES)throw new Error('Channel media is limited to 45 MB per photo or video.');
+      setMediaPreparing(true);
+      const bytes=new Uint8Array(await source.arrayBuffer());
+      const extension=messageType==='video'?'mp4':contentType==='image/png'?'png':contentType==='image/webp'?'webp':'jpg';
+      const objectPath=session.user.id+'/'+active.id+'/'+Date.now()+'_'+ExpoCrypto.randomUUID()+'.'+extension;
+      const {error:uploadError}=await supabase.storage.from('chat-media').upload(objectPath,bytes,{contentType,upsert:false});
+      bytes.fill(0);
+      if(uploadError)throw uploadError;
+      const {data,error}=await supabase.from('kc_messages').insert({conversation_id:active.id,sender_id:session.user.id,body:asset.fileName||(messageType==='video'?'Video':'Photo'),message_type:messageType,attachment_url:objectPath})
+        .select('id,conversation_id,sender_id,body,message_type,attachment_url,created_at').single();
+      if(error){await supabase.storage.from('chat-media').remove([objectPath]);throw error;}
+      const item=await resolveMessage({...data,mine:true});
+      setMessages(prev=>({...prev,[active.id]:[...(prev[active.id]||[]),item]}));
+      setChats(prev=>prev.map(chat=>chat.id===active.id?{...chat,last:messageType==='video'?'Video':'Photo',time:timeLabel(data.created_at),lastAt:Date.now()}:chat));
+      void dispatchPush(active.isOfficial?'official_broadcast':'message',data.id);
+    }catch(error:any){Alert.alert('Channel media not posted',error?.message||'Please try again.');}
+    finally{setMediaPreparing(false);}
+  };
+
+  const sendMedia=()=>{
+    if(active?.kind==='channel'){
+      if(!active.isChannelOwner){Alert.alert('Channel is read-only','Only the channel owner can publish media.');return;}
+      void sendChannelMedia();return;
+    }
+    Alert.alert('Attach to chat','Choose what you want to share.',[
+      {text:'Photo or video',onPress:()=>void sendPhotosVideos()},
+      {text:'PDF or document',onPress:()=>void sendDocument()},
+      {text:'Cancel',style:'cancel'}
+    ]);
+  };
+
+  const startCall=async(callType:'voice'|'video')=>{
+    if(!active||!session?.user?.id||callBusy)return;
+    if(!['direct','group'].includes(active.kind)){
+      Alert.alert('Calling unavailable','Calls are available in direct chats and groups.');
+      return;
+    }
+    setCallBusy(true);
+    try{
+      const callIdentity=await ensureDeviceIdentity();
+      // Create a pending direct conversation first so RLS lets this caller
+      // read the contact's public device keys before the encrypted key roster is built.
+      const callChat=await ensureActiveDirectConversation(active);
+      await assertDirectConversationAllowed(callChat.id);
+      const {data:members,error:memberError}=await supabase.from('kc_conversation_members')
+        .select('user_id').eq('conversation_id',callChat.id);
+      if(memberError)throw memberError;
+      const memberIds=[...new Set((members||[]).map((row:any)=>row.user_id))] as string[];
+      if(!memberIds.includes(session.user.id))throw new Error('You are no longer a member of this conversation.');
+      if(active.kind==='direct'&&(memberIds.length!==2||memberIds.filter(id=>id!==session.user.id).length!==1))
+        throw new Error('This direct call needs exactly one other member.');
+      if(active.kind==='group'&&(memberIds.length<2||memberIds.length>20))
+        throw new Error('Group calls need 2–20 group members, including you.');
+      const {data:devices,error:devicesError}=await supabase.from('kc_e2ee_devices')
+        .select('id,user_id,public_key').in('user_id',memberIds).is('revoked_at',null);
+      if(devicesError)throw devicesError;
+      const registeredUsers=new Set((devices||[]).map((device:any)=>device.user_id));
+      if(memberIds.some((id:string)=>!registeredUsers.has(id)))
+        throw new Error('Every participant must open the latest Guftin version and register a secure device before this encrypted call can start.');
+      if(!(devices||[]).some((device:any)=>device.id===callIdentity.deviceId))
+        throw new Error('This phone is not in the conversation encryption roster. Reopen Guftin and retry secure-device setup.');
+      const callKey=ExpoCrypto.getRandomBytes(32);
+      let e2eeKeyEnvelopes:any;
+      try{
+        e2eeKeyEnvelopes=encryptCallKeyForDevices(callKey,devices||[],callIdentity);
+      }finally{
+        callKey.fill(0);
+      }
+      let call:any;
+      if(callChat.kind==='group'){
+        const {data,error}=await supabase.rpc('kc_create_group_call',{
+          p_conversation_id:callChat.id,
+          p_call_type:callType,
+          p_e2ee_key_envelopes:e2eeKeyEnvelopes
+        });
+        if(error)throw error;
+        const callId=typeof data==='string'?data:(Array.isArray(data)?data[0]:data);
+        if(!callId)throw new Error('The group call was created but the call ID was not returned.');
+        call={id:callId,conversation_id:callChat.id,caller_id:session.user.id,call_type:callType,status:'ringing',call_scope:'group'};
+      }else{
+        const peer=memberIds.find(id=>id!==session.user.id);
+        const {data,error}=await supabase.from('kc_call_logs').insert({
+          conversation_id:callChat.id,
+          caller_id:session.user.id,
+          callee_id:peer,
+          call_type:callType,
+          status:'ringing',
+          call_scope:'direct',
+          e2ee_key_envelopes:e2eeKeyEnvelopes
+        }).select('id,conversation_id,caller_id,callee_id,call_type,status,call_scope').single();
+        if(error)throw error;
+        call=data;
+      }
+      // Use Guftin's own full-screen outgoing call page. Calling
+      // RNCallKeep.startCall here also launches the generic Android Telecom
+      // outgoing flow and can cover the app's custom call screen.
+      setIncomingCall(null);
+      setOutgoingCall({...call,contact_name:callChat.name,contact_avatar:callChat.avatar,contact_avatar_url:callChat.avatarUrl});
+      void dispatchPush('call',call.id);
+      void loadInbox();
+    }catch(e:any){
+      Alert.alert('Call could not start',e?.message||'Please try again.');
+    }finally{
+      setCallBusy(false);
+    }
+  };
+
+  const endCall=async(callId:string,fromNative=false)=>{
+    if(!callId||endingCallIds.current.has(callId))return;
+    endingCallIds.current.add(callId);
+
+    const endingGroup=(liveCall?.id===callId&&liveCall?.callScope==='group')||(outgoingCall?.id===callId&&outgoingCall?.call_scope==='group');
+    const hasNativeIncomingCall=(liveCall?.id===callId&&liveCall?.nativeIncomingCall)||(incomingCall?.id===callId);
+
+    // Telecom can ask us to end an active call without going through the
+    // in-call button. Disconnect LiveKit before changing state or releasing
+    // Android's communication audio focus.
+    if(liveCall?.id===callId){
+      const recordingController=activeGuftinCallRecordingController;
+      if(recordingController?.callId===callId){
+        try{await recordingController.stopAndSave();}
+        catch(error:any){console.warn('Guftin recording stop before call end:',error?.message||error);}
+      }
+      const roomController=activeGuftinCallRoom;
+      if(roomController?.callId===callId&&!roomController.disconnected){
+        try{await roomController.disconnect();}
+        catch(error:any){console.warn('Guftin forced call disconnect:',error?.message||error);}
+      }
+      await stopGuftinCallAudioSession();
+    }
+
+    // Clear the local call UI immediately; network updates must not hold audio
+    // resources or leave a stale call screen on the device.
+    setLiveCall(null);
+    setOutgoingCall(null);
+    setIncomingCall(null);
+    setPendingCallAccept((old:any)=>old?.id===callId?null:old);
+    void dismissIncomingCallNotification(callId);
+
+    if(hasNativeIncomingCall&&Platform.OS==='android'){
+      try{RNCallKeep.endCall(callId);}catch(error:any){console.warn('Could not end Android Telecom call:',error?.message||error);}
+    }
+
+    try{
+      if(endingGroup){
+        const {error}=await supabase.rpc('kc_leave_group_call',{p_call_id:callId});
+        if(error)throw error;
+      }else{
+        const {error}=await supabase.from('kc_call_logs')
+          .update({status:'ended',ended_at:new Date().toISOString()}).eq('id',callId);
+        if(error)throw error;
+      }
+    }catch(error:any){
+      console.warn('Guftin call-end server update failed:',error?.message||error);
+      Alert.alert('Call disconnected','The phone audio has been restored, but the server could not update the call status. Reopen Calls when your internet connection is available.');
+    }finally{
+      // Avoid an unbounded per-session set while retaining short-term duplicate protection.
+      if(endingCallIds.current.size>128){
+        const oldest=endingCallIds.current.values().next().value;
+        if(oldest)endingCallIds.current.delete(oldest);
+      }
+    }
+  };
+
+  const pendingNativeCallActions=useRef<Array<{callUUID:string;action:'answer'|'end'}>>([]);
+  const processedNativeCallActions=useRef<Set<string>>(new Set());
+  const handleNativeCallAction=useCallback(async(callUUID:string,action:'answer'|'end')=>{
+    if(!callUUID)return;
+    if(!session?.user?.id){
+      pendingNativeCallActions.current.push({callUUID,action});
+      return;
+    }
+    const actionKey=callUUID+':'+action;
+    if(processedNativeCallActions.current.has(actionKey))return;
+    if(action==='answer'&&Platform.OS==='android'){
+      try{await RNCallKeep.backToForeground();}
+      catch(foregroundError:any){console.warn('Could not bring Guftin to foreground after call answer:',foregroundError?.message||foregroundError);}
+    }
+    processedNativeCallActions.current.add(actionKey);
+    try{
+      const {data:call,error}=await supabase.from('kc_call_logs')
+        .select('id,conversation_id,caller_id,callee_id,call_type,status,call_scope')
+        .eq('id',callUUID).maybeSingle();
+      if(error)throw error;
+      if(!call)return;
+      const groupCall=(call.call_scope||'direct')==='group';
+      let groupParticipant:any=null;
+      if(groupCall){
+        const result=await supabase.from('kc_call_participants')
+          .select('status,role').eq('call_id',call.id).eq('user_id',session.user.id).maybeSingle();
+        if(result.error)throw result.error;
+        groupParticipant=result.data;
+        if(!groupParticipant)return;
+      }else if(call.caller_id!==session.user.id&&call.callee_id!==session.user.id)return;
+
+      if(action==='answer'){
+        const canAnswer=groupCall
+          ?groupParticipant.role==='invitee'&&['ringing','invited'].includes(groupParticipant.status)
+          :call.callee_id===session.user.id&&call.status==='ringing';
+        if(canAnswer){
+          setTab('Calls');
+          await acceptCallWhenReady(call);
+        }else if(call.status==='accepted'&&(!groupCall||groupParticipant.status==='accepted')){
+          setTab('Calls');
+          if(!liveCall)void joinCall(call);
+        }
+      }else if(groupCall&&groupParticipant.role==='invitee'&&['ringing','invited'].includes(groupParticipant.status)&&['ringing','accepted'].includes(call.status)){
+        await respondToCall(call,'declined');
+      }else if(call.status==='ringing'&&!groupCall&&call.callee_id===session.user.id){
+        await respondToCall(call,'declined');
+      }else if(call.status==='ringing'&&groupCall&&groupParticipant.role==='caller'){
+        await endCall(call.id,true);
+      }else if(call.status==='ringing'&&!groupCall&&call.caller_id===session.user.id){
+        await supabase.from('kc_call_logs').update({status:'cancelled',ended_at:new Date().toISOString()}).eq('id',call.id);
+        setOutgoingCall(null);
+      }else if(call.status==='accepted'){
+        await endCall(call.id,true);
+      }
+    }catch(error:any){
+      console.warn('Native call action failed:',error?.message||error);
+    }
+  },[session,acceptCallWhenReady,respondToCall,joinCall,liveCall,outgoingCall]);
+
+  const nativeCallActionHandlerRef=useRef<any>(null);
+  nativeCallActionHandlerRef.current=handleNativeCallAction;
+
+  useEffect(()=>{
+    if(Platform.OS!=='android')return;
+    const answerSub=RNCallKeep.addEventListener('answerCall',({callUUID}:any)=>{
+      void nativeCallActionHandlerRef.current?.(callUUID,'answer');
+    });
+    const endSub=RNCallKeep.addEventListener('endCall',({callUUID}:any)=>{
+      void nativeCallActionHandlerRef.current?.(callUUID,'end');
+    });
+    const showUiSub=RNCallKeep.addEventListener('showIncomingCallUi',({callUUID}:any)=>{
+      if(!session?.user?.id||!callUUID)return;
+      try{RNCallKeep.backToForeground();}catch(foregroundError:any){
+        console.warn('Could not foreground Guftin for incoming call:',foregroundError?.message||foregroundError);
+      }
+      void supabase.from('kc_call_logs')
+        .select('id,conversation_id,caller_id,callee_id,call_type,status,call_scope')
+        .eq('id',callUUID).maybeSingle().then(async({data:call,error})=>{
+          if(error||!call||call.status!=='ringing')return;
+          if((call.call_scope||'direct')==='group'){
+            const {data:participant,error:participantError}=await supabase.from('kc_call_participants')
+              .select('status,role').eq('call_id',call.id).eq('user_id',session.user.id).maybeSingle();
+            if(participantError||!participant||!['invited','ringing'].includes(participant.status))return;
+          }else if(call.callee_id!==session.user.id)return;
+          setTab('Calls');
+          setIncomingCall(call);
+        });
+    });
+
+    return ()=>{
+      answerSub.remove();
+      endSub.remove();
+      showUiSub.remove();
+    };
+  },[session?.user?.id]);
+
+  useEffect(()=>{
+    if(!session?.user?.id||Platform.OS!=='android')return;
+    const queued=pendingNativeCallActions.current.splice(0);
+    for(const action of queued)void handleNativeCallAction(action.callUUID,action.action);
+    void RNCallKeep.getInitialEvents().then((events:any[])=>{
+      for(const event of events||[]){
+        const uuid=event?.data?.callUUID;
+        if(!uuid)continue;
+        if(String(event.name||'').toLowerCase().includes('answer')){
+          void handleNativeCallAction(uuid,'answer');
+        }else if(String(event.name||'').toLowerCase().includes('end')){
+          void handleNativeCallAction(uuid,'end');
+        }
+      }
+      RNCallKeep.clearInitialEvents();
+    }).catch(error=>console.warn('Could not restore native call actions:',error?.message||error));
+  },[session?.user?.id,handleNativeCallAction]);
+
+  const chooseProfilePhoto=async()=>{
+    const permission=await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if(!permission.granted){Alert.alert('Permission needed','Allow photo access to choose a profile picture.');return;}
+    const result=await ImagePicker.launchImageLibraryAsync({mediaTypes:['images'],allowsEditing:true,aspect:[1,1],quality:0.85});
+    if(result.canceled||!result.assets?.[0]||!session)return;
+    setProfileUploading(true);
+    try{
+      const asset=result.assets[0],file=new File(asset.uri);
+      if(file.size>10*1024*1024)throw new Error('Profile photo must be under 10 MB.');
+      const bytes=new Uint8Array(await file.arrayBuffer()),objectPath=session.user.id+'/profile/'+Date.now()+'_'+ExpoCrypto.randomUUID()+'.jpg';
+      const {error}=await supabase.storage.from('chat-media').upload(objectPath,bytes,{contentType:'image/jpeg',upsert:false});bytes.fill(0);
+      if(error)throw error;
+      const {error:profileError}=await supabase.rpc('kc_save_profile_avatar',{p_avatar_path:objectPath});
+      if(profileError)throw profileError;
+      const signedUrl=await getSignedMediaUrl(objectPath);
+      setProfileAvatarPath(objectPath);
+      setProfileAvatarUrl(signedUrl||asset.uri);
+      setProfile((current:any)=>current?{...current,avatar_url:objectPath}:current);
+    }catch(e:any){Alert.alert('Photo not saved',e?.message||'Please try again.');}
+    finally{setProfileUploading(false);}
+  };
+
+  const chooseStatusMedia=async()=>{
+    const permission=await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if(!permission.granted){Alert.alert('Permission needed','Allow photo/video access to share status media.');return;}
+    const result=await ImagePicker.launchImageLibraryAsync({mediaTypes:['images','videos'],allowsEditing:false,quality:0.85,videoMaxDuration:60});
+    if(!result.canceled&&result.assets?.[0])setStatusAsset(result.assets[0]);
+  };
+
+  const publishStatus=async()=>{
+    const caption=statusText.trim();
+    if(!session||publishingStatus)return;
+    if((!caption&&!statusAsset)||caption.length>700){Alert.alert('Status required','Write a caption or choose a photo/video (maximum 700 characters).');return;}
+    setPublishingStatus(true);
+    let media_url:string|null=null;
+    if(statusAsset){
+      try{
+        const file=new File(statusAsset.uri);if(file.size>MAX_MEDIA_BYTES)throw new Error('Status photo or video must be under 45 MB with the current cloud-storage limit.');
+        const bytes=new Uint8Array(await file.arrayBuffer()),ext=statusAsset.type==='video'?'mp4':'jpg',path=session.user.id+'/status/'+Date.now()+'_'+ExpoCrypto.randomUUID()+'.'+ext;
+        const mime=statusAsset.mimeType||(statusAsset.type==='video'?'video/mp4':'image/jpeg');
+        const {error:uploadError}=await supabase.storage.from('chat-media').upload(path,bytes,{contentType:mime,upsert:false});bytes.fill(0);
+        if(uploadError)throw uploadError;media_url=path;
+      }catch(e:any){setPublishingStatus(false);Alert.alert('Status upload failed',e?.message||'Please try again.');return;}
+    }
+    const {data:postedStatus,error}=await supabase.from('kc_status_updates').insert({user_id:session.user.id,caption:caption||null,media_url}).select('id').single();
+    setPublishingStatus(false);
+    if(error){
+      Alert.alert('Status not posted',error.message);
+      return;
+    }
+    setStatusComposer(false);
+    setStatusText('');setStatusAsset(null);
+    if(postedStatus?.id)void dispatchPush('status',postedStatus.id);
+    await loadStatuses();
+  };
+
+  const signUpEmail=async()=>{
+    const cleanEmail=email.trim().toLowerCase();
+    const cleanUsername=username.trim().toLowerCase().replace(/^@/,'');
+    const cleanName=fullName.trim();
+    const normalizedPhone=profilePhone.trim()?normalizeGuftinPhone(profilePhone):null;
+    if(cleanName.length<2||cleanName.length>40){setAuthError('Enter your full name (2-40 characters).');return;}
+    if(!/^[a-z0-9_]{3,24}$/.test(cleanUsername)){setAuthError('Username must be 3-24 characters using letters, numbers or underscore.');return;}
+    if(!/^\S+@\S+\.\S+$/.test(cleanEmail)){setAuthError('Enter a valid Gmail/email address.');return;}
+    if(password.length<8){setAuthError('Password must be at least 8 characters.');return;}
+    if(profilePhone.trim()&&!normalizedPhone){setAuthError('Enter a valid mobile number or leave the optional field empty.');return;}
+    setAuthBusy(true);setAuthError('');
+    try{
+      const {data:usernameAvailable,error:usernameCheckError}=await supabase.rpc('kc_is_username_available',{p_username:cleanUsername});
+      if(usernameCheckError)throw usernameCheckError;
+      if(usernameAvailable!==true){setAuthError('This username is already taken. Please choose a different username.');return;}
+      const {data,error}=await supabase.auth.signUp({
+        email:cleanEmail,
+        password,
+        options:{data:{display_name:cleanName,username:cleanUsername}}
+      });
+      if(error){
+        if(/already registered|already been registered|user already exists/i.test(error.message||'')){
+          const {error:resendError}=await supabase.auth.resend({type:'signup',email:cleanEmail});
+          if(resendError)throw resendError;
+          setEmail(cleanEmail);setEmailOtp('');setOtpPurpose('signup');setEmailOtpPending(true);
+          setAuthError('This email already has a pending Guftin signup. A fresh verification code has been requested. If the account was created earlier, sign in with your password.');
+          return;
+        }
+        throw error;
+      }
+      if(data.user&&Array.isArray(data.user.identities)&&data.user.identities.length===0){
+        setAuthMode('login');setEmail(cleanEmail);setEmailOtpPending(false);
+        setAuthError('This email already has a Guftin account. Please sign in with your password, or use Forgot password if needed.');
+        return;
+      }
+      if(data.session){
+        void supabase.rpc('kc_set_email_discoverable',{p_enabled:true});
+        if(normalizedPhone)await supabase.rpc('kc_set_optional_phone',{p_phone:normalizedPhone});
+        setPassword('');setAuthError('');
+        return;
+      }
+      if(!data.user)throw new Error('Guftin could not start email verification. Please try again.');
+      setEmail(cleanEmail);setEmailOtp('');setOtpPurpose('signup');setEmailOtpPending(true);setAuthError('');
+    }catch(e:any){
+      setAuthError(e?.message||'Account creation failed. Please try again.');
+    }finally{setAuthBusy(false);}
+  };
+
+  const verifyCurrentOtp=async()=>{
+    if(otpPurpose==='recovery'){await verifyRecoveryOtp();return;}
+    await verifySignupOtp();
+  };
+
+  const verifySignupOtp=async()=>{
+    const cleanEmail=email.trim().toLowerCase();
+    const token=emailOtp.replace(/\D/g,'');
+    if(token.length!==6){setAuthError('Enter the complete 6-digit code sent to your email.');return;}
+    setOtpBusy(true);setAuthError('');
+    try{
+      const {data,error}=await supabase.auth.verifyOtp({email:cleanEmail,token,type:'signup'});
+      if(error)throw error;
+      if(!data.session)throw new Error('The code was accepted but Guftin did not receive a sign-in session. Please sign in with your email and password.');
+      const {error:discoveryError}=await supabase.rpc('kc_set_email_discoverable',{p_enabled:true});
+      if(discoveryError)console.warn('Email verified, but email discovery could not be enabled:',discoveryError.message);
+      const optionalPhone=profilePhone.trim()?normalizeGuftinPhone(profilePhone):null;
+      if(optionalPhone){const {error:phoneError}=await supabase.rpc('kc_set_optional_phone',{p_phone:optionalPhone});if(phoneError)console.warn('Optional phone could not be saved:',phoneError.message);}
+      setEmailOtpPending(false);
+      setEmailOtp('');
+      setPassword('');
+      setAuthError('');
+    }catch(e:any){
+      setAuthError(e?.message||'Verification failed. Check the code and try again.');
+    }finally{
+      setOtpBusy(false);
+    }
+  };
+
+  const resendCurrentOtp=async()=>{
+    if(otpPurpose==='recovery'){await resendRecoveryOtp();return;}
+    await resendSignupOtp();
+  };
+
+  const resendSignupOtp=async()=>{
+    const cleanEmail=email.trim().toLowerCase();
+    setOtpBusy(true);setAuthError('');
+    try{
+      const {error}=await supabase.auth.resend({type:'signup',email:cleanEmail});
+      if(error)throw error;
+      setEmailOtp('');
+      setAuthError('A new verification code has been requested. Check your inbox and spam folder.');
+    }catch(e:any){
+      setAuthError(e?.message||'Could not resend the verification code. Please wait and try again.');
+    }finally{
+      setOtpBusy(false);
+    }
+  };
+
+  const requestPasswordReset=async()=>{
+    const cleanEmail=email.trim().toLowerCase();
+    if(!/^\S+@\S+\.\S+$/.test(cleanEmail)){setAuthError('Enter the email address linked to your Guftin account.');return;}
+    setAuthBusy(true);setAuthError('');
+    try{
+      const {error}=await supabase.auth.resetPasswordForEmail(cleanEmail);
+      if(error)throw error;
+      setOtpPurpose('recovery');
+      setEmailOtp('');
+      setNewPassword('');
+      setConfirmNewPassword('');
+      setEmailOtpPending(true);
+    }catch(e:any){
+      setAuthError(e?.message||'Could not send a password reset code. Please try again.');
+    }finally{setAuthBusy(false);}
+  };
+
+  const verifyRecoveryOtp=async()=>{
+    const cleanEmail=email.trim().toLowerCase();
+    const token=emailOtp.replace(/\D/g,'');
+    if(token.length!==6){setAuthError('Enter the complete 6-digit reset code from your email.');return;}
+    if(newPassword.length<8){setAuthError('Your new password must be at least 8 characters.');return;}
+    if(newPassword!==confirmNewPassword){setAuthError('The new passwords do not match.');return;}
+    setOtpBusy(true);setAuthError('');
+    try{
+      const {data,error}=await supabase.auth.verifyOtp({email:cleanEmail,token,type:'recovery'});
+      if(error)throw error;
+      if(!data.session)throw new Error('The reset code was accepted but no secure reset session was created. Please request a new code.');
+      const {error:updateError}=await supabase.auth.updateUser({password:newPassword});
+      if(updateError)throw updateError;
+      setEmailOtpPending(false);
+      setEmailOtp('');
+      setPassword('');
+      setNewPassword('');
+      setConfirmNewPassword('');
+      setAuthMode('login');
+      setAuthError('Password updated successfully. Sign in using your new password.');
+    }catch(e:any){
+      setAuthError(e?.message||'Password reset failed. Check the code and try again.');
+    }finally{setOtpBusy(false);}
+  };
+
+  const resendRecoveryOtp=async()=>{
+    const cleanEmail=email.trim().toLowerCase();
+    setOtpBusy(true);setAuthError('');
+    try{
+      const {error}=await supabase.auth.resetPasswordForEmail(cleanEmail);
+      if(error)throw error;
+      setEmailOtp('');
+      setAuthError('A new password reset code has been requested. Check your inbox and spam folder.');
+    }catch(e:any){
+      setAuthError(e?.message||'Could not resend the password reset code. Please wait and try again.');
+    }finally{setOtpBusy(false);}
+  };
+
+  const linkEmailToAccount=async()=>{
+    const cleanEmail=accountEmailInput.trim().toLowerCase();
+    if(!session){setAccountEmailNotice('Sign in before linking an email address.');return;}
+    if(!/^\S+@\S+\.\S+$/.test(cleanEmail)){setAccountEmailNotice('Enter a valid email address.');return;}
+    if(accountEmailPassword.length<8){setAccountEmailNotice('Create a password with at least 8 characters.');return;}
+    setAccountEmailBusy(true);setAccountEmailNotice('');
+    try{
+      const {error}=await supabase.auth.updateUser({email:cleanEmail,password:accountEmailPassword});
+      if(error)throw error;
+      setAccountEmailPassword('');
+      setAccountEmailNotice('A verification link has been sent to this email. Open it to link your email and password to this same Guftin account.');
+    }catch(e:any){
+      setAccountEmailNotice(e?.message||'Could not link this email. Please try again.');
+    }finally{setAccountEmailBusy(false);}
+  };
+
+  const signInEmail=async()=>{
+    const cleanEmail=email.trim().toLowerCase();
+    if(!cleanEmail||!password){setAuthError('Enter your email and password.');return;}
+    setAuthBusy(true);setAuthError('');
+    const {error}=await supabase.auth.signInWithPassword({email:cleanEmail,password});
+    setAuthBusy(false);
+    if(error)setAuthError(error.message);
+  };
+
+  const signInGoogle=async()=>{
+    if(googleBusy)return;
+    setGoogleBusy(true);setAuthError('');
+    try{
+      const redirectTo=Linking.createURL('auth/callback');
+      const {data,error}=await supabase.auth.signInWithOAuth({
+        provider:'google',
+        options:{redirectTo,skipBrowserRedirect:true,queryParams:{prompt:'select_account'}}
+      });
+      if(error)throw error;
+      if(!data?.url)throw new Error('Google sign-in could not start. Please try again.');
+      const result=await WebBrowser.openAuthSessionAsync(data.url,redirectTo);
+      if(result.type==='cancel'||result.type==='dismiss')return;
+      if(result.type!=='success'||!result.url)throw new Error('Google sign-in was not completed.');
+      const {data:authData,error:sessionError}=await supabase.auth.exchangeCodeForSession(result.url);
+      if(sessionError)throw sessionError;
+      if(!authData.session)throw new Error('Google did not return a Guftin sign-in session.');
+      const {data:googleProfile,error:profileError}=await supabase.rpc('kc_finish_google_profile');
+      if(profileError)throw profileError;
+      setProfileName(googleProfile?.display_name||authData.session.user.user_metadata?.full_name||authData.session.user.user_metadata?.name||'');
+      setProfileUsername(googleProfile?.username||'');
+      setEmail(authData.session.user.email||'');
+      setAuthError('');
+      void supabase.rpc('kc_set_email_discoverable',{p_enabled:true});
+    }catch(e:any){
+      setAuthError(e?.message||'Google sign-in failed. Please try again.');
+    }finally{setGoogleBusy(false);}
+  };
+
+  const finishProfile=async()=>{
+    if(!session||savingProfile)return;
+    const cleanUsername=profileUsername.trim().toLowerCase().replace(/^@/,'');
+    const cleanName=profileName.trim();
+    const normalizedPhone=profilePhone.trim()?normalizeGuftinPhone(profilePhone):null;
+    if(!/^[a-z0-9_]{3,24}$/.test(cleanUsername)){Alert.alert('Username not valid','Use 3-24 lowercase letters, numbers or underscore.');return;}
+    if(cleanName.length<2||cleanName.length>40){Alert.alert('Name required','Use a name between 2 and 40 characters.');return;}
+    if(profilePhone.trim()&&!normalizedPhone){Alert.alert('Phone number not valid','Enter a valid mobile number or leave it blank.');return;}
+    setSavingProfile(true);
+    try{
+      const {error}=await supabase.rpc('kc_finish_profile',{p_username:cleanUsername,p_display_name:cleanName});
+      if(error)throw error;
+      const {error:phoneError}=await supabase.rpc('kc_set_optional_phone',{p_phone:normalizedPhone});
+      if(phoneError)throw phoneError;
+      await loadProfile();
+    }catch(error:any){Alert.alert('Profile not saved',error?.message||'Please try again.');}
+    finally{setSavingProfile(false);}
+  };
+
+  const addContact=async()=>{
+    if(!session||adding)return;
+    const raw=contactUsername.trim();
+    if(!raw){Alert.alert('Contact search','Enter a Guftin username, email address or mobile number.');return;}
+    setAdding(true);
+    try{
+      let row:any=null;
+      if(raw.includes('@')){
+        const emailQuery=raw.toLowerCase();
+        if(!/^\S+@\S+\.\S+$/.test(emailQuery))throw new Error('Enter a valid email address.');
+        const {data,error}=await supabase.rpc('kc_lookup_email_contact',{p_email:emailQuery});
+        if(error)throw error;
+        row=Array.isArray(data)?data[0]:data;
+        if(!row?.contact_id)throw new Error('No verified, discoverable Guftin account was found for that email address.');
+      }else{
+        const normalizedPhone=normalizeGuftinPhone(raw);
+        if(normalizedPhone){
+          const {data,error}=await supabase.rpc('kc_lookup_phone_contacts',{p_phone_numbers:[normalizedPhone]});
+          if(error)throw error;
+          row=Array.isArray(data)?data[0]:data;
+          if(!row?.contact_id)throw new Error('No Guftin account was found with that optional mobile number.');
+        }else{
+          const cleanUsername=raw.toLowerCase().replace(/^@/,'');
+          if(!/^[a-z0-9_]{3,24}$/.test(cleanUsername))throw new Error('Use a valid username, full email address or mobile number with country code.');
+          const {data,error}=await supabase.rpc('kc_save_contact_by_username',{p_username:cleanUsername});
+          if(error)throw error;
+          row=Array.isArray(data)?data[0]:data;
+          if(!row?.contact_id)throw new Error('No registered Guftin account uses this username yet.');
+        }
+      }
+      const name=row.display_name||row.username||'Guftin member';
+      const avatarUrl=row.avatar_url?await getSignedMediaUrl(row.avatar_url):null;
+      const chat:Chat={
+        id:'pending:'+row.contact_id,pendingContactId:row.contact_id,name,
+        avatar:initials(name),avatarUrl:avatarUrl||undefined,color:colorFor(name),
+        last:'Start a conversation',time:'',unread:0,online:false,kind:'direct',lastAt:0
+      };
+      setAddOpen(false);setContactUsername('');setPhoneContactMatches([]);setPeerLastReadAt(null);setActive(chat);
+    }catch(e:any){
+      Alert.alert('Could not find contact',e?.message||'Check the username, email or phone number and try again.');
+    }finally{setAdding(false);}
+  };
+
+  const findPhoneContacts=async()=>{
+    if(!session||phoneContactsLoading)return;
+    setPhoneContactsLoading(true);
+    setPhoneContactMatches([]);
+    try{
+      const permission=await ExpoContacts.requestPermissionsAsync();
+      if(permission.status!=='granted'){
+        Alert.alert('Contacts permission needed','Allow Guftin to read your phone contacts only when you choose Find Guftin accounts.');
+        return;
+      }
+      const response=await ExpoContacts.getContactsAsync({
+        fields:[ExpoContacts.Fields.Name,ExpoContacts.Fields.PhoneNumbers],
+        pageSize:1000,
+        pageOffset:0
+      });
+      const numberToContact=new Map<string,{name:string}>();
+      for(const contact of response.data||[]){
+        const savedName=(contact as any).name||[ (contact as any).firstName,(contact as any).lastName ].filter(Boolean).join(' ')||'Phone contact';
+        for(const phone of (contact as any).phoneNumbers||[]){
+          const normalized=normalizeGuftinPhone(String(phone.number||''));
+          if(normalized&&!numberToContact.has(normalized))numberToContact.set(normalized,{name:savedName});
+        }
+      }
+      const numbers=[...numberToContact.keys()].slice(0,1000);
+      if(!numbers.length){
+        Alert.alert('No phone numbers found','Save phone numbers with an international country code, or use Pakistan mobile format such as 03xxxxxxxxx.');
+        return;
+      }
+      const allMatches:any[]=[];
+      for(let offset=0;offset<numbers.length;offset+=250){
+        const batch=numbers.slice(offset,offset+250);
+        const {data,error}=await supabase.rpc('kc_lookup_phone_contacts',{p_phone_numbers:batch});
+        if(error)throw error;
+        for(const row of (data||[]) as any[]){
+          if(allMatches.some(existing=>existing.contact_id===row.contact_id))continue;
+          const local=numberToContact.get(row.matched_phone);
+          const avatar=row.avatar_url?await getSignedMediaUrl(row.avatar_url):null;
+          allMatches.push({
+            ...row,
+            local_contact_name:local?.name||row.display_name||'Phone contact',
+            avatar_signed_url:avatar||undefined
+          });
+        }
+      }
+      setPhoneContactMatches(allMatches);
+      if(!allMatches.length){
+        Alert.alert('No Guftin accounts found','None of the checked phone contacts has an account discoverable by phone number yet. You can still add people by username.');
+      }
+    }catch(error:any){
+      Alert.alert('Contacts could not be checked',error?.message||'Please try again.');
+    }finally{
+      setPhoneContactsLoading(false);
+    }
+  };
+
+  const openPhoneContactChat=(item:any)=>{
+    if(!item?.contact_id)return;
+    const name=item.display_name||item.local_contact_name||'Guftin member';
+    const chat:Chat={
+      id:'pending:'+item.contact_id,
+      pendingContactId:item.contact_id,
+      name,
+      avatar:initials(name),
+      avatarUrl:item.avatar_signed_url||undefined,
+      color:colorFor(name),
+      last:'Start a conversation',
+      time:'',
+      unread:0,
+      online:false,
+      kind:'direct',
+      lastAt:0
+    };
+    setAddOpen(false);
+    setPhoneContactMatches([]);
+    setPeerLastReadAt(null);
+    setActive(chat);
+  };
+
+  const saveProfile=async()=>{
+    if(!session||savingProfile)return;
+    const cleanUsername=profileUsername.trim().toLowerCase().replace(/^@/,'');
+    const cleanName=profileName.trim();
+    if(cleanName.length<2||cleanName.length>40){Alert.alert('Name required','Use a name between 2 and 40 characters.');return;}
+    if(!/^[a-z0-9_]{3,24}$/.test(cleanUsername)){Alert.alert('Username not valid','Use 3-24 lowercase letters, numbers or underscore.');return;}
+    setSavingProfile(true);
+    const usernameChanged=Boolean(profile?.username&&cleanUsername!==profile.username);
+    const {error}=usernameChanged
+      ?await supabase.rpc('kc_change_google_username_once',{p_username:cleanUsername})
+      :await supabase.rpc('kc_finish_profile',{p_username:cleanUsername,p_display_name:cleanName});
+    if(error){setSavingProfile(false);Alert.alert('Profile not saved',error.message);return;}
+    if(usernameChanged)setGoogleUsernameChangeAvailable(false);
+    const {error:aboutError}=await supabase.from('kc_profiles').update({about:about.trim().slice(0,160)}).eq('id',session.user.id);
+    setSavingProfile(false);
+    if(aboutError){Alert.alert('About text not saved',aboutError.message);return;}
+    await loadProfile();
+    Alert.alert('Saved','Your Guftin profile has been updated.');
+  };
+
+  const loadGroupContacts=async()=>{
+    if(!session)return;
+    setGroupContactsLoading(true);
+    try{
+      const {data:links,error}=await supabase.from('kc_contacts').select('contact_id').eq('owner_id',session.user.id);
+      if(error)throw error;
+      const ids=[...new Set((links||[]).map((row:any)=>row.contact_id).filter(Boolean))] as string[];
+      if(!ids.length){setGroupContacts([]);return;}
+      const {data:people,error:peopleError}=await supabase.from('kc_profiles')
+        .select('id,display_name,username,avatar_url').in('id',ids).order('display_name');
+      if(peopleError)throw peopleError;
+      const contacts=await Promise.all((people||[]).map(async(person:any)=>{
+        const avatar=person.avatar_url?(await getSignedMediaUrl(person.avatar_url))||undefined:undefined;
+        return {...person,avatar_signed_url:avatar};
+      }));
+      setGroupContacts(contacts);
+    }catch(e:any){
+      Alert.alert('Contacts could not load',e?.message||'Please try again.');
+    }finally{setGroupContactsLoading(false);}
+  };
+
+  const openGroupCreator=async()=>{
+    setGroupName('');
+    setSelectedGroupIds([]);
+    setGroupCreateOpen(true);
+    await loadGroupContacts();
+  };
+
+  const toggleGroupMember=(id:string)=>{
+    setSelectedGroupIds(current=>current.includes(id)?current.filter(value=>value!==id):[...current,id]);
+  };
+
+  const createGroup=async()=>{
+    const title=groupName.trim();
+    if(!session||groupCreating)return;
+    if(title.length<2||title.length>60){Alert.alert('Group name required','Enter a group name between 2 and 60 characters.');return;}
+    if(selectedGroupIds.length<1){Alert.alert('Add members','Select at least one contact to create a group.');return;}
+    setGroupCreating(true);
+    try{
+      const {data,error}=await supabase.rpc('kc_create_group',{p_title:title,p_member_ids:selectedGroupIds});
+      if(error)throw error;
+      const conversationId=typeof data==='string'?data:(Array.isArray(data)?data[0]:data);
+      if(!conversationId)throw new Error('The group was created but its conversation ID was not returned.');
+      const chat:Chat={id:conversationId,name:title,avatar:initials(title),color:colorFor(title),last:'Group created',time:timeLabel(new Date().toISOString()),unread:0,online:false,kind:'group',lastAt:Date.now()};
+      setChats(current=>[chat,...current.filter(item=>item.id!==chat.id)]);
+      setGroupCreateOpen(false);
+      setActive(chat);
+      void loadInbox();
+    }catch(e:any){
+      Alert.alert('Group could not be created',e?.message||'Please check your contacts and try again.');
+    }finally{setGroupCreating(false);}
+  };
+
+  const openChatDetails=async()=>{
+    if(!active||!session||chatDetailsLoading)return;
+    setChatDetailsLoading(true);
+    try{
+      const [{data:conversation,error:conversationError},{data:members,error:membersError}]=await Promise.all([
+        supabase.from('kc_conversations').select('id,kind,title,photo_url,created_at,created_by').eq('id',active.id).single(),
+        supabase.from('kc_conversation_members').select('user_id,role,joined_at').eq('conversation_id',active.id)
+      ]);
+      if(conversationError)throw conversationError;
+      if(membersError)throw membersError;
+      const ids=[...new Set((members||[]).map((member:any)=>member.user_id))] as string[];
+      const {data:people,error:peopleError}=await supabase.from('kc_profiles')
+        .select('id,display_name,username,about,avatar_url,is_online,last_seen_at,created_at').in('id',ids);
+      if(peopleError)throw peopleError;
+      const peopleMap=new Map((people||[]).map((person:any)=>[person.id,person]));
+      const details=await Promise.all((members||[]).map(async(member:any)=>{
+        const person:any=peopleMap.get(member.user_id)||{};
+        const avatar=person.avatar_url?(await getSignedMediaUrl(person.avatar_url))||null:null;
+        return {...member,...person,avatar_signed_url:avatar,is_me:member.user_id===session.user.id};
+      }));
+      const groupPhotoSigned=conversation.photo_url?await getSignedMediaUrl(conversation.photo_url):null;
+      setGroupEditTitle(conversation.title||'');
+      setChatDetails({conversation:{...conversation,photo_signed_url:groupPhotoSigned},members:details.map((m:any)=>({...m,role:m.user_id===conversation.created_by?'owner':m.role}))});
+      setChatDetailsOpen(true);
+    }catch(e:any){
+      Alert.alert('Details could not load',e?.message||'Please try again.');
+    }finally{setChatDetailsLoading(false);}
+  };
+
+  const saveGroupDetails=async()=>{
+    if(!active||!chatDetails||groupAdminBusy)return;
+    const title=groupEditTitle.trim();
+    if(title.length<2||title.length>60){Alert.alert('Group name required','Use 2 to 60 characters.');return;}
+    setGroupAdminBusy(true);
+    try{
+      const {error}=await supabase.rpc('kc_update_group_details',{p_conversation_id:active.id,p_title:title,p_photo_url:null});
+      if(error)throw error;
+      setChatDetails((prev:any)=>({...prev,conversation:{...prev.conversation,title}}));
+      setActive((prev:any)=>prev?.id===active.id?{...prev,name:title,avatar:initials(title)}:prev);
+      void loadInbox();
+      Alert.alert('Group updated','The group name has been changed.');
+    }catch(e:any){Alert.alert('Could not update group',e?.message||'Please try again.');}
+    finally{setGroupAdminBusy(false);}
+  };
+  const chooseGroupPhoto=async()=>{
+    if(!active||!session||!chatDetails)return;
+    const permission=await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if(!permission.granted){Alert.alert('Permission needed','Allow photo access to choose a group photo.');return;}
+    const result=await ImagePicker.launchImageLibraryAsync({mediaTypes:['images'],allowsEditing:true,aspect:[1,1],quality:0.85});
+    if(result.canceled||!result.assets?.[0])return;
+    setGroupAdminBusy(true);
+    try{
+      const asset=result.assets[0],file=new File(asset.uri);
+      if(file.size>10*1024*1024)throw new Error('Group photo must be under 10 MB.');
+      const bytes=new Uint8Array(await file.arrayBuffer()),path=session.user.id+'/groups/'+active.id+'/'+Date.now()+'_'+ExpoCrypto.randomUUID()+'.jpg';
+      const {error:uploadError}=await supabase.storage.from('chat-media').upload(path,bytes,{contentType:'image/jpeg',upsert:false});bytes.fill(0);
+      if(uploadError)throw uploadError;
+      const {error}=await supabase.rpc('kc_update_group_details',{p_conversation_id:active.id,p_title:null,p_photo_url:path});
+      if(error)throw error;
+      const signed=await getSignedMediaUrl(path);
+      setChatDetails((prev:any)=>({...prev,conversation:{...prev.conversation,photo_url:path,photo_signed_url:signed}}));
+      setActive((prev:any)=>prev?.id===active.id?{...prev,avatarUrl:signed}:prev);
+      void loadInbox();
+      Alert.alert('Group photo updated','The new group photo is now saved.');
+    }catch(e:any){Alert.alert('Could not update group photo',e?.message||'Please try again.');}
+    finally{setGroupAdminBusy(false);}
+  };
+  const setGroupMemberAdmin=async(member:any,makeAdmin:boolean)=>{
+    if(!active||groupAdminBusy)return;
+    setGroupAdminBusy(true);
+    try{
+      const {error}=await supabase.rpc('kc_set_group_admin',{p_conversation_id:active.id,p_member_id:member.user_id,p_make_admin:makeAdmin});
+      if(error)throw error;
+      setChatDetails((prev:any)=>({...prev,members:prev.members.map((m:any)=>m.user_id===member.user_id?{...m,role:makeAdmin?'admin':'member'}:m)}));
+    }catch(e:any){Alert.alert('Could not change admin',e?.message||'Please try again.');}
+    finally{setGroupAdminBusy(false);}
+  };
+  const transferGroupOwnership=async(member:any,keepAdmin:boolean)=>{
+    if(!active||groupAdminBusy)return;
+    setGroupAdminBusy(true);
+    try{
+      const {error}=await supabase.rpc('kc_transfer_group_ownership',{p_conversation_id:active.id,p_new_owner_id:member.user_id,p_keep_old_owner_admin:keepAdmin});
+      if(error)throw error;
+      setChatDetails((prev:any)=>({...prev,conversation:{...prev.conversation,created_by:member.user_id},members:prev.members.map((m:any)=>m.user_id===member.user_id?{...m,role:'owner'}:m.user_id===session.user.id?{...m,role:keepAdmin?'admin':'member'}:m)}));
+      Alert.alert('Ownership transferred',keepAdmin?'You are still an admin.':'Your role is now member.');
+    }catch(e:any){Alert.alert('Could not transfer ownership',e?.message||'Please try again.');}
+    finally{setGroupAdminBusy(false);}
+  };
+
+  const loadStatuses=useCallback(async()=>{
+    if(!session)return;
+    const statusCacheKey='guftin-cache-statuses:'+session.user.id;
+    try{
+      const cachedRaw=await AsyncStorage.getItem(statusCacheKey);
+      if(cachedRaw){const cached=JSON.parse(cachedRaw);if(Array.isArray(cached))setStatuses(cached.filter((item:any)=>!item.expires_at||new Date(item.expires_at).getTime()>Date.now()));}
+    }catch{}
+    if(!onlineRef.current)return;
+    const {data,error}=await supabase.from('kc_status_updates').select('id,user_id,caption,media_url,created_at,expires_at')
+      .gt('expires_at',new Date().toISOString()).order('created_at',{ascending:false}).limit(100);
+    if(error){if(!isConnectivityFailure(error))Alert.alert('Statuses could not load',error.message);return;}
+    const rows=(data||[]) as any[];if(!rows.length){setStatuses([]);return;}
+    const ids=rows.map(row=>row.id);
+    const [peopleResult,viewsResult,likesResult,officialResult]=await Promise.all([
+      supabase.from('kc_profiles').select('id,display_name,username,avatar_url').in('id',[...new Set(rows.map(row=>row.user_id))]),
+      supabase.from('kc_status_views').select('status_id,viewer_id,viewed_at').in('status_id',ids),
+      supabase.from('kc_status_likes').select('status_id,user_id,created_at').in('status_id',ids),
+      supabase.from('kc_channels').select('owner_id').eq('is_official',true).maybeSingle()
+    ]);
+    const people=new Map((peopleResult.data||[]).map((p:any)=>[p.id,p]));
+    const actorIds=[...new Set([...(viewsResult.data||[]).map((v:any)=>v.viewer_id),...(likesResult.data||[]).map((v:any)=>v.user_id)])];
+    const {data:actors}=actorIds.length?await supabase.from('kc_profiles').select('id,display_name').in('id',actorIds):{data:[]};
+    const actorMap=new Map((actors||[]).map((p:any)=>[p.id,p]));
+    const mapped=await Promise.all(rows.map(async row=>{
+      const person:any=people.get(row.user_id),avatarSigned=person?.avatar_url?await getSignedMediaUrl(person.avatar_url):null;
+      const views=(viewsResult.data||[]).filter((v:any)=>v.status_id===row.id),likes=(likesResult.data||[]).filter((v:any)=>v.status_id===row.id);
+      const ext=String(row.media_url||'').split('.').pop()?.toLowerCase().replace(/[^a-z0-9]/g,'').slice(0,5)||'jpg';
+      const local=row.media_url?new File(Paths.document,'guftin-status-'+row.id+'.'+ext):null;
+      return {...row,display_name:row.user_id===officialResult.data?.owner_id?'Guftin Official':(person?.display_name||'Guftin member'),
+        username:row.user_id===officialResult.data?.owner_id?'':(person?.username||''),is_verified:row.user_id===officialResult.data?.owner_id,
+        avatar_signed_url:avatarSigned,status_count:rows.filter(x=>x.user_id===row.user_id).length,media_signed_url:local?.exists?local.uri:null,
+        viewed_by_me:row.user_id===session.user.id||views.some((v:any)=>v.viewer_id===session.user.id),view_count:views.length,
+        viewer_names:views.map((v:any)=>(actorMap.get(v.viewer_id) as any)?.display_name||'Guftin member'),
+        liker_names:likes.map((v:any)=>(actorMap.get(v.user_id) as any)?.display_name||'Guftin member'),
+        like_count:likes.length,liked_by_me:likes.some((v:any)=>v.user_id===session.user.id)};
+    }));
+    setStatuses(mapped);void AsyncStorage.setItem(statusCacheKey,JSON.stringify(mapped)).catch(()=>{});
+  },[session,getSignedMediaUrl]);
+
+  const openStatus=async(status:any)=>{
+    if(!session||statusOpening)return;setStatusOpening(true);
+    try{
+      let localMedia:string|null=null;
+      if(status.media_url){
+        const ext=String(status.media_url).split('.').pop()?.toLowerCase().replace(/[^a-z0-9]/g,'').slice(0,5)||'jpg';
+        const local=new File(Paths.document,'guftin-status-'+status.id+'.'+ext);
+        if(!status.viewed_by_me&&!onlineRef.current)throw new Error('Connect to the internet to open a status you have not viewed yet.');
+        if(status.viewed_by_me&&local.exists)localMedia=local.uri;
+        else{
+          if(!onlineRef.current)throw new Error('This status media is not saved on this phone. Connect to the internet and try again.');
+          const signed=await getSignedMediaUrl(status.media_url);if(!signed)throw new Error('Could not create a secure status media link.');
+          await File.downloadFileAsync(signed,local);if(!local.exists)throw new Error('Status media could not be saved for offline viewing.');localMedia=local.uri;
+        }
+      }
+      setSelectedStatus({...status,media_signed_url:localMedia});
+      if(!status.viewed_by_me&&status.user_id!==session.user.id){
+        const {error}=await supabase.from('kc_status_views').upsert({status_id:status.id,viewer_id:session.user.id},{onConflict:'status_id,viewer_id',ignoreDuplicates:true});
+        if(error)console.warn('Status view not recorded:',error.message);
+        else{void dispatchPush('status_view',status.id);setStatuses(prev=>prev.map(x=>x.id===status.id?{...x,viewed_by_me:true,view_count:(x.view_count||0)+1}:x));}
+      }
+    }catch(error:any){Alert.alert('Status could not open',error?.message||'Please try again.');}
+    finally{setStatusOpening(false);}
+  };
+
+  const toggleStatusLike=async(status:any)=>{
+    if(!session||status.user_id===session.user.id)return;
+    if(status.liked_by_me){
+      const {error}=await supabase.from('kc_status_likes').delete()
+        .eq('status_id',status.id).eq('user_id',session.user.id);
+      if(error){Alert.alert('Could not remove like',error.message);return;}
+    }else{
+      const {error}=await supabase.from('kc_status_likes').insert({
+        status_id:status.id,user_id:session.user.id
+      });
+      if(error&&error.code!=='23505'){Alert.alert('Could not like status',error.message);return;}
+      if(!error)void dispatchPush('status_like',status.id);
+    }
+    await loadStatuses();
+  };
+
+  useEffect(()=>{
+    if(!session||tab!=='Updates')return;
+    void loadStatuses();
+    const channel=supabase.channel('guftin-status-'+session.user.id)
+      .on('postgres_changes',{event:'*',schema:'public',table:'kc_status_updates'},()=>{void loadStatuses();})
+      .on('postgres_changes',{event:'*',schema:'public',table:'kc_status_views'},()=>{void loadStatuses();})
+      .on('postgres_changes',{event:'*',schema:'public',table:'kc_status_likes'},()=>{void loadStatuses();})
+      .subscribe((status,error)=>{
+        if(status==='CHANNEL_ERROR'||status==='TIMED_OUT'||status==='CLOSED'){
+          console.warn('Status realtime unavailable; automatic refresh will use polling.',error?.message||status);
+        }
+      });
+    const timer=setInterval(()=>{
+      if(AppState.currentState==='active')void loadStatuses();
+    },30000);
+    const appState=AppState.addEventListener('change',state=>{
+      if(state==='active')void loadStatuses();
+    });
+    return ()=>{
+      clearInterval(timer);
+      appState.remove();
+      void supabase.removeChannel(channel);
+    };
+  },[session,tab,loadStatuses]);
+
+  useEffect(()=>{if(session?.user?.id)void loadChatFolders();else{setChatFolders([]);setActiveFolderId(null);}},[session?.user?.id]);
+
+  const visible=useMemo(()=>chats.filter(c=>c.name.toLowerCase().includes(search.toLowerCase())&&(!activeFolderId||chatFolders.some((folder:any)=>folder.id===activeFolderId&&folder.conversation_ids.includes(c.id)))),[chats,search,activeFolderId,chatFolders]);
+  const pageTitle=tab==='Chats'?'Messages':tab==='Updates'?'Updates':tab==='Channels'?'Channels':tab==='Calls'?'Calls':'You';
+
+  if(authRestoring){
+    return <SafeAreaView style={{flex:1,backgroundColor:C.paper,alignItems:'center',justifyContent:'center'}}>
+      <ActivityIndicator color={C.green} size="large"/>
+      <Text style={{color:C.muted,marginTop:12}}>Restoring your Guftin session…</Text>
+    </SafeAreaView>;
+  }
+
+  if(!session&&emailOtpPending){
+    return <SafeAreaView style={{flex:1,backgroundColor:C.paper,padding:25,justifyContent:'center'}}>
+      <StatusBar barStyle="dark-content"/>
+      <ScrollView contentContainerStyle={{flexGrow:1,justifyContent:'center'}}>
+        <View style={{alignItems:'center',marginBottom:34}}>
+          <BrandLogo size={78}/>
+          <Heading>{otpPurpose==='recovery'?'Reset your password':'Verify your email'}</Heading>
+          <Text style={{color:C.muted,marginTop:10,textAlign:'center',lineHeight:22}}>We sent a 6-digit {otpPurpose==='recovery'?'password reset':'verification'} code to</Text>
+          <Text style={{color:C.ink,fontWeight:'800',marginTop:4}}>{email}</Text>
+        </View>
+        <Text style={{fontSize:23,fontWeight:'900',color:C.ink,marginBottom:8}}>Enter verification code</Text>
+        <Text style={{color:C.muted,marginBottom:18,lineHeight:20}}>Enter the code from your email. Do not share it with anyone.</Text>
+        <TextInput value={emailOtp} onChangeText={v=>{setEmailOtp(v.replace(/\D/g,'').slice(0,6));setAuthError('');}} placeholder="6-digit code" keyboardType="number-pad" textContentType="oneTimeCode" autoComplete="one-time-code" maxLength={6} style={{backgroundColor:C.white,borderRadius:15,padding:18,marginBottom:12,color:C.ink,fontSize:25,fontWeight:'800',letterSpacing:8,textAlign:'center'}}/>
+        {otpPurpose==='recovery'?<>
+          <TextInput value={newPassword} onChangeText={setNewPassword} placeholder="New password (at least 8 characters)" secureTextEntry autoCapitalize="none" style={{backgroundColor:C.white,borderRadius:15,padding:16,marginBottom:10,color:C.ink}}/>
+          <TextInput value={confirmNewPassword} onChangeText={setConfirmNewPassword} placeholder="Confirm new password" secureTextEntry autoCapitalize="none" style={{backgroundColor:C.white,borderRadius:15,padding:16,marginBottom:12,color:C.ink}}/>
+        </>:null}
+        {authError?<Text style={{color:C.red,fontSize:12,lineHeight:18,marginBottom:12}}>{authError}</Text>:null}
+        <Btn disabled={otpBusy||emailOtp.length!==6||(otpPurpose==='recovery'&&(newPassword.length<8||newPassword!==confirmNewPassword))} onPress={verifyCurrentOtp} style={{backgroundColor:C.green,padding:17,borderRadius:16,alignItems:'center'}}>{otpBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>{otpPurpose==='recovery'?'Verify code & reset password':'Verify email'}</Text>}</Btn>
+        <Btn disabled={otpBusy} onPress={resendCurrentOtp} style={{padding:16,alignItems:'center'}}><Text style={{color:C.green,fontWeight:'800'}}>Resend code</Text></Btn>
+        <Btn disabled={otpBusy} onPress={()=>{setEmailOtpPending(false);setEmailOtp('');setNewPassword('');setConfirmNewPassword('');setAuthError('');}} style={{padding:12,alignItems:'center'}}><Text style={{color:C.muted,fontWeight:'700'}}>Back to sign in</Text></Btn>
+      </ScrollView>
+    </SafeAreaView>;
+  }
+
+  if(!session){
+    return <SafeAreaView style={{flex:1,backgroundColor:C.paper,padding:25,justifyContent:'center'}}>
+      <StatusBar barStyle="dark-content"/>
+      <ScrollView contentContainerStyle={{flexGrow:1,justifyContent:'center'}}>
+        <View style={{alignItems:'center',marginBottom:34}}>
+          <BrandLogo size={78}/>
+          <Heading>Guftin</Heading>
+          <Text style={{color:C.muted,marginTop:8}}>Your world. Your people. One place.</Text>
+        </View>
+        <Text style={{fontSize:23,fontWeight:'900',color:C.ink,marginBottom:8}}>{authMode==='signup'?'Create your Guftin account':'Welcome back'}</Text>
+        <Text style={{color:C.muted,marginBottom:14,lineHeight:20}}>{authMode==='signup'?'Create your account using Gmail/email and password. Mobile number is optional.':'Sign in using your email and password.'}</Text>
+        {authMode==='signup'?<>
+          <TextInput value={fullName} onChangeText={setFullName} placeholder="Full name" autoCapitalize="words" style={{backgroundColor:C.white,borderRadius:15,padding:16,marginBottom:10,color:C.ink}}/>
+          <TextInput value={email} onChangeText={setEmail} placeholder="Gmail / email address" keyboardType="email-address" autoCapitalize="none" autoComplete="email" style={{backgroundColor:C.white,borderRadius:15,padding:16,marginBottom:10,color:C.ink}}/>
+          <TextInput value={username} onChangeText={v=>setUsername(v.toLowerCase().replace(/[^a-z0-9_]/g,''))} placeholder="Choose permanent username" autoCapitalize="none" style={{backgroundColor:C.white,borderRadius:15,padding:16,marginBottom:10,color:C.ink}}/>
+          <TextInput value={password} onChangeText={setPassword} placeholder="Password (at least 8 characters)" secureTextEntry autoCapitalize="none" autoComplete="new-password" style={{backgroundColor:C.white,borderRadius:15,padding:16,marginBottom:10,color:C.ink}}/>
+          <TextInput value={profilePhone} onChangeText={setProfilePhone} placeholder="Mobile number (Optional)" keyboardType="phone-pad" autoComplete="tel" style={{backgroundColor:C.white,borderRadius:15,padding:16,marginBottom:10,color:C.ink}}/>
+        </>:<>
+          <TextInput value={email} onChangeText={setEmail} placeholder="Gmail / email address" keyboardType="email-address" autoCapitalize="none" autoComplete="email" style={{backgroundColor:C.white,borderRadius:15,padding:16,marginBottom:10,color:C.ink}}/>
+          <TextInput value={password} onChangeText={setPassword} placeholder="Password" secureTextEntry autoCapitalize="none" autoComplete="password" style={{backgroundColor:C.white,borderRadius:15,padding:16,marginBottom:10,color:C.ink}}/>
+        </>}
+        {authError?<Text style={{color:C.red,fontSize:12,lineHeight:18,marginBottom:12}}>{authError}</Text>:null}
+        {authMode==='login'?<Btn disabled={authBusy} onPress={requestPasswordReset} style={{padding:10,alignItems:'center'}}><Text style={{color:C.green,fontWeight:'800'}}>Forgot password?</Text></Btn>:null}
+        <Btn disabled={authBusy} onPress={()=>authMode==='signup'?void signUpEmail():void signInEmail()} style={{backgroundColor:C.green,padding:17,borderRadius:16,alignItems:'center'}}>{authBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>{authMode==='signup'?'Create account':'Sign in'}</Text>}</Btn>
+        <View style={{flexDirection:'row',alignItems:'center',gap:12,marginVertical:14}}>
+          <View style={{flex:1,height:1,backgroundColor:C.line}}/><Text style={{color:C.muted,fontSize:11,fontWeight:'700'}}>OR</Text><View style={{flex:1,height:1,backgroundColor:C.line}}/>
+        </View>
+        <Btn disabled={googleBusy||authBusy} onPress={()=>void signInGoogle()} style={{backgroundColor:C.white,borderWidth:1,borderColor:C.line,padding:16,borderRadius:16,alignItems:'center',flexDirection:'row',justifyContent:'center',gap:10}}>
+          {googleBusy?<ActivityIndicator color={C.green}/>:<Text style={{fontSize:17,fontWeight:'900',color:'#4285F4'}}>G</Text>}
+          <Text style={{color:C.ink,fontWeight:'900'}}>{googleBusy?'Connecting to Google...':'Continue with Google'}</Text>
+        </Btn>
+        <Text style={{color:C.muted,fontSize:10,textAlign:'center',marginTop:7}}>Create a new Guftin account or sign in securely with Google.</Text>
+        <Btn onPress={()=>{setAuthMode(authMode==='signup'?'login':'signup');setAuthError('');setEmailOtpPending(false);}} style={{padding:16,alignItems:'center'}}><Text style={{color:C.green,fontWeight:'800'}}>{authMode==='signup'?'Already have an account? Sign in':'New to Guftin? Create account'}</Text></Btn>
+        {authMode==='signup'?<Text style={{color:C.muted,fontSize:10,textAlign:'center',marginTop:8,lineHeight:16}}>Email verification is required for email signup. A mobile number is optional and is never used to sign in.</Text>:null}
+
+      </ScrollView>
+    </SafeAreaView>;
+  }
+
+  if(!profileReady){
+    return <SafeAreaView style={{flex:1,alignItems:'center',justifyContent:'center',backgroundColor:C.paper}}><ActivityIndicator color={C.green}/><Text style={{color:C.muted,marginTop:10}}>Loading your account…</Text></SafeAreaView>;
+  }
+
+  if(!profile?.username){
+    return <SafeAreaView style={{flex:1,backgroundColor:C.paper,padding:24,justifyContent:'center'}}>
+      <StatusBar barStyle="dark-content"/>
+      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{flexGrow:1,justifyContent:'center'}}>
+        <View style={{alignItems:'center',marginBottom:26}}><BrandLogo size={70}/><Heading>Complete your Guftin profile</Heading></View>
+        <Text style={{fontSize:22,fontWeight:'900',color:C.ink,marginBottom:8}}>Your account details</Text>
+        <Text style={{color:C.muted,lineHeight:20,marginBottom:18}}>Choose a permanent username. Your mobile number is optional and does not need verification.</Text>
+        <TextInput value={profileName} onChangeText={setProfileName} placeholder="Full name" autoCapitalize="words" style={{backgroundColor:C.white,borderRadius:15,padding:16,marginBottom:10,color:C.ink}}/>
+        <TextInput value={profileUsername} onChangeText={v=>setProfileUsername(v.toLowerCase().replace(/[^a-z0-9_]/g,''))} placeholder="Username (3-24 characters)" autoCapitalize="none" style={{backgroundColor:C.white,borderRadius:15,padding:16,marginBottom:10,color:C.ink}}/>
+        <Text style={{fontSize:11,color:C.muted,marginBottom:14}}>Allowed: lowercase letters, numbers and underscore.</Text>
+        <TextInput value={profilePhone} onChangeText={setProfilePhone} placeholder="Mobile number (Optional)" keyboardType="phone-pad" autoComplete="tel" style={{backgroundColor:C.white,borderRadius:15,padding:16,marginBottom:14,color:C.ink}}/>
+        <Btn disabled={savingProfile} onPress={()=>void finishProfile()} style={{backgroundColor:C.green,padding:17,borderRadius:16,alignItems:'center'}}>{savingProfile?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Save and continue</Text>}</Btn>
+        <Btn onPress={()=>supabase.auth.signOut()} style={{padding:12,alignItems:'center'}}><Text style={{color:C.red,fontWeight:'700'}}>Sign out</Text></Btn>
+      </ScrollView>
+    </SafeAreaView>;
+  }
+
+  if(permissionSetupVisible&&session){
+    const step=PERMISSION_SETUP_STEPS[permissionSetupStep];
+    return <SafeAreaView style={{flex:1,backgroundColor:C.paper,paddingHorizontal:22}}>
+      <StatusBar barStyle="dark-content"/>
+      <ScrollView contentContainerStyle={{flexGrow:1,justifyContent:'center',paddingVertical:28}}>
+        <View style={{alignItems:'center',marginBottom:26}}>
+          <BrandLogo size={70}/>
+          <Heading>Guftin setup</Heading>
+          <Text style={{color:C.muted,fontSize:12,marginTop:7,textAlign:'center'}}>Set your device permissions</Text>
+        </View>
+        <Text style={{fontSize:23,fontWeight:'900',color:C.ink,marginBottom:8}}>Allow the features you want</Text>
+        <Text style={{color:C.muted,fontSize:13,lineHeight:20,marginBottom:18}}>Guftin will ask one permission at a time. For Android call permissions, Allow opens the exact system settings page; after you enable the switch and return, Guftin verifies it automatically.</Text>
+        <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
+          <Text style={{fontSize:11,color:C.green,fontWeight:'900'}}>STEP {permissionSetupStep+1} OF {PERMISSION_SETUP_STEPS.length}</Text>
+          <Text style={{fontSize:11,color:C.muted}}>{Math.round(((permissionSetupStep+1)/PERMISSION_SETUP_STEPS.length)*100)}%</Text>
+        </View>
+        <View style={{height:7,backgroundColor:'#dcebe4',borderRadius:8,overflow:'hidden',marginBottom:20}}>
+          <View style={{height:7,width:((((permissionSetupStep+1)/PERMISSION_SETUP_STEPS.length)*100)+'%') as any,backgroundColor:C.green,borderRadius:8}}/>
+        </View>
+        <View style={{backgroundColor:C.white,borderRadius:22,padding:22,borderWidth:1,borderColor:C.line}}>
+          <Text style={{fontSize:39,marginBottom:12}}>{step.icon}</Text>
+          <Text style={{fontSize:21,fontWeight:'900',color:C.ink,marginBottom:8}}>{step.title}</Text>
+          <Text style={{fontSize:13,color:C.muted,lineHeight:20}}>{step.description}</Text>
+          {step.key==='autoSave'?<View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginTop:20,paddingTop:15,borderTopWidth:1,borderColor:C.line}}>
+            <View style={{flex:1,paddingRight:12}}>
+              <Text style={{fontSize:13,fontWeight:'900',color:C.ink}}>Turn on automatic gallery saving</Text>
+              <Text style={{fontSize:11,color:C.muted,marginTop:4}}>When enabled, new incoming photos and videos can be saved automatically.</Text>
+            </View>
+            <Switch value={permissionSetupAutoSave} onValueChange={setPermissionSetupAutoSave} trackColor={{true:C.green}}/>
+          </View>:null}
+          {permissionSetupNotice?<Text style={{fontSize:11,color:C.muted,lineHeight:17,marginTop:15}}>{permissionSetupNotice}</Text>:null}
+        </View>
+        <View style={{flexDirection:'row',gap:10,marginTop:22}}>
+          <Btn disabled={permissionSetupBusy} onPress={()=>void skipPermissionSetupStep()} style={{flex:1,padding:15,borderRadius:14,alignItems:'center',backgroundColor:C.white,borderWidth:1,borderColor:C.line}}>
+            <Text style={{color:C.ink,fontWeight:'800'}}>Not now</Text>
+          </Btn>
+          <Btn disabled={permissionSetupBusy} onPress={()=>void requestPermissionSetupStep()} style={{flex:1,padding:15,borderRadius:14,alignItems:'center',backgroundColor:C.green}}>
+            {permissionSetupBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>{step.key==='autoSave'?'Save choice':step.key==='fullScreenCalls'?(permissionSetupFullScreenOpened?'Continue':'Open settings'):'Allow'}</Text>}
+          </Btn>
+        </View>
+        <Btn disabled={permissionSetupBusy} onPress={()=>void finishPermissionSetup()} style={{paddingVertical:14,paddingHorizontal:12,alignItems:'center',marginTop:7}}>
+          <Text style={{color:C.green,fontWeight:'900'}}>Skip setup for now</Text>
+        </Btn>
+        <Text style={{fontSize:10,color:C.muted,textAlign:'center',lineHeight:16,marginTop:8}}>You can allow each permission later when you use the feature. Contacts and location access are not needed for username-based Guftin chats. Android only grants access when you choose Allow.</Text>
+      </ScrollView>
+    </SafeAreaView>;
+  }
+
+  if(liveCall){
+    return <SecureLiveKitRoom
+      liveCall={liveCall}
+      sessionUserId={session.user.id}
+      onConnected={()=>{
+        if(Platform.OS==='android'&&liveCall.nativeIncomingCall){
+          try{RNCallKeep.setCurrentCallActive(liveCall.id);}
+          catch(nativeStateError:any){console.warn('Android incoming call active-state sync:',nativeStateError?.message||nativeStateError);}
+        }
+      }}
+      onDisconnected={()=>void endCall(liveCall.id)}
+      onHangUp={()=>endCall(liveCall.id)}
+    />;
+  }
+
+  if(incomingCall){
+    return <CallLobbyScreen
+      call={incomingCall}
+      mode="incoming"
+      busy={!!pendingCallAccept&&pendingCallAccept.id===incomingCall.id}
+      onAccept={()=>void acceptCallWhenReady(incomingCall)}
+      onDecline={()=>void respondToCall(incomingCall,'declined')}
+    />;
+  }
+
+  if(outgoingCall){
+    return <CallLobbyScreen
+      call={outgoingCall}
+      mode="outgoing"
+      onCancel={()=>void endCall(outgoingCall.id)}
+    />;
+  }
+
+  if(active){
+    const list=messages[active.id]||[];
+    return <KeyboardAvoidingView style={{flex:1}} behavior={Platform.OS==='ios'?'padding':'height'} keyboardVerticalOffset={Platform.OS==='ios'?insets.top:0}>
+      <SafeAreaView style={{flex:1,backgroundColor:C.paper}}>
+      <StatusBar barStyle="dark-content"/>
+      <View style={{minHeight:82,backgroundColor:C.white,flexDirection:'row',alignItems:'center',paddingHorizontal:12,paddingVertical:7,borderBottomWidth:1,borderColor:C.line,elevation:2}}>
+        <Btn onPress={()=>setActive(null)} style={{padding:10}}><Text style={{fontSize:24,color:C.ink}}>‹</Text></Btn>
+        <Avatar label={active.avatar} color={active.color} size={43} online={active.online} uri={active.avatarUrl}/>
+        <Btn onPress={()=>active.kind==='channel'?showChannelOptions():void openChatDetails()} style={{flex:1,marginLeft:11,alignItems:'flex-start'}}>
+          <View style={{flexDirection:'row',alignItems:'center',gap:5}}><Text numberOfLines={1} style={{fontWeight:'900',fontSize:15,color:C.ink}}>{active.name}</Text>{active.isVerified?<VerifiedBadge label={active.isOfficial?'Verified Guftin Official account':'Verified channel'}/>:null}</View>
+          <Text style={{fontSize:11,color:active.isOfficial?C.green:active.online?C.green:C.muted}}>{active.kind==='channel'?(active.isOfficial?'Official Guftin announcements':active.isChannelOwner?'Your channel · publish updates':'Channel · read-only'):active.kind==='group'?'Tap for group info':outgoingCall?'Calling…':active.online?'● online':'Tap for contact info'}</Text>
+        </Btn>
+        {active.kind!=='channel'?(outgoingCall?<Btn onPress={()=>void endCall(outgoingCall.id)} style={{backgroundColor:'#fde8e8',borderRadius:15,width:62,height:58,alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:'#f3c6c6'}}><Text style={{fontSize:11,fontWeight:'900',color:C.red}}>Cancel</Text><Text style={{fontSize:9,color:C.red}}>call</Text></Btn>:<>
+          <Btn disabled={callBusy} onPress={()=>void startCall('voice')} style={{backgroundColor:C.mint,borderRadius:15,width:56,height:58,alignItems:'center',justifyContent:'center',opacity:callBusy?0.5:1,borderWidth:1,borderColor:'#cce9dc'}}><Text style={{fontSize:20,color:C.green}}>☎</Text><Text style={{fontSize:10,fontWeight:'900',color:C.green}}>{active.kind==='group'?'Group call':'Call'}</Text></Btn>
+          <Btn disabled={callBusy} onPress={()=>void startCall('video')} style={{backgroundColor:C.mint,borderRadius:15,width:56,height:58,alignItems:'center',justifyContent:'center',opacity:callBusy?0.5:1,borderWidth:1,borderColor:'#cce9dc'}}><Text style={{fontSize:19,color:C.green}}>▣</Text><Text style={{fontSize:10,fontWeight:'900',color:C.green}}>Video</Text></Btn>
+        </>):null}
+        <Btn onPress={()=>active.kind==='channel'?showChannelOptions():Alert.alert('Chat options',active.name,[
+          {text:'Chat info',onPress:()=>void openChatDetails()},
+          ...(active.kind==='direct'?[{text:'Block contact',style:'destructive' as const,onPress:()=>Alert.alert('Block this contact?', 'They will be added to your blocked users. Existing chat history will remain.',[{text:'Cancel',style:'cancel' as const},{text:'Block',style:'destructive' as const,onPress:()=>void blockCurrentContact(active)}])}]:[]),
+          {text:'Chat PIN settings',onPress:()=>void (async()=>{const key=pinStorageKey('chat',active.id);const stored=await SecureStore.getItemAsync(key);const disabled=await AsyncStorage.getItem('guftin-chat-lock-disabled:'+active.id);Alert.alert('Chat PIN',active.name,stored&&disabled!=='1'?[{text:'Unlock Chat',onPress:()=>startPinFlow('unlock-chat',active)},{text:'Permanently Unlock',style:'destructive',onPress:()=>startPinFlow('remove-chat-lock',active)},{text:'Cancel',style:'cancel'}]:[{text:'Lock Chat',onPress:()=>void (async()=>{await AsyncStorage.removeItem('guftin-chat-lock-disabled:'+active.id);startPinFlow('set-chat',active);})()},{text:'Cancel',style:'cancel'}]);})()},
+          {text:'Clear Chat',style:'destructive',onPress:()=>Alert.alert('Clear this chat?', 'This removes the messages from your Guftin account on this phone. The other participant keeps their chat history.',[
+            {text:'Cancel',style:'cancel'},
+            {text:'Clear Chat',style:'destructive',onPress:()=>void clearChatForMe(active)}
+          ])},
+          {text:'Cancel',style:'cancel'}
+        ])} style={{width:36,height:52,borderRadius:13,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:26,fontWeight:'900',color:C.ink}}>⋮</Text></Btn>
+      </View>
+      {!isOnline?<View style={{backgroundColor:'#fff1d6',paddingHorizontal:14,paddingVertical:8}}><Text style={{color:'#815500',fontSize:11,fontWeight:'800',textAlign:'center'}}>You are offline · Showing saved messages. Sending is unavailable.</Text></View>:null}
+      <FlatList ref={chatMessagesListRef} data={list} keyExtractor={m=>m.id} keyboardShouldPersistTaps="handled" style={{flex:1}} contentContainerStyle={{padding:18,gap:12,flexGrow:1,justifyContent:list.length?'flex-end':'center'}}
+        ListEmptyComponent={<Text style={{textAlign:'center',color:C.muted}}>No messages yet. Send the first message.</Text>}
+        renderItem={({item})=><TouchableOpacity activeOpacity={1} onLongPress={active.kind==='channel'&&!active.isChannelOwner?undefined:()=>deleteMessage(item)} delayLongPress={420} style={{alignSelf:item.mine?'flex-end':'flex-start',maxWidth:'84%',backgroundColor:item.mine?'#dff4e8':C.white,padding:13,borderRadius:17,borderTopRightRadius:item.mine?5:17,borderTopLeftRadius:item.mine?17:5}}>
+          {item.deleted_at?<Text style={{fontSize:12,color:C.muted,fontStyle:'italic'}}>This message was deleted</Text>:item.message_type==='image'&&item.attachment_url?<Image source={{uri:item.attachment_url}} style={{width:210,height:210,borderRadius:12}} resizeMode="cover"/>:item.message_type==='video'&&item.attachment_url?<VideoBubble uri={item.attachment_url}/>:item.message_type==='audio'&&item.attachment_url?<AudioBubble uri={item.attachment_url}/>:item.message_type==='file'&&item.attachment_url?<View style={{minWidth:225,maxWidth:270,backgroundColor:C.paper,borderRadius:13,padding:12}}>
+            <Text style={{fontSize:25,color:C.green}}>▤</Text>
+            <Text numberOfLines={2} style={{fontSize:13,fontWeight:'900',color:C.ink,marginTop:5}}>{item.body||'Document'}</Text>
+            <Text style={{fontSize:10,color:C.muted,marginTop:3}}>{getDocumentMimeType(item.body||'').replace('application/','').replace('vnd.openxmlformats-officedocument.','')}</Text>
+            <Btn onPress={()=>void Sharing.shareAsync(item.attachment_url!,{mimeType:getDocumentMimeType(item.body||''),dialogTitle:item.body||'Share document'})} style={{marginTop:10,padding:10,borderRadius:10,backgroundColor:C.mint,alignSelf:'flex-start'}}>
+              <Text style={{color:C.green,fontWeight:'900',fontSize:11}}>Open / Share document</Text>
+            </Btn>
+          </View>:<Text style={{color:C.ink,fontSize:14,lineHeight:21}}>{item.body||'Attachment'}</Text>}
+          {!item.deleted_at&&['image','video'].includes(item.message_type)&&item.attachment_url?<Btn onPress={()=>void saveMediaToGallery(item)} style={{marginTop:7,paddingVertical:6,paddingHorizontal:9,borderRadius:9,backgroundColor:C.paper,alignSelf:'flex-start'}}><Text style={{fontSize:11,color:C.green,fontWeight:'800'}}>↓ Save to gallery</Text></Btn>:null}
+          <Text style={{textAlign:'right',fontSize:9,color:C.muted,marginTop:5}}>
+            {timeLabel(item.created_at)}{item.pending?' · Queued':item.mine ? " · " + (showReadReceipts && peerLastReadAt && new Date(peerLastReadAt).getTime() >= new Date(item.created_at).getTime() ? "✓✓ Read" : deliveredByMessage[item.id] ? "✓✓ Delivered" : "✓ Sent") : ""}
+          </Text>
+          {item.pending?<Btn onPress={()=>{void flushPendingMessagesRef.current?.(true);void flushPendingMediaRef.current?.(true);}} style={{marginTop:6,alignSelf:'flex-end',paddingHorizontal:10,paddingVertical:5,borderRadius:9,backgroundColor:C.mint}}><Text style={{fontSize:10,color:C.green,fontWeight:'900'}}>↻ Retry sending</Text></Btn>:null}
+        </TouchableOpacity>}/>
+      <View style={{flexDirection:'row',alignItems:'center',padding:11,gap:8,backgroundColor:C.white,borderTopWidth:1,borderColor:C.line}}>
+        {active.kind==='channel'&&!active.isChannelOwner
+          ?<Text style={{flex:1,textAlign:'center',fontSize:12,color:C.muted,fontWeight:'800',paddingVertical:12}}>Only the channel owner can publish updates.</Text>
+          :<>
+            <Btn disabled={mediaPreparing} onPress={sendMedia} style={{width:42,height:42,borderRadius:15,backgroundColor:C.paper,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:23,color:C.green}}>＋</Text></Btn>
+            {active.kind!=='channel'?<Btn disabled={sending||recordingBusy} onPress={recording?stopVoiceRecording:startVoiceRecording} style={{width:42,height:42,borderRadius:15,backgroundColor:recording?'#fde8e8':C.paper,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:18,color:recording?C.red:C.green}}>{recording?'■':'🎙'}</Text></Btn>:null}
+            <TextInput editable={true} value={draft} onChangeText={setDraft} onFocus={()=>requestAnimationFrame(()=>chatMessagesListRef.current?.scrollToEnd({animated:true}))} placeholder={!isOnline?'Offline · message will send when connected':active.kind==='channel'?'Write a channel update…':recording?'Recording… tap ■ to send':'Write a message...'} multiline maxLength={4000} style={{flex:1,minHeight:46,maxHeight:110,backgroundColor:C.paper,borderRadius:16,paddingHorizontal:15,paddingVertical:12,color:C.ink,textAlignVertical:'center'}}/>
+            <Btn disabled={!draft.trim()||sending} onPress={sendMessage} style={{backgroundColor:C.green,width:46,height:46,borderRadius:16,alignItems:'center',justifyContent:'center'}}>
+              {sending?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontSize:20}}>➤</Text>}
+            </Btn>
+          </>}
+      </View>
+    <Modal visible={chatDetailsOpen} animationType="slide" onRequestClose={()=>setChatDetailsOpen(false)}>
+      <SafeAreaView style={{flex:1,backgroundColor:C.paper}}>
+        <StatusBar barStyle="dark-content"/>
+        <View style={{height:58,backgroundColor:C.white,flexDirection:'row',alignItems:'center',paddingHorizontal:14,borderBottomWidth:1,borderColor:C.line}}>
+          <Btn onPress={()=>setChatDetailsOpen(false)} style={{padding:10}}><Text style={{fontSize:25,color:C.ink}}>‹</Text></Btn>
+          <Text style={{fontSize:18,fontWeight:'900',color:C.ink,marginLeft:8}}>Contact info</Text>
+        </View>
+        {chatDetailsLoading?<View style={{flex:1,alignItems:'center',justifyContent:'center'}}><ActivityIndicator color={C.green}/><Text style={{color:C.muted,marginTop:10}}>Loading contact information…</Text></View>:chatDetails?<ScrollView contentContainerStyle={{padding:18,paddingBottom:34}}>
+          <View style={{alignItems:'center',backgroundColor:C.white,borderRadius:22,padding:24,marginBottom:16}}>
+            <Avatar label={initials(chatDetails.conversation.kind==='group'?chatDetails.conversation.title:(chatDetails.members.find((member:any)=>member.user_id!==session.user.id)?.display_name||active.name||'G'))}
+              color={C.green} size={112} uri={chatDetails.conversation.kind==='group'?(chatDetails.conversation.photo_signed_url||undefined):(chatDetails.members.find((member:any)=>member.user_id!==session.user.id)?.avatar_signed_url||undefined)}/>
+            <Text style={{fontSize:22,fontWeight:'900',color:C.ink,marginTop:15}}>{chatDetails.conversation.kind==='group'?chatDetails.conversation.title:(chatDetails.members.find((member:any)=>member.user_id!==session.user.id)?.display_name||active.name)}</Text>
+            {chatDetails.conversation.kind==='group'?<Text style={{fontSize:12,color:C.muted,marginTop:5}}>Group conversation · {chatDetails.members.length} participants</Text>:(()=>{
+              const person=chatDetails.members.find((member:any)=>member.user_id!==session.user.id)||{};
+              return <><Text style={{fontSize:13,color:C.green,fontWeight:'800',marginTop:5}}>@{person.username||'—'}</Text><Text style={{fontSize:12,color:C.muted,marginTop:5}}>{person.is_online?'● Online now':person.last_seen_at?'Last seen '+timeLabel(person.last_seen_at):'Offline'}</Text></>;
+            })()}
+          </View>
+          {chatDetails.conversation.kind==='group'?<>
+            <View style={{backgroundColor:C.white,borderRadius:18,padding:16,marginBottom:12}}>
+              <Text style={{fontSize:14,fontWeight:'900',color:C.ink,marginBottom:10}}>Group management</Text>
+              {(chatDetails.conversation.created_by===session.user.id||chatDetails.members.some((m:any)=>m.is_me&&m.role==='admin'))?<><TextInput value={groupEditTitle} onChangeText={setGroupEditTitle} maxLength={60} placeholder="Group name" style={{backgroundColor:C.paper,borderRadius:12,padding:12,color:C.ink}}/><Btn disabled={groupAdminBusy} onPress={()=>void saveGroupDetails()} style={{backgroundColor:C.green,padding:11,borderRadius:11,marginTop:8,alignItems:'center'}}><Text style={{color:'#fff',fontWeight:'900'}}>Save group name</Text></Btn><Btn disabled={groupAdminBusy} onPress={()=>void chooseGroupPhoto()} style={{backgroundColor:C.mint,padding:11,borderRadius:11,marginTop:8,alignItems:'center'}}><Text style={{color:C.green,fontWeight:'900'}}>Change group logo / photo</Text></Btn></>:null}
+            </View>
+            <View style={{backgroundColor:C.white,borderRadius:18,padding:16}}>
+              <Text style={{fontSize:14,fontWeight:'900',color:C.ink,marginBottom:8}}>Participants · {chatDetails.members.length}</Text>
+              {chatDetails.members.map((member:any)=><View key={member.user_id} style={{flexDirection:'row',alignItems:'center',gap:11,paddingVertical:11,borderBottomWidth:1,borderColor:C.line}}>
+                <Avatar label={initials(member.display_name||member.username||'G')} color={colorFor(member.user_id)} size={44} uri={member.avatar_signed_url}/>
+                <View style={{flex:1}}><Text style={{fontWeight:'800',color:C.ink}}>{member.display_name||'Guftin member'}{member.is_me?' (You)':''}</Text><Text style={{fontSize:11,color:C.muted,marginTop:3}}>@{member.username||'member'}</Text></View>
+                <View style={{alignItems:'flex-end',gap:5}}>
+                  <Text style={{fontSize:10,color:C.green,fontWeight:'800'}}>{member.role||'member'}</Text>
+                  {chatDetails.conversation.created_by===session.user.id&&!member.is_me&&member.role!=='owner'?<><Btn disabled={groupAdminBusy} onPress={()=>void setGroupMemberAdmin(member,member.role!=='admin')} style={{paddingHorizontal:9,paddingVertical:6,borderRadius:9,backgroundColor:C.mint}}><Text style={{fontSize:9,color:C.green,fontWeight:'900'}}>{member.role==='admin'?'Remove admin':'Make admin'}</Text></Btn><Btn disabled={groupAdminBusy} onPress={()=>Alert.alert('Transfer group ownership?', 'You can keep your admin role or transfer ownership and become a regular member.',[{text:'Cancel',style:'cancel'},{text:'Transfer and remain admin',onPress:()=>void transferGroupOwnership(member,true)},{text:'Transfer and become member',style:'destructive',onPress:()=>void transferGroupOwnership(member,false)}])} style={{paddingHorizontal:9,paddingVertical:6,borderRadius:9,backgroundColor:C.paper}}><Text style={{fontSize:9,color:C.ink,fontWeight:'900'}}>Make owner</Text></Btn></>:null}
+                </View>
+              </View>)}
+            </View>
+          </>:(()=>{
+            const person=chatDetails.members.find((member:any)=>member.user_id!==session.user.id)||{};
+            return <View style={{gap:12}}>
+              <View style={{backgroundColor:C.white,borderRadius:16,padding:16}}>
+                <Text style={{fontSize:10,color:C.muted,fontWeight:'900',letterSpacing:1}}>NAME</Text>
+                <Text style={{fontSize:15,color:C.ink,fontWeight:'800',marginTop:5}}>{person.display_name||'Guftin member'}</Text>
+              </View>
+              <View style={{backgroundColor:C.white,borderRadius:16,padding:16}}>
+                <Text style={{fontSize:10,color:C.muted,fontWeight:'900',letterSpacing:1}}>USERNAME / GUFTIN ID</Text>
+                <Text style={{fontSize:15,color:C.ink,fontWeight:'900',marginTop:5}}>@{person.username||'—'}</Text>
+              </View>
+              <View style={{backgroundColor:C.white,borderRadius:16,padding:16}}>
+                <Text style={{fontSize:10,color:C.muted,fontWeight:'900',letterSpacing:1}}>ABOUT</Text>
+                <Text style={{fontSize:14,color:C.ink,lineHeight:21,marginTop:5}}>{person.about||'No about information added.'}</Text>
+              </View>
+              <View style={{backgroundColor:C.white,borderRadius:16,padding:16}}>
+                <Text style={{fontSize:10,color:C.muted,fontWeight:'900',letterSpacing:1}}>ACTIVITY</Text>
+                <Text style={{fontSize:14,color:C.ink,marginTop:5}}>{person.is_online?'Online now':person.last_seen_at?'Last seen '+timeLabel(person.last_seen_at):'Offline'}</Text>
+              </View>
+              <View style={{backgroundColor:C.white,borderRadius:16,padding:16}}>
+                <Text style={{fontSize:10,color:C.muted,fontWeight:'900',letterSpacing:1}}>MEMBER SINCE</Text>
+                <Text style={{fontSize:14,color:C.ink,marginTop:5}}>{person.created_at?new Date(person.created_at).toLocaleDateString([],{month:'long',year:'numeric'}):'Not available'}</Text>
+              </View>
+            </View>;
+          })()}
+        </ScrollView>:<View style={{flex:1,alignItems:'center',justifyContent:'center',padding:30}}><Text style={{color:C.muted}}>No contact information available.</Text></View>}
+      </SafeAreaView>
+    </Modal>
+
+      </SafeAreaView>
+    </KeyboardAvoidingView>;
+  }
+
+  const searchableChannels=channels.filter(channel=>channel.owner_id===session?.user?.id||channel.is_public===true||channel.isFollowing);
+  const channelQuery=channelSearch.trim().toLowerCase();
+  const ownChannels=searchableChannels.filter(channel=>channel.owner_id===session?.user?.id&&(!channelQuery||[channel.title,channel.handle,channel.description].some(value=>String(value||'').toLowerCase().includes(channelQuery))));
+  const discoverChannels=searchableChannels.filter(channel=>channel.owner_id!==session?.user?.id&&(!channelQuery||[channel.title,channel.handle,channel.description].some(value=>String(value||'').toLowerCase().includes(channelQuery))));
+
+  return <SafeAreaView edges={['top','left','right']} style={{flex:1,backgroundColor:C.white}}>
+    <StatusBar barStyle="dark-content"/>
+    <View style={{paddingHorizontal:18,paddingTop:14,paddingBottom:13,flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}>
+      <View style={{flexDirection:'row',alignItems:'center',gap:10}}>
+        <Btn onPress={()=>setTab('You')}><Avatar label={initials(profile?.display_name||'G')} color={C.green} size={40} uri={profileAvatarUrl}/></Btn>
+        <View><Heading>{pageTitle}</Heading><Text style={{color:C.muted,fontSize:12,marginTop:4}}>{tab==='Chats'?'Your real conversations':tab==='You'?'Your Guftin ID':'Guftin'}</Text></View>
+      </View>
+      <View style={{flexDirection:'row',gap:9}}>
+        <Btn onPress={()=>setSettingsOpen(true)} style={{backgroundColor:C.paper,width:42,height:42,borderRadius:15,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:19,color:C.green}}>⚙</Text></Btn>
+        {tab==='Chats'?<Btn onPress={()=>void openGroupCreator()} style={{backgroundColor:C.mint,width:42,height:42,borderRadius:15,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:18,color:C.green}}>👥</Text></Btn>:null}
+        {tab==='Chats'?<Btn onPress={()=>setSearching(!searching)} style={{backgroundColor:C.paper,width:42,height:42,borderRadius:15,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:19}}>⌕</Text></Btn>:null}
+        {tab==='Chats'?<Btn onPress={()=>setAddOpen(true)} style={{backgroundColor:C.green,width:42,height:42,borderRadius:15,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:24,color:'#fff'}}>＋</Text></Btn>:null}
+        {tab==='Channels'?<Btn onPress={()=>setChannelJoinOpen(true)} style={{backgroundColor:C.mint,width:42,height:42,borderRadius:15,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:18,color:C.green}}>↗</Text></Btn>:null}
+        {tab==='Channels'?<Btn onPress={()=>setChannelCreateOpen(true)} style={{backgroundColor:C.green,width:42,height:42,borderRadius:15,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:24,color:'#fff'}}>＋</Text></Btn>:null}
+      </View>
+    </View>
+    {!isOnline?<View style={{backgroundColor:'#fff1d6',paddingHorizontal:16,paddingVertical:8}}><Text style={{color:'#815500',fontSize:11,fontWeight:'800',textAlign:'center'}}>Offline mode · Saved Guftin information is available. Messages and live updates need internet.</Text></View>:null}
+    {tab==='Chats'?<>
+      {searching?<TextInput value={search} onChangeText={setSearch} placeholder="Search your conversations..." autoFocus style={{marginHorizontal:20,marginBottom:12,padding:14,backgroundColor:C.paper,borderRadius:14,color:C.ink}}/>:null}
+      {loading&&chats.length===0?<View style={{flex:1,alignItems:'center',justifyContent:'center'}}><ActivityIndicator color={C.green}/><Text style={{color:C.muted,marginTop:10}}>Loading your conversations…</Text></View>:
+        <FlatList data={visible} keyExtractor={x=>x.id} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={C.green}/>} contentContainerStyle={{paddingHorizontal:13,paddingBottom:25,flexGrow:1}}
+          ListHeaderComponent={<View style={{paddingTop:4,paddingBottom:12}}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{gap:8,paddingBottom:12}}>
+              <Btn onPress={()=>setActiveFolderId(null)} style={{paddingHorizontal:14,paddingVertical:9,borderRadius:20,backgroundColor:activeFolderId===null?C.green:C.paper}}><Text style={{color:activeFolderId===null?'#fff':C.ink,fontWeight:'900',fontSize:11}}>All chats</Text></Btn>
+              {chatFolders.map((folder:any)=><Btn key={folder.id} onPress={()=>setActiveFolderId(folder.id)} style={{paddingHorizontal:14,paddingVertical:9,borderRadius:20,backgroundColor:activeFolderId===folder.id?C.green:C.paper}}><Text style={{color:activeFolderId===folder.id?'#fff':C.ink,fontWeight:'900',fontSize:11}}>{folder.title}</Text></Btn>)}
+              <Btn onPress={()=>{setFolderTargetChat(null);setFolderTitle('');setFolderModalVisible(true);}} style={{paddingHorizontal:14,paddingVertical:9,borderRadius:20,backgroundColor:C.mint}}><Text style={{color:C.green,fontWeight:'900',fontSize:11}}>＋ Folder</Text></Btn>
+            </ScrollView>
+            <Btn onPress={()=>setAddOpen(true)} style={{flexDirection:'row',alignItems:'center',gap:12,padding:13,borderRadius:16,backgroundColor:C.mint}}>
+              <View style={{width:42,height:42,borderRadius:14,backgroundColor:C.green,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:26,color:'#fff',fontWeight:'700'}}>＋</Text></View>
+              <View style={{flex:1}}>
+                <Text style={{fontSize:14,fontWeight:'900',color:C.green}}>Add a new contact</Text>
+                <Text style={{fontSize:11,color:C.muted,marginTop:3}}>Find people by username, email or mobile number</Text>
+              </View>
+              <Text style={{fontSize:22,color:C.green,fontWeight:'700'}}>›</Text>
+            </Btn>
+          </View>}
+          ListEmptyComponent={<View style={{alignItems:'center',padding:35,marginTop:34}}><BrandLogo size={64}/><Text style={{fontSize:17,fontWeight:'900',color:C.ink,marginTop:15}}>No conversations yet</Text><Text style={{color:C.muted,textAlign:'center',marginTop:7,lineHeight:20}}>Add a contact above using their username, verified email address or verified mobile number. Your chat appears when you send the first message or start a call.</Text></View>}
+          renderItem={({item})=><Btn onPress={()=>openChat(item)} onLongPress={()=>Alert.alert('Chat options',item.name,[{text:'Add to folder',onPress:()=>chooseChatFolder(item)},{text:'Delete chat for me',style:'destructive',onPress:()=>void hideChat(item)},{text:'Cancel',style:'cancel'}])} style={{flexDirection:'row',alignItems:'center',padding:10,gap:12,borderRadius:17}}>
+            <Avatar label={item.avatar} color={item.color} online={item.online} uri={item.avatarUrl}/>
+            <View style={{flex:1,borderBottomWidth:1,borderColor:C.line,paddingBottom:14,paddingTop:2}}>
+              <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center'}}><View style={{flexDirection:'row',alignItems:'center',gap:4,flex:1}}><Text numberOfLines={1} style={{fontWeight:'800',color:C.ink,fontSize:14}}>{item.name}</Text>{<>{item.isOfficial?<Text style={{fontSize:9,color:'#2387e8',fontWeight:'900'}}>OFFICIAL</Text>:null}{item.isVerified?<VerifiedBadge label={item.isOfficial?'Verified Guftin Official account':'Verified channel'}/>:null}</>}</View><Text style={{fontSize:10,color:C.muted}}>{item.time}</Text></View>
+              <View style={{flexDirection:'row',alignItems:'center',gap:8,marginTop:6}}>
+                <Text numberOfLines={1} style={{fontSize:12,color:C.muted,flex:1}}>{item.last}</Text>
+                {item.unread>0?<View style={{minWidth:20,height:20,paddingHorizontal:6,borderRadius:10,backgroundColor:C.green,alignItems:'center',justifyContent:'center'}}>
+                  <Text style={{fontSize:10,color:'#fff',fontWeight:'900'}}>{item.unread>99?'99+':item.unread}</Text>
+                </View>:null}
+              </View>
+            </View>
+          </Btn>}/>
+      }
+    </>:null}
+    {tab==='Updates'?<ScrollView contentContainerStyle={{padding:20,paddingBottom:30}}>
+      <View style={{backgroundColor:C.paper,borderRadius:20,padding:18,marginBottom:18}}>
+        <Text style={{fontSize:18,fontWeight:'900',color:C.ink}}>Your status</Text>
+        <Text style={{color:C.muted,fontSize:12,marginTop:5}}>Share a photo, video or text. It expires after 24 hours.</Text>
+        <Btn onPress={()=>setStatusComposer(true)} style={{backgroundColor:C.green,padding:14,borderRadius:14,alignItems:'center',marginTop:13}}>
+          <Text style={{color:'#fff',fontWeight:'900'}}>＋ Add status</Text>
+        </Btn>
+      </View>
+      <Text style={{fontSize:16,fontWeight:'900',color:C.ink,marginBottom:4}}>Recent updates</Text>
+      <Text style={{fontSize:11,color:C.muted,marginBottom:10}}>{new Set(statuses.map((item:any)=>item.user_id)).size} people · {statuses.length} updates shared in the last 24 hours</Text>
+      {statuses.length===0?<Text style={{color:C.muted,textAlign:'center',padding:30}}>No active statuses from your contacts yet.</Text>:statuses.map((status:any)=><View key={status.id} style={{padding:14,borderBottomWidth:1,borderColor:C.line,flexDirection:'row',gap:12}}>
+        <Avatar label={initials(status.display_name)} color={colorFor(status.user_id)} size={46} uri={status.avatar_signed_url}/>
+        <View style={{flex:1}}>
+          <View style={{flexDirection:'row',alignItems:'center',gap:5,flexWrap:'wrap'}}><Text style={{fontWeight:'900',color:C.ink}}>{status.user_id===session.user.id?'You':status.display_name}{status.username?'  @'+status.username:''}</Text>{status.is_verified?<VerifiedBadge label="Verified Guftin Official account"/>:null}</View>
+          <Text style={{color:status.viewed_by_me?C.muted:C.green,fontSize:11,fontWeight:'900',marginTop:8}}>{status.media_url?(status.viewed_by_me?'Viewed · Tap to replay':'New status · Tap to view'):'Text status · Tap to read'}</Text>
+          <Btn onPress={()=>void openStatus(status)} disabled={statusOpening} style={{alignSelf:'flex-start',marginTop:7,paddingHorizontal:11,paddingVertical:6,borderRadius:9,backgroundColor:C.mint}}><Text style={{fontSize:10,color:C.green,fontWeight:'900'}}>View status</Text></Btn>
+          {status.caption?<Text numberOfLines={2} style={{color:C.ink,lineHeight:20,marginTop:5}}>{status.caption}</Text>:null}
+          <Text style={{color:C.muted,fontSize:10,marginTop:5}}>{timeLabel(status.created_at)} · {status.status_count} status update{status.status_count===1?'':'s'} from this person</Text>
+          {status.user_id===session.user.id?<View style={{marginTop:8,padding:10,borderRadius:12,backgroundColor:C.paper}}>
+            <Text style={{fontSize:11,color:C.green,fontWeight:'900'}}>◉ {status.view_count||0} views  ·  ♥ {status.like_count||0} likes</Text>
+            {status.viewer_names?.length?<Text style={{fontSize:10,color:C.muted,marginTop:4}}>Seen by: {status.viewer_names.join(', ')}</Text>:null}
+            {status.liker_names?.length?<Text style={{fontSize:10,color:C.muted,marginTop:4}}>Liked by: {status.liker_names.join(', ')}</Text>:null}
+          </View>:<Btn onPress={()=>void toggleStatusLike(status)} style={{alignSelf:'flex-start',marginTop:9,paddingHorizontal:12,paddingVertical:7,borderRadius:12,backgroundColor:status.liked_by_me?'#ffe8ed':C.mint}}>
+            <Text style={{fontSize:11,fontWeight:'900',color:status.liked_by_me?'#c74768':C.green}}>{status.liked_by_me?'♥ Liked':'♡ Like status'}</Text>
+          </Btn>}
+        </View>
+      </View>)}
+    </ScrollView>:null}
+    {tab==='Channels'?<ScrollView contentContainerStyle={{padding:18,paddingBottom:30}}>
+      <View style={{backgroundColor:C.paper,borderRadius:20,padding:18,marginBottom:16}}>
+        <Text style={{fontSize:19,fontWeight:'900',color:C.ink}}>Guftin Channels</Text>
+        <Text style={{fontSize:12,color:C.muted,lineHeight:18,marginTop:6}}>Create a broadcast channel, invite people with a link, and publish photos, videos or updates. Followers can view posts but cannot publish.</Text>
+        <View style={{flexDirection:'row',gap:9,marginTop:14}}>
+          <Btn onPress={()=>setChannelCreateOpen(true)} style={{flex:1,backgroundColor:C.green,padding:13,borderRadius:13,alignItems:'center'}}><Text style={{color:'#fff',fontWeight:'900'}}>＋ Create channel</Text></Btn>
+          <Btn onPress={()=>setChannelJoinOpen(true)} style={{flex:1,backgroundColor:C.mint,padding:13,borderRadius:13,alignItems:'center'}}><Text style={{color:C.green,fontWeight:'900'}}>Join by link</Text></Btn>
+        </View>
+      </View>
+      {channelsLoading&&channels.length===0?<View style={{padding:30,alignItems:'center'}}><ActivityIndicator color={C.green}/><Text style={{color:C.muted,marginTop:8}}>Loading channels…</Text></View>:null}
+      <TextInput value={channelSearch} onChangeText={setChannelSearch} placeholder="Search public channels by name..." autoCapitalize="none" returnKeyType="search" style={{backgroundColor:C.paper,borderRadius:14,padding:14,color:C.ink,marginBottom:15}}/>
+      <Text style={{fontSize:16,fontWeight:'900',color:C.ink,marginBottom:9}}>Your channels</Text>
+      {ownChannels.length===0?<Text style={{fontSize:12,color:C.muted,marginBottom:16}}>{channelQuery?'No channel you own matches this name.':'You have not created a channel yet.'}</Text>:ownChannels.map(channel=><View key={channel.conversation_id} style={{backgroundColor:C.white,borderRadius:17,padding:13,marginBottom:9,borderWidth:1,borderColor:C.line}}>
+        <View style={{flexDirection:'row',alignItems:'center',gap:11}}><Avatar label={initials(channel.title||'C')} color={C.green} size={46} uri={channel.logo_signed_url}/><View style={{flex:1}}><Text style={{fontSize:14,fontWeight:'900',color:C.ink}}>{channel.title||'My channel'}{channel.is_verified?<VerifiedBadge label="Verified channel"/>:null}</Text><Text style={{fontSize:10,color:C.muted,marginTop:3}}>{channel.is_public?'Public channel':'Private · invite link only'} · Owner</Text></View><Btn onPress={()=>void shareChannelInvite(channel)} style={{padding:9,borderRadius:11,backgroundColor:C.mint}}><Text style={{fontSize:11,color:C.green,fontWeight:'900'}}>Invite ↗</Text></Btn></View>
+        <Text numberOfLines={2} style={{fontSize:11,color:C.muted,lineHeight:16,marginTop:8}}>{channel.description||'No channel description'}</Text>
+        <Btn onPress={()=>openChannelChat(channel)} style={{marginTop:10,backgroundColor:C.paper,padding:10,borderRadius:11,alignItems:'center'}}><Text style={{fontSize:11,color:C.green,fontWeight:'900'}}>Open channel ›</Text></Btn>
+      </View>)}
+      <Text style={{fontSize:16,fontWeight:'900',color:C.ink,marginTop:13,marginBottom:9}}>Discover channels</Text>
+      <Text style={{fontSize:11,color:C.muted,marginBottom:9}}>Search by channel name and follow any public channel. Private channels remain invite-only.</Text>
+      {discoverChannels.length===0?<Text style={{fontSize:12,color:C.muted}}>{channelQuery?'No public channels match that name.':'No public channels to discover yet. Share your channel link to invite followers.'}</Text>:discoverChannels.map(channel=><View key={channel.conversation_id} style={{flexDirection:'row',alignItems:'center',gap:11,padding:12,borderBottomWidth:1,borderColor:C.line}}>
+        <Avatar label={initials(channel.title||'C')} color={C.green} size={44} uri={channel.logo_signed_url}/><View style={{flex:1}}><Text style={{fontSize:13,fontWeight:'900',color:C.ink}}>{channel.title||'Guftin channel'}{channel.is_verified?<VerifiedBadge label="Verified channel"/>:null}</Text><Text numberOfLines={2} style={{fontSize:10,color:C.muted,marginTop:3}}>{channel.description||'Public channel'}</Text></View>
+        {channel.isFollowing?<Btn onPress={()=>openChannelChat(channel)} style={{paddingHorizontal:13,paddingVertical:9,borderRadius:11,backgroundColor:C.mint}}><Text style={{color:C.green,fontWeight:'900',fontSize:11}}>Open</Text></Btn>:<Btn disabled={channelBusy} onPress={()=>void followPublicChannel(channel)} style={{paddingHorizontal:13,paddingVertical:9,borderRadius:11,backgroundColor:C.green}}><Text style={{color:'#fff',fontWeight:'900',fontSize:11}}>Follow</Text></Btn>}
+      </View>)}
+      <Text style={{fontSize:10,color:C.muted,lineHeight:16,marginTop:18}}>Channel posts are broadcast content. They are visible to followers and are not end-to-end encrypted like private one-to-one messages.</Text>
+    </ScrollView>:null}
+    {tab==='Calls'?<ScrollView contentContainerStyle={{padding:18,paddingBottom:30}}>
+      <View style={{backgroundColor:C.paper,borderRadius:18,padding:16,marginBottom:16}}>
+        <Text style={{fontSize:18,fontWeight:'900',color:C.ink}}>Call history</Text>
+        <Text style={{fontSize:11,color:C.muted,marginTop:5}}>Your recent voice and video calls</Text>
+      </View>
+      {callHistory.length===0?<Text style={{color:C.muted,textAlign:'center',padding:32}}>No calls yet. Start a call from any direct chat.</Text>:callHistory.map((call:any)=><View key={call.id} style={{flexDirection:'row',alignItems:'center',gap:12,padding:13,borderBottomWidth:1,borderColor:C.line}}>
+        <View style={{width:43,height:43,borderRadius:15,backgroundColor:C.mint,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:19,color:C.green}}>{call.call_type==='video'?'▣':'☎'}</Text></View>
+        <View style={{flex:1}}>
+          <Text style={{fontWeight:'900',color:C.ink}}>{call.peer_name}</Text>
+          <Text style={{fontSize:11,color:C.muted,marginTop:3}}>{call.outgoing?'Outgoing':'Incoming'} {call.call_type==='video'?'video':'voice'} call · {call.status}</Text>
+          <Text style={{fontSize:10,color:C.muted,marginTop:3}}>{timeLabel(call.started_at||call.ended_at||'')}</Text>
+        </View>
+        <Text style={{color:call.status==='accepted'||call.status==='ended'?C.green:C.muted,fontSize:11,fontWeight:'800'}}>{call.status==='missed'?'Missed':call.status==='declined'?'Declined':call.status==='ringing'?'Ringing':'Done'}</Text>
+      </View>)}
+      <Text style={{fontSize:10,color:C.muted,marginTop:15,lineHeight:16}}>Incoming calls can arrive as push alerts while Guftin is closed when notifications are enabled on this phone. Use Accept or Decline on the call notification. Full-screen continuous ringing still depends on native call-screen integration and platform credentials.</Text>
+    </ScrollView>:null}
+    {tab==='You'?<ScrollView contentContainerStyle={{padding:22}}>
+      <View style={{alignItems:'center',padding:25,backgroundColor:C.paper,borderRadius:22}}>
+        <Btn onPress={chooseProfilePhoto} style={{alignItems:'center'}}><Avatar label={initials(profile?.display_name||session.user.email||'KC')} color={C.green} size={88} uri={profileAvatarUrl}/><Text style={{color:C.green,fontWeight:'800',fontSize:12,marginTop:8}}>{profileUploading?'Uploading…':'Change profile photo'}</Text></Btn>
+        <Text style={{fontSize:20,fontWeight:'900',color:C.ink,marginTop:12}}>{profile?.display_name||'Your profile'}</Text>
+        <Text style={{color:C.muted,fontSize:12,marginTop:4}}>{session.user.email||'Verified account'}</Text>
+        <Text style={{color:C.green,fontSize:13,fontWeight:'800',marginTop:6}}>@{profile?.username}</Text>
+      </View>
+      <Text style={{fontWeight:'800',color:C.ink,marginTop:25,marginBottom:8}}>Display name</Text>
+      <TextInput value={profileName} onChangeText={setProfileName} placeholder="Your name" maxLength={40} style={{backgroundColor:C.paper,borderRadius:14,padding:15,color:C.ink}}/>
+      <Text style={{fontWeight:'800',color:C.ink,marginTop:15,marginBottom:8}}>Username</Text>
+      {profile?.username&&googleUsernameChangeAvailable?
+        <View>
+          <TextInput value={profileUsername} onChangeText={v=>setProfileUsername(v.toLowerCase().replace(/[^a-z0-9_]/g,''))} placeholder="Choose your one-time new username" autoCapitalize="none" maxLength={24} style={{backgroundColor:C.paper,borderRadius:14,padding:15,color:C.ink}}/>
+          <Text style={{color:C.green,fontSize:11,marginTop:6}}>Google account benefit: you can change this username once. Saving it will lock it permanently.</Text>
+        </View>
+        :<View style={{backgroundColor:C.paper,borderRadius:14,padding:15,borderWidth:1,borderColor:C.line}}>
+          <Text style={{color:C.ink,fontWeight:'900'}}>@{profile?.username||'Not set'}</Text>
+          <Text style={{color:C.muted,fontSize:11,marginTop:5}}>Your Guftin ID is permanent and cannot be changed.</Text>
+        </View>}
+      <Text style={{fontWeight:'800',color:C.ink,marginTop:15,marginBottom:8}}>About</Text>
+      <TextInput value={about} onChangeText={setAbout} placeholder="A little about you" maxLength={160} multiline style={{backgroundColor:C.paper,borderRadius:14,padding:15,color:C.ink,minHeight:75,textAlignVertical:'top'}}/>
+      <Btn disabled={savingProfile||profileUploading} onPress={saveProfile} style={{backgroundColor:C.green,padding:15,borderRadius:14,alignItems:'center',marginTop:10}}>{savingProfile?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'800'}}>Save profile</Text>}</Btn>
+      <View style={{padding:15,backgroundColor:C.mint,borderRadius:14,marginTop:18}}>
+        <Text style={{fontWeight:'900',color:C.green}}>🔒 Message encryption</Text>
+        <Text style={{color:C.ink,fontSize:12,lineHeight:18,marginTop:6}}>{e2eeStatus==='ready'?'This device has a private key stored locally. New text messages are encrypted for each registered conversation device before upload.':'This device encryption key is not available yet. Secure text sending is paused.'}</Text>
+        <Text style={{color:C.muted,fontSize:10,lineHeight:15,marginTop:6}}>This is an early encryption implementation with no forward secrecy or verified safety numbers, and private keys cannot be recovered after reinstalling Android. New direct voice/video calls now use LiveKit media E2EE with a per-call key wrapped to each registered device. Status updates are not encrypted, and neither messaging nor calling has had an independent security audit.</Text>
+      </View>
+      <Btn onPress={()=>Alert.alert('Privacy','New text messages and photo/video attachments are encrypted on the sending device before upload. New direct voice/video calls use LiveKit media E2EE with a per-call key wrapped to each registered device. Public keys are not yet verified with safety numbers, forward secrecy is not implemented, status is not end-to-end encrypted, and this version has not had an independent security audit.')} style={{padding:18,borderBottomWidth:1,borderColor:C.line,marginTop:12}}><Text style={{color:C.ink,fontWeight:'700'}}>Privacy and security　›</Text></Btn>
+      <Btn onPress={()=>void WebBrowser.openBrowserAsync(PRIVACY_POLICY_URL).catch((error:any)=>Alert.alert('Privacy Policy could not open',error?.message||'Please try again.'))} style={{padding:18,borderBottomWidth:1,borderColor:C.line}}>
+        <Text style={{color:C.ink,fontWeight:'800'}}>Read full Privacy Policy　›</Text>
+      </Btn>
+            <View style={{padding:15,backgroundColor:C.mint,borderRadius:14,marginTop:18}}>
+        <Text style={{fontWeight:'900',color:C.green}}>Contact Guftin Official</Text>
+        <Text style={{color:C.ink,fontSize:12,lineHeight:18,marginTop:6}}>For complaints, feedback, feature requests or any question about Guftin, contact our official team directly.</Text>
+        <Btn onPress={()=>void openGuftinSupport()} style={{backgroundColor:C.green,padding:13,borderRadius:12,alignItems:'center',marginTop:10}}><Text style={{color:'#fff',fontWeight:'900'}}>Email Guftin Official · guftinofficle@gmail.com</Text></Btn>
+      </View>
+<Btn onPress={()=>supabase.auth.signOut()} style={{padding:18}}><Text style={{color:C.red,fontWeight:'800'}}>Sign out</Text></Btn>
+    </ScrollView>:null}
+    {adsReady&&tab!=='You'?<View style={{alignItems:'center',justifyContent:'center',backgroundColor:C.white,minHeight:50,paddingTop:4}}>
+      <BannerAd
+        unitId={__DEV__?TestIds.BANNER:(process.env.EXPO_PUBLIC_ADMOB_BANNER_UNIT_ID||'ca-app-pub-3116820002792089/9054692427')}
+        size={BannerAdSize.BANNER}
+        requestOptions={{requestNonPersonalizedAdsOnly:true}}
+        onAdFailedToLoad={error=>console.warn('AdMob banner failed:',error?.message||error)}
+      />
+    </View>:null}
+    <View style={{height:66+insets.bottom,paddingTop:5,paddingBottom:Math.max(insets.bottom,6),borderTopWidth:1,borderColor:C.line,flexDirection:'row',alignItems:'center',justifyContent:'space-around',backgroundColor:C.white,elevation:8}}>
+      {([['Chats','▤'],['Updates','◉'],['Channels','◈'],['Calls','⌕'],['You','●']] as string[][]).map(([t,icon])=><Btn key={t} onPress={()=>setTab(t)} style={{alignItems:'center',minWidth:58}}><Text style={{fontSize:19,color:tab===t?C.green:C.muted}}>{icon}</Text><Text style={{fontSize:10,fontWeight:tab===t?'900':'600',color:tab===t?C.green:C.muted,marginTop:3}}>{t}</Text></Btn>)}
+    </View>
+
+    <Modal visible={groupCreateOpen} transparent animationType="slide" onRequestClose={()=>setGroupCreateOpen(false)}>
+      <View style={{flex:1,backgroundColor:'#0008',justifyContent:'flex-end'}}>
+        <View style={{backgroundColor:C.white,borderTopLeftRadius:24,borderTopRightRadius:24,padding:20,maxHeight:'88%'}}>
+          <Text style={{fontSize:21,fontWeight:'900',color:C.ink}}>Create a group</Text>
+          <Text style={{fontSize:12,color:C.muted,marginTop:5}}>Choose a name and add people from your saved contacts.</Text>
+          <TextInput value={groupName} onChangeText={setGroupName} placeholder="Group name" maxLength={60} style={{backgroundColor:C.paper,borderRadius:14,padding:14,marginTop:15,color:C.ink}}/>
+          <Text style={{fontSize:13,fontWeight:'900',color:C.ink,marginTop:16,marginBottom:8}}>Members ({selectedGroupIds.length})</Text>
+          {groupContactsLoading?<ActivityIndicator color={C.green} style={{padding:24}}/>:groupContacts.length===0?
+            <Text style={{color:C.muted,padding:20,textAlign:'center'}}>No saved contacts yet. Add contacts by username first.</Text>:
+            <FlatList data={groupContacts} keyExtractor={(item:any)=>item.id} style={{maxHeight:300}} renderItem={({item}:any)=>{
+              const selected=selectedGroupIds.includes(item.id);
+              return <Btn onPress={()=>toggleGroupMember(item.id)} style={{flexDirection:'row',alignItems:'center',gap:11,paddingVertical:10,borderBottomWidth:1,borderColor:C.line}}>
+                <Avatar label={initials(item.display_name||item.username||'G')} color={colorFor(item.id)} size={42} uri={item.avatar_signed_url}/>
+                <View style={{flex:1}}><Text style={{fontWeight:'800',color:C.ink}}>{item.display_name||'Guftin member'}</Text><Text style={{fontSize:11,color:C.muted}}>@{item.username||'member'}</Text></View>
+                <Text style={{fontSize:20,color:selected?C.green:C.muted,fontWeight:'900'}}>{selected?'☑':'＋'}</Text>
+              </Btn>;
+            }}/>}
+          <View style={{flexDirection:'row',justifyContent:'flex-end',gap:10,marginTop:18}}>
+            <Btn onPress={()=>setGroupCreateOpen(false)} style={{padding:13}}><Text style={{color:C.muted,fontWeight:'700'}}>Cancel</Text></Btn>
+            <Btn disabled={groupCreating||groupContactsLoading||selectedGroupIds.length===0} onPress={()=>void createGroup()} style={{backgroundColor:C.green,paddingHorizontal:18,paddingVertical:13,borderRadius:13}}>
+              {groupCreating?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Create group</Text>}
+            </Btn>
+          </View>
+        </View>
+      </View>
+    </Modal>
+
+    <Modal visible={appLocked} transparent animationType="fade" onRequestClose={()=>{}}>
+      <View style={{flex:1,backgroundColor:C.white,justifyContent:'center',alignItems:'center',padding:24}}><Text style={{fontSize:25,fontWeight:'900',color:C.ink,marginBottom:12}}>Guftin is locked</Text><Btn onPress={()=>startPinFlow('unlock-app')} style={{backgroundColor:C.green,padding:15,borderRadius:13,width:'100%'}}><Text style={{color:'#fff',fontWeight:'900',textAlign:'center'}}>Enter App PIN</Text></Btn></View>
+    </Modal>
+    <Modal visible={pinModalVisible} transparent animationType="fade" onRequestClose={()=>{if(pinMode==='unlock-app'||pinMode==='unlock-chat')return;setPinModalVisible(false);}}>
+      <View style={{flex:1,backgroundColor:'#0009',justifyContent:'center',padding:24}}><View style={{backgroundColor:C.white,borderRadius:22,padding:22,gap:12}}>
+        <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}>
+          <Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>{pinMode==='unlock-chat'?'Unlock Chat':pinMode==='remove-chat-lock'?'Permanently Unlock':pinMode==='unlock-app'?'Unlock Guftin':pinMode==='reset-chat'||pinMode==='reset-app'?'Reset PIN':'Create PIN'}</Text>
+          <Btn onPress={()=>{if(pinMode==='unlock-chat'||pinMode==='unlock-app'){setPinModalVisible(false);setPinEntry('');if(pinMode==='unlock-chat')setActive(null);}else setPinModalVisible(false);}} style={{padding:5}}><Text style={{fontSize:23,color:C.ink}}>×</Text></Btn>
+        </View>
+        <Text style={{fontSize:12,color:C.muted}}>{pinMode==='unlock-chat'||pinMode==='remove-chat-lock'?'Enter this chat’s PIN.':pinMode==='unlock-app'?'Enter your app PIN.':pinMode==='reset-chat'||pinMode==='reset-app'?'Enter the email verification code, then choose and confirm a new PIN.':'Choose a 4–8 digit PIN and confirm it.'}</Text>
+        {pinMode==='reset-chat'||pinMode==='reset-app'?<><Text style={{fontSize:11,color:C.muted}}>Code sent to {pinResetEmail}</Text><TextInput value={pinResetCode} onChangeText={v=>setPinResetCode(v.replace(/\D/g,'').slice(0,6))} keyboardType="number-pad" placeholder="6-digit email code" style={{borderWidth:1,borderColor:C.line,borderRadius:12,padding:14,color:C.ink,fontSize:18,letterSpacing:4}}/><TextInput value={pinEntry} onChangeText={v=>setPinEntry(v.replace(/\D/g,'').slice(0,8))} keyboardType="number-pad" secureTextEntry placeholder="New PIN" style={{borderWidth:1,borderColor:C.line,borderRadius:12,padding:14,color:C.ink,fontSize:18,letterSpacing:5}}/><TextInput value={pinConfirm} onChangeText={v=>setPinConfirm(v.replace(/\D/g,'').slice(0,8))} keyboardType="number-pad" secureTextEntry placeholder="Confirm new PIN" style={{borderWidth:1,borderColor:C.line,borderRadius:12,padding:14,color:C.ink,fontSize:18,letterSpacing:5}}/></>:<><TextInput value={pinEntry} onChangeText={v=>setPinEntry(v.replace(/\D/g,'').slice(0,8))} keyboardType="number-pad" secureTextEntry placeholder="PIN" style={{borderWidth:1,borderColor:C.line,borderRadius:12,padding:14,color:C.ink,fontSize:18,letterSpacing:5}} />{pinMode==='set-chat'||pinMode==='set-app'?<TextInput value={pinConfirm} onChangeText={v=>setPinConfirm(v.replace(/\D/g,'').slice(0,8))} keyboardType="number-pad" secureTextEntry placeholder="Confirm PIN" style={{borderWidth:1,borderColor:C.line,borderRadius:12,padding:14,color:C.ink,fontSize:18,letterSpacing:5}}/>:null}</>}
+        <Btn disabled={pinBusy} onPress={()=>void (async()=>{setPinBusy(true);try{if(pinMode==='unlock-chat'||pinMode==='unlock-app'||pinMode==='remove-chat-lock')await unlockPin();else if(pinMode==='reset-chat'||pinMode==='reset-app')await confirmPinReset();else await savePin();}finally{setPinBusy(false);}})()} style={{backgroundColor:C.green,padding:14,borderRadius:13}}><Text style={{color:'#fff',fontWeight:'900',textAlign:'center'}}>{pinBusy?'Please wait…':(pinMode==='unlock-chat'||pinMode==='unlock-app'?'Unlock':pinMode==='remove-chat-lock'?'Permanently Unlock':pinMode==='reset-chat'||pinMode==='reset-app'?'OK':'Save PIN')}</Text></Btn>
+        {(pinMode==='unlock-chat'||pinMode==='unlock-app')?<Btn onPress={()=>void resetPinByEmail()} style={{padding:10}}><Text style={{color:C.green,fontWeight:'800',textAlign:'center'}}>Forgot / Reset PIN</Text></Btn>:null}
+        {pinMode==='reset-chat'||pinMode==='reset-app'?<Btn onPress={()=>void resetPinByEmail()} style={{padding:8}}><Text style={{color:C.green,textAlign:'center',fontWeight:'800'}}>Resend code</Text></Btn>:null}
+        {(pinMode!=='unlock-app'&&pinMode!=='unlock-chat')?<Btn onPress={()=>setPinModalVisible(false)} style={{padding:8}}><Text style={{color:C.muted,textAlign:'center'}}>Cancel</Text></Btn>:null}
+      </View></View>
+    </Modal>
+
+    <Modal visible={deviceManagerOpen} animationType="slide" onRequestClose={()=>setDeviceManagerOpen(false)}>
+      <SafeAreaView style={{flex:1,backgroundColor:C.paper}}>
+        <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',padding:18,backgroundColor:C.white,borderBottomWidth:1,borderColor:C.line}}>
+          <View><Text style={{fontSize:21,fontWeight:'900',color:C.ink}}>Linked encryption devices</Text><Text style={{fontSize:11,color:C.muted,marginTop:3}}>Devices that can receive new E2EE message keys</Text></View>
+          <Btn onPress={()=>setDeviceManagerOpen(false)} style={{padding:8}}><Text style={{fontSize:24,color:C.ink}}>×</Text></Btn>
+        </View>
+        <ScrollView contentContainerStyle={{padding:16,gap:10}}>
+          {devicesLoading?<ActivityIndicator color={C.green}/>:null}
+          {registeredDevices.map((device:any)=><View key={device.id} style={{backgroundColor:C.white,borderRadius:14,padding:14,borderWidth:1,borderColor:C.line}}>
+            <Text style={{fontWeight:'900',color:C.ink}}>{device.device_label||'Guftin device'} {device.id===deviceIdentity?.deviceId?'· This device':''}</Text>
+            <Text style={{fontSize:11,color:C.muted,marginTop:4}}>{String(device.platform||'unknown').toUpperCase()} · Added {timeLabel(device.created_at)} · Last active {timeLabel(device.last_active_at||device.created_at)}</Text>
+            {device.revoked_at?<Text style={{color:C.red,fontSize:11,fontWeight:'900',marginTop:8}}>Revoked</Text>:device.id===deviceIdentity?.deviceId?<Text style={{color:C.green,fontSize:11,fontWeight:'900',marginTop:8}}>This device is active</Text>:<Btn onPress={()=>void revokeEncryptionDevice(device)} style={{alignSelf:'flex-start',backgroundColor:'#fde8e8',paddingHorizontal:12,paddingVertical:8,borderRadius:9,marginTop:9}}><Text style={{color:C.red,fontWeight:'900',fontSize:11}}>Revoke encryption device</Text></Btn>}
+          </View>)}
+          {!devicesLoading&&!registeredDevices.length?<Text style={{color:C.muted,textAlign:'center',padding:30}}>No registered encryption devices.</Text>:null}
+        </ScrollView>
+      </SafeAreaView>
+    </Modal>
+
+    <Modal visible={folderModalVisible} transparent animationType="fade" onRequestClose={()=>setFolderModalVisible(false)}>
+      <View style={{flex:1,backgroundColor:'#0008',justifyContent:'center',padding:24}}>
+        <View style={{backgroundColor:C.white,borderRadius:20,padding:20,gap:12}}>
+          <Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>{folderTargetChat?'Add chat to a new folder':'Create chat folder'}</Text>
+          <TextInput value={folderTitle} onChangeText={setFolderTitle} placeholder="Folder name (up to 40 characters)" maxLength={40} style={{backgroundColor:C.paper,borderRadius:12,padding:14,color:C.ink}}/>
+          <Btn onPress={()=>void createChatFolder()} disabled={!folderTitle.trim()} style={{backgroundColor:C.green,padding:13,borderRadius:12,alignItems:'center'}}><Text style={{color:'#fff',fontWeight:'900'}}>Create folder</Text></Btn>
+          <Btn onPress={()=>{setFolderModalVisible(false);setFolderTargetChat(null);}} style={{padding:9,alignItems:'center'}}><Text style={{color:C.muted,fontWeight:'800'}}>Cancel</Text></Btn>
+        </View>
+      </View>
+    </Modal>
+
+    <Modal visible={savedItemsOpen} animationType="slide" onRequestClose={()=>setSavedItemsOpen(false)}>
+      <SafeAreaView style={{flex:1,backgroundColor:C.paper}}>
+        <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',padding:18,borderBottomWidth:1,borderColor:C.line,backgroundColor:C.white}}>
+          <View><Text style={{fontSize:21,fontWeight:'900',color:C.ink}}>Saved Items</Text><Text style={{fontSize:11,color:C.muted,marginTop:3}}>Your saved messages and attachments</Text></View>
+          <Btn onPress={()=>setSavedItemsOpen(false)} style={{padding:8}}><Text style={{fontSize:25,color:C.ink}}>×</Text></Btn>
+        </View>
+        {savedItemsLoading?<ActivityIndicator color={C.green} style={{marginTop:30}}/>:null}
+        <ScrollView contentContainerStyle={{padding:16,gap:10}}>
+          {!savedItemsLoading&&!savedItems.length?<Text style={{textAlign:'center',color:C.muted,padding:30}}>No saved items yet. Long-press a message and choose Save to Saved Items.</Text>:null}
+          {savedItems.map((item:any)=><View key={item.id} style={{backgroundColor:C.white,borderRadius:14,padding:14,borderWidth:1,borderColor:C.line}}>
+            <Text style={{color:C.green,fontWeight:'900',fontSize:11}}>{item.conversationTitle} · {String(item.kind).toUpperCase()}</Text>
+            <Text style={{color:C.ink,fontSize:14,marginTop:6}}>{item.preview}</Text>
+            <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginTop:9}}>
+              <Text style={{color:C.muted,fontSize:10}}>{timeLabel(item.created_at)}</Text>
+              <Btn onPress={()=>void removeSavedItem(item.id)} style={{paddingHorizontal:11,paddingVertical:6,borderRadius:9,backgroundColor:'#fde8e8'}}><Text style={{color:C.red,fontWeight:'800',fontSize:11}}>Remove</Text></Btn>
+            </View>
+          </View>)}
+        </ScrollView>
+      </SafeAreaView>
+    </Modal>
+
+    <Modal visible={settingsOpen} transparent animationType="slide" onRequestClose={()=>setSettingsOpen(false)}>
+      <View style={{flex:1,backgroundColor:'#0008',justifyContent:'flex-end'}}><View style={{backgroundColor:C.white,borderTopLeftRadius:24,borderTopRightRadius:24,padding:22}}>
+        <Text style={{fontSize:21,fontWeight:'900',color:C.ink}}>Guftin settings</Text>
+        <Text style={{color:C.muted,fontSize:12,marginTop:5,marginBottom:15}}>Privacy and connection preferences</Text>
+        <Btn onPress={()=>{setSettingsOpen(false);setSavedItemsOpen(true);void loadSavedItems();}} style={{backgroundColor:C.mint,borderRadius:12,padding:13,marginBottom:12}}>
+          <Text style={{color:C.green,fontWeight:'900'}}>★  Open Saved Items</Text>
+        </Btn>
+        <Btn onPress={()=>{setSettingsOpen(false);setDeviceManagerOpen(true);void loadRegisteredDevices();}} style={{backgroundColor:C.mint,borderRadius:12,padding:13,marginBottom:12}}>
+          <Text style={{color:C.green,fontWeight:'900'}}>⌁  Linked encryption devices</Text>
+        </Btn>
+        <View style={{backgroundColor:C.mint,borderRadius:15,padding:13,marginBottom:10}}>
+          <Text style={{color:C.green,fontWeight:'900',marginBottom:5}}>Account sign-in methods</Text>
+          <Text style={{color:C.ink,fontSize:11,lineHeight:17}}>Linked email: {session?.user?.email||'Not linked'}{session?.user?.email_confirmed_at?' · verified':' · not verified'}</Text>
+          {!session?.user?.email?<>
+            <TextInput value={accountEmailInput} onChangeText={setAccountEmailInput} placeholder="Add Gmail / email address" keyboardType="email-address" autoCapitalize="none" autoComplete="email" style={{backgroundColor:C.white,borderRadius:11,padding:12,marginTop:10,color:C.ink}}/>
+            <TextInput value={accountEmailPassword} onChangeText={setAccountEmailPassword} placeholder="Create password (at least 8 characters)" secureTextEntry autoCapitalize="none" style={{backgroundColor:C.white,borderRadius:11,padding:12,marginTop:8,color:C.ink}}/>
+            <Btn disabled={accountEmailBusy} onPress={()=>void linkEmailToAccount()} style={{backgroundColor:C.green,padding:12,borderRadius:11,alignItems:'center',marginTop:9}}>
+              {accountEmailBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Link email and password</Text>}
+            </Btn>
+            {accountEmailNotice?<Text style={{color:C.ink,fontSize:11,lineHeight:16,marginTop:7}}>{accountEmailNotice}</Text>:null}
+          </>:null}
+          <Text style={{color:C.ink,fontSize:11,lineHeight:17,marginTop:3}}>Optional mobile number: {profilePhone||'Not added'}</Text>
+          <TextInput value={profilePhone} onChangeText={setProfilePhone} placeholder="Add or update mobile number (Optional)" keyboardType="phone-pad" autoComplete="tel" style={{backgroundColor:C.white,borderRadius:11,padding:12,marginTop:10,color:C.ink}}/>
+          <Btn disabled={phoneBusy} onPress={()=>void (async()=>{
+            const normalized=profilePhone.trim()?normalizeGuftinPhone(profilePhone):null;
+            if(profilePhone.trim()&&!normalized){setPhoneVerifyError('Enter a valid mobile number or leave it empty.');return;}
+            setPhoneBusy(true);setPhoneVerifyError('');
+            const {error}=await supabase.rpc('kc_set_optional_phone',{p_phone:normalized});
+            setPhoneBusy(false);
+            if(error){setPhoneVerifyError(error.message);return;}
+            await loadProfile();
+            setPhoneVerifyError('Mobile number saved. No verification is required.');
+          })()} style={{backgroundColor:C.green,padding:12,borderRadius:11,alignItems:'center',marginTop:8}}>
+            {phoneBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Save optional mobile number</Text>}
+          </Btn>
+          {phoneVerifyError?<Text style={{color:C.ink,fontSize:11,lineHeight:16,marginTop:6}}>{phoneVerifyError}</Text>:null}
+        </View>
+        <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingVertical:12}}><View style={{flex:1,paddingRight:12}}><Text style={{color:C.ink,fontWeight:'800'}}>App Lock</Text><Text style={{color:C.muted,fontSize:11}}>Require a PIN to open Guftin</Text></View><Switch value={appLockEnabled} onValueChange={async enabled=>{if(enabled){startPinFlow('set-app');}else{await AsyncStorage.removeItem('guftin-app-lock-enabled');setAppLockEnabled(false);}}} trackColor={{true:C.green}}/></View>
+        <Btn onPress={()=>{setSettingsOpen(false);setPermissionSetupStep(0);setPermissionSetupAutoSave(mediaAutoDownload);setPermissionSetupFullScreenOpened(false);setPermissionSetupNotice('');setPermissionSetupVisible(true);}} style={{backgroundColor:C.mint,padding:12,borderRadius:13,marginBottom:7}}>
+          <Text style={{color:C.green,fontWeight:'900',textAlign:'center'}}>Review app permissions</Text>
+        </Btn>
+        <Btn onPress={()=>void (async()=>{
+          if(Platform.OS!=='android'||Number(Platform.Version)<34){
+            Alert.alert('Full-screen call alerts','This Android setting is available on Android 14 and newer. Calls still use the normal high-priority incoming notification on earlier Android versions.');
+            return;
+          }
+          try{
+            await IntentLauncher.startActivityAsync('android.settings.MANAGE_APP_USE_FULL_SCREEN_INTENT',{data:'package:com.guftin.app'});
+          }catch(error:any){
+            Alert.alert('Could not open call alert settings',error?.message||'Open Android Settings → Apps → Special app access → Full-screen notifications → Guftin.');
+          }
+        })()} style={{backgroundColor:C.mint,padding:12,borderRadius:13,marginBottom:7}}>
+          <Text style={{color:C.green,fontWeight:'900',textAlign:'center'}}>Allow full-screen incoming calls</Text>
+        </Btn>
+        <Text style={{color:C.green,fontWeight:'900',marginTop:8,marginBottom:2}}>Privacy controls</Text>
+        <Btn onPress={()=>choosePrivacyVisibility('last_seen_visibility','Last seen',lastSeenVisibility,setLastSeenVisibility)} style={{paddingVertical:11,borderBottomWidth:1,borderColor:C.line}}>
+          <Text style={{color:C.ink,fontWeight:'800'}}>Last Seen</Text><Text style={{color:C.muted,fontSize:11,marginTop:3}}>{lastSeenVisibility[0].toUpperCase()+lastSeenVisibility.slice(1)}</Text>
+        </Btn>
+        <Btn onPress={()=>choosePrivacyVisibility('profile_photo_visibility','Profile picture',profilePhotoVisibility,setProfilePhotoVisibility)} style={{paddingVertical:11,borderBottomWidth:1,borderColor:C.line}}>
+          <Text style={{color:C.ink,fontWeight:'800'}}>Profile Picture</Text><Text style={{color:C.muted,fontSize:11,marginTop:3}}>{profilePhotoVisibility[0].toUpperCase()+profilePhotoVisibility.slice(1)}</Text>
+        </Btn>
+        <Btn onPress={()=>choosePrivacyVisibility('about_visibility','About',aboutVisibility,setAboutVisibility)} style={{paddingVertical:11,borderBottomWidth:1,borderColor:C.line}}>
+          <Text style={{color:C.ink,fontWeight:'800'}}>About</Text><Text style={{color:C.muted,fontSize:11,marginTop:3}}>{aboutVisibility[0].toUpperCase()+aboutVisibility.slice(1)}</Text>
+        </Btn>
+        <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingVertical:12}}><View style={{flex:1,paddingRight:12}}><Text style={{color:C.ink,fontWeight:'800'}}>Show online status</Text><Text style={{color:C.muted,fontSize:11}}>Let contacts see when you are online</Text></View><Switch value={onlineVisibility} onValueChange={async value=>{if(await savePrivacyPreferences({online_visibility:value?'everyone':'nobody'}))setOnlineVisibility(value);}} trackColor={{true:C.green}}/></View>
+        <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingVertical:12}}><View style={{flex:1,paddingRight:12}}><Text style={{color:C.ink,fontWeight:'800'}}>Read receipts</Text><Text style={{color:C.muted,fontSize:11}}>Show seen status on messages</Text></View><Switch value={showReadReceipts} onValueChange={async value=>{if(await savePrivacyPreferences({read_receipts_enabled:value}))setShowReadReceipts(value);}} trackColor={{true:C.green}}/></View>
+        <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingVertical:12}}><View style={{flex:1,paddingRight:12}}><Text style={{color:C.ink,fontWeight:'800'}}>Push notifications on this phone</Text><Text style={{color:C.muted,fontSize:11}}>Messages, status likes/views, and incoming call alerts with Accept/Decline</Text></View><Switch value={pushEnabled} disabled={pushBusy} onValueChange={enabled=>enabled?void enablePushNotifications():void disablePushNotifications()} trackColor={{true:C.green}}/></View>
+        <Btn disabled={pushBusy||!session} onPress={()=>void testPushNotifications()} style={{backgroundColor:C.mint,padding:12,borderRadius:13,marginTop:2,marginBottom:7,opacity:pushBusy ? .55 : 1}}>
+          <Text style={{color:C.green,fontWeight:'900',textAlign:'center'}}>{pushBusy?'Checking notification service…':'Send test notification to this phone'}</Text>
+        </Btn>
+        <View style={{padding:13,backgroundColor:C.mint,borderRadius:13,marginTop:6,marginBottom:8}}>
+          <Text style={{color:C.green,fontWeight:'900',textAlign:'center'}}>Guftin in-app calling</Text>
+          <Text style={{color:C.muted,fontSize:11,textAlign:'center',marginTop:5,lineHeight:17}}>Incoming, outgoing and active calls use Guftin's own call screens. Android Phone app calling-account setup is not required.</Text>
+        </View>
+        <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingVertical:12}}><View style={{flex:1,paddingRight:12}}><Text style={{color:C.ink,fontWeight:'800'}}>Automatic message sync</Text><Text style={{color:C.muted,fontSize:11}}>Refresh while Guftin is open</Text></View><Switch value={autoSync} onValueChange={setAutoSync} trackColor={{true:C.green}}/></View>
+        <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingVertical:12}}><View style={{flex:1,paddingRight:12}}><Text style={{color:C.ink,fontWeight:'800'}}>Auto-save incoming photos/videos</Text><Text style={{color:C.muted,fontSize:11}}>Save new media to your gallery automatically</Text></View><Switch value={mediaAutoDownload} onValueChange={setMediaAutoDownload} trackColor={{true:C.green}}/></View>
+        <Text style={{color:C.ink,fontWeight:'800',marginTop:12}}>App theme</Text>
+        <View style={{flexDirection:'row',flexWrap:'wrap',gap:8,marginTop:10}}>
+          {([['emerald','#087e6c','Emerald'],['ocean','#2476d2','Ocean'],['violet','#7950c8','Violet'],['sunset','#d45b42','Sunset'],['night','#101a2b','Night']] as any[]).map(([name,color,label])=><Btn key={name} onPress={()=>setThemeName(name)} style={{paddingHorizontal:13,paddingVertical:10,borderRadius:13,backgroundColor:color,borderWidth:themeName===name?3:0,borderColor:'#f2c75c'}}><Text style={{color:'#fff',fontWeight:'900',fontSize:11}}>{label}</Text></Btn>)}
+        </View>
+        <Text style={{fontSize:10,color:C.muted,marginTop:10}}>Gallery access is requested only when you save media or enable auto-save.</Text>
+        <Text style={{color:C.ink,fontWeight:'800',marginTop:10}}>Sync interval</Text><View style={{flexDirection:'row',gap:8,marginTop:10}}>{[15,30,60].map(seconds=><Btn key={seconds} onPress={()=>setSyncIntervalSeconds(seconds)} style={{flex:1,padding:12,borderRadius:12,backgroundColor:syncIntervalSeconds===seconds?C.green:C.paper,alignItems:'center'}}><Text style={{color:syncIntervalSeconds===seconds?'#fff':C.ink,fontWeight:'800'}}>{seconds}s</Text></Btn>)}</View>
+        <Btn onPress={()=>setSettingsOpen(false)} style={{backgroundColor:C.green,padding:15,borderRadius:14,alignItems:'center',marginTop:20}}><Text style={{color:'#fff',fontWeight:'900'}}>Done</Text></Btn>
+      </View></View>
+    </Modal>
+
+    <Modal visible={!!selectedStatus} transparent animationType="fade" onRequestClose={()=>setSelectedStatus(null)}>
+      <View style={{flex:1,backgroundColor:'#000e',justifyContent:'center',padding:18}}>
+        <View style={{backgroundColor:C.white,borderRadius:22,padding:18,maxHeight:'88%'}}>
+          <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginBottom:12}}>
+            <Text style={{fontSize:17,fontWeight:'900',color:C.ink}}>{selectedStatus?.display_name||'Status'}</Text>
+            <Btn onPress={()=>setSelectedStatus(null)} style={{padding:8}}><Text style={{fontSize:18,color:C.ink}}>✕</Text></Btn>
+          </View>
+          {selectedStatus?.media_signed_url?(selectedStatus?.media_url?.toLowerCase().match(/\.(mp4|mov|m4v)$/)?<VideoBubble uri={selectedStatus.media_signed_url}/>:<Image source={{uri:selectedStatus.media_signed_url}} style={{width:'100%',height:360,borderRadius:14}} resizeMode="contain"/>):null}
+          {selectedStatus?.caption?<Text style={{color:C.ink,fontSize:15,lineHeight:22,marginTop:12}}>{selectedStatus.caption}</Text>:null}
+          <Text style={{color:C.muted,fontSize:11,marginTop:10}}>{selectedStatus?.view_count||0} views · {selectedStatus?.like_count||0} likes</Text>
+        </View>
+      </View>
+    </Modal>
+
+    <Modal visible={statusComposer} transparent animationType="fade" onRequestClose={()=>setStatusComposer(false)}>
+      <View style={{flex:1,backgroundColor:'#0008',justifyContent:'center',padding:22}}>
+        <View style={{backgroundColor:C.white,borderRadius:22,padding:22}}>
+          <Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>Add a status</Text>
+          <Text style={{color:C.muted,lineHeight:19,marginTop:7,marginBottom:16}}>Your text status is visible to Guftin contacts for 24 hours.</Text>
+          <Btn onPress={chooseStatusMedia} style={{backgroundColor:C.mint,padding:13,borderRadius:12,alignItems:'center',marginBottom:12}}><Text style={{color:C.green,fontWeight:'800'}}>{statusAsset?'Change selected media':'＋ Add photo or video'}</Text></Btn>
+          {statusAsset?<Text style={{color:C.green,fontSize:12,marginBottom:8}}>Selected: {statusAsset.fileName||statusAsset.type||'Media'}</Text>:null}
+          <TextInput value={statusText} onChangeText={setStatusText} placeholder="What's new?" maxLength={700} multiline style={{backgroundColor:C.paper,borderRadius:14,padding:15,color:C.ink,minHeight:120,textAlignVertical:'top'}}/>
+          <Text style={{color:C.muted,fontSize:10,marginTop:7,textAlign:'right'}}>{statusText.length}/700</Text>
+          <View style={{flexDirection:'row',justifyContent:'flex-end',gap:10,marginTop:15}}>
+            <Btn onPress={()=>setStatusComposer(false)} style={{padding:13}}><Text style={{color:C.muted,fontWeight:'700'}}>Cancel</Text></Btn>
+            <Btn disabled={publishingStatus||(!statusText.trim()&&!statusAsset)} onPress={publishStatus} style={{backgroundColor:C.green,paddingHorizontal:18,paddingVertical:13,borderRadius:13}}>{publishingStatus?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'800'}}>Share status</Text>}</Btn>
+          </View>
+        </View>
+      </View>
+    </Modal>
+
+
+    <Modal visible={channelEditOpen} transparent animationType="slide" onRequestClose={()=>setChannelEditOpen(false)}>
+      <View style={{flex:1,backgroundColor:'#0008',justifyContent:'flex-end'}}>
+        <View style={{backgroundColor:C.white,borderTopLeftRadius:24,borderTopRightRadius:24,padding:21}}>
+          <Text style={{fontSize:21,fontWeight:'900',color:C.ink}}>Edit channel branding</Text>
+          <Text style={{fontSize:12,color:C.muted,lineHeight:18,marginTop:5}}>Only the channel owner can make these changes. Followers will see the saved name and logo.</Text>
+          <Btn onPress={()=>void chooseChannelLogo()} style={{alignSelf:'center',alignItems:'center',marginTop:16,marginBottom:12}}>
+            <Avatar label={initials(channelEditTitle||'C')} color={C.green} size={84} uri={channelLogoAsset?.uri||channelEditTarget?.logo_signed_url}/>
+            <Text style={{fontSize:12,fontWeight:'900',color:C.green,marginTop:8}}>{channelLogoAsset?'Change selected logo':'Choose channel logo'}</Text>
+          </Btn>
+          <TextInput value={channelEditTitle} onChangeText={setChannelEditTitle} placeholder="Channel name" maxLength={60} style={{backgroundColor:C.paper,borderRadius:14,padding:14,marginTop:8,color:C.ink}}/>
+          <TextInput value={channelEditDescription} onChangeText={setChannelEditDescription} placeholder="Channel description" maxLength={500} multiline style={{backgroundColor:C.paper,borderRadius:14,padding:14,marginTop:10,minHeight:85,textAlignVertical:'top',color:C.ink}}/>
+          <View style={{flexDirection:'row',justifyContent:'flex-end',gap:10,marginTop:18}}>
+            <Btn disabled={channelEditBusy} onPress={()=>setChannelEditOpen(false)} style={{padding:13}}><Text style={{color:C.muted,fontWeight:'700'}}>Cancel</Text></Btn>
+            <Btn disabled={channelEditBusy} onPress={()=>void saveChannelBranding()} style={{backgroundColor:C.green,paddingHorizontal:18,paddingVertical:13,borderRadius:13}}>
+              {channelEditBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Save changes</Text>}
+            </Btn>
+          </View>
+        </View>
+      </View>
+    </Modal>
+
+    <Modal visible={channelCreateOpen} transparent animationType="slide" onRequestClose={()=>setChannelCreateOpen(false)}>
+      <View style={{flex:1,backgroundColor:'#0008',justifyContent:'flex-end'}}>
+        <View style={{backgroundColor:C.white,borderTopLeftRadius:24,borderTopRightRadius:24,padding:21}}>
+          <Text style={{fontSize:21,fontWeight:'900',color:C.ink}}>Create a channel</Text>
+          <Text style={{fontSize:12,color:C.muted,marginTop:5}}>Create multiple channels and invite followers with a shareable link.</Text>
+          <TextInput value={channelTitle} onChangeText={setChannelTitle} placeholder="Channel name" maxLength={60} style={{backgroundColor:C.paper,borderRadius:14,padding:14,marginTop:15,color:C.ink}}/>
+          <TextInput value={channelDescription} onChangeText={setChannelDescription} placeholder="Description (optional)" maxLength={500} multiline style={{backgroundColor:C.paper,borderRadius:14,padding:14,marginTop:10,minHeight:75,textAlignVertical:'top',color:C.ink}}/>
+          <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginTop:14}}>
+            <View style={{flex:1,paddingRight:12}}><Text style={{fontWeight:'900',color:C.ink}}>Public channel</Text><Text style={{fontSize:11,color:C.muted,marginTop:3}}>Anyone can discover and follow it</Text></View>
+            <Switch value={channelPublic} onValueChange={setChannelPublic} trackColor={{true:C.green}}/>
+          </View>
+          <View style={{flexDirection:'row',justifyContent:'flex-end',gap:10,marginTop:20}}>
+            <Btn onPress={()=>setChannelCreateOpen(false)} style={{padding:13}}><Text style={{color:C.muted,fontWeight:'700'}}>Cancel</Text></Btn>
+            <Btn disabled={channelBusy||channelTitle.trim().length<2} onPress={()=>void createChannel()} style={{backgroundColor:C.green,paddingHorizontal:18,paddingVertical:13,borderRadius:13}}>{channelBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Create channel</Text>}</Btn>
+          </View>
+        </View>
+      </View>
+    </Modal>
+    <Modal visible={channelJoinOpen} transparent animationType="fade" onRequestClose={()=>setChannelJoinOpen(false)}>
+      <View style={{flex:1,backgroundColor:'#0008',justifyContent:'center',padding:22}}>
+        <View style={{backgroundColor:C.white,borderRadius:22,padding:22}}>
+          <Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>Join a channel</Text>
+          <Text style={{fontSize:12,color:C.muted,lineHeight:18,marginTop:7,marginBottom:14}}>Paste a Guftin channel invite code. Opening an invite link in Guftin will also join it.</Text>
+          <TextInput value={channelInviteCode} onChangeText={setChannelInviteCode} autoCapitalize="none" placeholder="Invite code" style={{backgroundColor:C.paper,borderRadius:14,padding:15,color:C.ink}}/>
+          <View style={{flexDirection:'row',justifyContent:'flex-end',gap:10,marginTop:18}}>
+            <Btn onPress={()=>setChannelJoinOpen(false)} style={{padding:13}}><Text style={{color:C.muted,fontWeight:'700'}}>Cancel</Text></Btn>
+            <Btn disabled={channelBusy||!channelInviteCode.trim()} onPress={()=>void joinChannelByInvite(channelInviteCode)} style={{backgroundColor:C.green,paddingHorizontal:18,paddingVertical:13,borderRadius:13}}>{channelBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Join channel</Text>}</Btn>
+          </View>
+        </View>
+      </View>
+    </Modal>
+    <Modal visible={addOpen} transparent animationType="fade" onRequestClose={()=>setAddOpen(false)}>
+      <View style={{flex:1,backgroundColor:'#0008',justifyContent:'center',padding:22}}>
+        <View style={{backgroundColor:C.white,borderRadius:22,padding:20,maxHeight:'88%'}}>
+          <Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>Add a new Guftin contact</Text>
+          <Text style={{color:C.muted,lineHeight:19,marginTop:7,marginBottom:12}}>Search by Guftin username, Gmail/email address, or the mobile number linked to that account.</Text>
+          <TextInput value={contactUsername} onChangeText={setContactUsername} autoCapitalize="none" autoCorrect={false} placeholder="Username, email or mobile number" style={{backgroundColor:C.paper,borderRadius:14,padding:15,color:C.ink}}/>
+          <Text style={{color:C.muted,fontSize:11,lineHeight:16,marginTop:8}}>Search by username, verified email address, or an optional mobile number added to the account. Mobile numbers are not verified by Guftin.</Text>
+          <Btn disabled={phoneContactsLoading} onPress={()=>void findPhoneContacts()} style={{backgroundColor:C.mint,padding:13,borderRadius:13,marginTop:12,alignItems:'center'}}>
+            {phoneContactsLoading?<ActivityIndicator color={C.green}/>:<Text style={{color:C.green,fontWeight:'900'}}>Find Guftin accounts in phone contacts</Text>}
+          </Btn>
+          <Text style={{color:C.muted,fontSize:10,lineHeight:15,marginTop:6}}>Guftin checks phone numbers only after you tap this button. It returns matching account details, not other people's phone numbers, and does not upload or save your address-book names.</Text>
+          {phoneContactMatches.length>0?<ScrollView style={{maxHeight:230,marginTop:8}} keyboardShouldPersistTaps="handled">
+            {phoneContactMatches.map((item:any)=><Btn key={item.contact_id} onPress={()=>openPhoneContactChat(item)} style={{flexDirection:'row',alignItems:'center',gap:10,paddingVertical:10,borderBottomWidth:1,borderColor:C.line}}>
+              {item.avatar_signed_url?<Avatar label={initials(item.display_name||'G')} color={colorFor(item.contact_id)} size={43} uri={item.avatar_signed_url}/>:<View style={{width:43,height:43,borderRadius:15,backgroundColor:C.mint,alignItems:'center',justifyContent:'center'}}><BrandLogo size={30}/></View>}
+              <View style={{flex:1}}>
+                <Text style={{fontWeight:'900',color:C.ink}}>{item.display_name||item.local_contact_name||'Guftin member'}</Text>
+                <Text style={{fontSize:11,color:C.muted,marginTop:2}}>@{item.username||'member'} · Saved as {item.local_contact_name||'Phone contact'}</Text>
+                <Text style={{fontSize:10,color:C.green,fontWeight:'900',marginTop:3}}>GUFTIN ACCOUNT</Text>
+              </View>
+              <Text style={{fontSize:20,color:C.green,fontWeight:'900'}}>›</Text>
+            </Btn>)}
+          </ScrollView>:null}
+          <Btn onPress={()=>{setAddOpen(false);void openGroupCreator();}} style={{padding:10,alignSelf:'flex-start',marginTop:8}}><Text style={{color:C.green,fontWeight:'800'}}>👥 Create a group instead</Text></Btn>
+          <View style={{flexDirection:'row',justifyContent:'flex-end',gap:10,marginTop:12}}>
+            <Btn onPress={()=>setAddOpen(false)} style={{padding:13}}><Text style={{color:C.muted,fontWeight:'700'}}>Cancel</Text></Btn>
+            <Btn disabled={adding} onPress={addContact} style={{backgroundColor:C.green,paddingHorizontal:18,paddingVertical:13,borderRadius:13}}>{adding?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'800'}}>Find and open chat</Text>}</Btn>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  </SafeAreaView>;
+}
+
+export default function App(){
+  return <SafeAreaProvider><GuftinApp/></SafeAreaProvider>;
+}
     if(!session?.user?.id||chat.kind!=='direct')return;
     try{
       const {data:members,error:membersError}=await supabase.from('kc_conversation_members')
