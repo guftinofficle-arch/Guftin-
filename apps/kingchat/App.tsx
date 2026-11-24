@@ -888,6 +888,11 @@ function GuftinApp() {
   const [savedItemsOpen,setSavedItemsOpen]=useState(false);
   const [savedItems,setSavedItems]=useState<any[]>([]);
   const [savedItemsLoading,setSavedItemsLoading]=useState(false);
+  const [chatFolders,setChatFolders]=useState<any[]>([]);
+  const [activeFolderId,setActiveFolderId]=useState<string|null>(null);
+  const [folderModalVisible,setFolderModalVisible]=useState(false);
+  const [folderTitle,setFolderTitle]=useState('');
+  const [folderTargetChat,setFolderTargetChat]=useState<Chat|null>(null);
   const [accountEmailInput,setAccountEmailInput]=useState('');
   const [accountEmailPassword,setAccountEmailPassword]=useState('');
   const [accountEmailBusy,setAccountEmailBusy]=useState(false);
@@ -1753,6 +1758,48 @@ function GuftinApp() {
     const {error}=await supabase.from('kc_saved_items').delete().eq('id',id).eq('user_id',session.user.id);
     if(error){Alert.alert('Could not remove saved item',error.message);return;}
     setSavedItems((items:any[])=>items.filter(item=>item.id!==id));
+  };
+
+  const loadChatFolders=async()=>{
+    if(!session?.user?.id)return;
+    const {data,error}=await supabase.from('kc_chat_folders')
+      .select('id,title,color,sort_order,items:kc_chat_folder_items(conversation_id)')
+      .eq('user_id',session.user.id).order('sort_order',{ascending:true});
+    if(error){console.warn('Chat folders could not load:',error.message);return;}
+    setChatFolders((data||[]).map((folder:any)=>({...folder,conversation_ids:(folder.items||[]).map((item:any)=>item.conversation_id)})));
+  };
+
+  const saveChatInFolder=async(folderId:string,chat:Chat)=>{
+    if(!session?.user?.id)return;
+    const {error}=await supabase.from('kc_chat_folder_items').upsert(
+      {folder_id:folderId,user_id:session.user.id,conversation_id:chat.id},
+      {onConflict:'folder_id,conversation_id'}
+    );
+    if(error){Alert.alert('Could not add chat to folder',error.message);return;}
+    await loadChatFolders();
+  };
+
+  const chooseChatFolder=(chat:Chat)=>{
+    const choices:any[]=chatFolders.map((folder:any)=>({
+      text:folder.title,
+      onPress:()=>void saveChatInFolder(folder.id,chat)
+    }));
+    choices.push({text:'＋ Create new folder',onPress:()=>{setFolderTargetChat(chat);setFolderTitle('');setFolderModalVisible(true);}});
+    choices.push({text:'Cancel',style:'cancel'});
+    Alert.alert('Add chat to folder',chat.name,choices);
+  };
+
+  const createChatFolder=async()=>{
+    const title=folderTitle.trim();
+    if(!session?.user?.id||!title)return;
+    if(title.length>40){Alert.alert('Folder name too long','Use up to 40 characters.');return;}
+    const {data,error}=await supabase.from('kc_chat_folders')
+      .insert({user_id:session.user.id,title,color:'emerald',sort_order:chatFolders.length})
+      .select('id').single();
+    if(error){Alert.alert('Could not create folder',error.message);return;}
+    if(folderTargetChat)await saveChatInFolder(data.id,folderTargetChat);
+    else await loadChatFolders();
+    setFolderModalVisible(false);setFolderTitle('');setFolderTargetChat(null);
   };
 
   const deleteMessage=async(item:Message)=>{
@@ -4094,7 +4141,9 @@ function GuftinApp() {
     };
   },[session,tab,loadStatuses]);
 
-  const visible=useMemo(()=>chats.filter(c=>c.name.toLowerCase().includes(search.toLowerCase())),[chats,search]);
+  useEffect(()=>{if(session?.user?.id)void loadChatFolders();else{setChatFolders([]);setActiveFolderId(null);}},[session?.user?.id]);
+
+  const visible=useMemo(()=>chats.filter(c=>c.name.toLowerCase().includes(search.toLowerCase())&&(!activeFolderId||chatFolders.some((folder:any)=>folder.id===activeFolderId&&folder.conversation_ids.includes(c.id)))),[chats,search,activeFolderId,chatFolders]);
   const pageTitle=tab==='Chats'?'Messages':tab==='Updates'?'Updates':tab==='Channels'?'Channels':tab==='Calls'?'Calls':'You';
 
   if(authRestoring){
@@ -4419,7 +4468,12 @@ function GuftinApp() {
       {loading&&chats.length===0?<View style={{flex:1,alignItems:'center',justifyContent:'center'}}><ActivityIndicator color={C.green}/><Text style={{color:C.muted,marginTop:10}}>Loading your conversations…</Text></View>:
         <FlatList data={visible} keyExtractor={x=>x.id} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={C.green}/>} contentContainerStyle={{paddingHorizontal:13,paddingBottom:25,flexGrow:1}}
           ListHeaderComponent={<View style={{paddingTop:4,paddingBottom:12}}>
-            <Btn onPress={()=>setAddOpen(true)} style={{flexDirection:'row',alignItems:'center',gap:12,padding:13,borderRadius:16,backgroundColor:C.mint}}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{gap:8,paddingBottom:12}}>
+              <Btn onPress={()=>setActiveFolderId(null)} style={{paddingHorizontal:14,paddingVertical:9,borderRadius:20,backgroundColor:activeFolderId===null?C.green:C.paper}}><Text style={{color:activeFolderId===null?'#fff':C.ink,fontWeight:'900',fontSize:11}}>All chats</Text></Btn>
+              {chatFolders.map((folder:any)=><Btn key={folder.id} onPress={()=>setActiveFolderId(folder.id)} style={{paddingHorizontal:14,paddingVertical:9,borderRadius:20,backgroundColor:activeFolderId===folder.id?C.green:C.paper}}><Text style={{color:activeFolderId===folder.id?'#fff':C.ink,fontWeight:'900',fontSize:11}}>{folder.title}</Text></Btn>)}
+              <Btn onPress={()=>{setFolderTargetChat(null);setFolderTitle('');setFolderModalVisible(true);}} style={{paddingHorizontal:14,paddingVertical:9,borderRadius:20,backgroundColor:C.mint}}><Text style={{color:C.green,fontWeight:'900',fontSize:11}}>＋ Folder</Text></Btn>
+            </ScrollView>
+            <Btn onPress={()=>setAddOpen(true) style={{flexDirection:'row',alignItems:'center',gap:12,padding:13,borderRadius:16,backgroundColor:C.mint}}>
               <View style={{width:42,height:42,borderRadius:14,backgroundColor:C.green,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:26,color:'#fff',fontWeight:'700'}}>＋</Text></View>
               <View style={{flex:1}}>
                 <Text style={{fontSize:14,fontWeight:'900',color:C.green}}>Add a new contact</Text>
@@ -4429,7 +4483,7 @@ function GuftinApp() {
             </Btn>
           </View>}
           ListEmptyComponent={<View style={{alignItems:'center',padding:35,marginTop:34}}><BrandLogo size={64}/><Text style={{fontSize:17,fontWeight:'900',color:C.ink,marginTop:15}}>No conversations yet</Text><Text style={{color:C.muted,textAlign:'center',marginTop:7,lineHeight:20}}>Add a contact above using their username, verified email address or verified mobile number. Your chat appears when you send the first message or start a call.</Text></View>}
-          renderItem={({item})=><Btn onPress={()=>openChat(item)} onLongPress={()=>Alert.alert('Chat options',item.name,[{text:'Delete chat for me',style:'destructive',onPress:()=>void hideChat(item)},{text:'Cancel',style:'cancel'}])} style={{flexDirection:'row',alignItems:'center',padding:10,gap:12,borderRadius:17}}>
+          renderItem={({item})=><Btn onPress={()=>openChat(item)} onLongPress={()=>Alert.alert('Chat options',item.name,[{text:'Add to folder',onPress:()=>chooseChatFolder(item)},{text:'Delete chat for me',style:'destructive',onPress:()=>void hideChat(item)},{text:'Cancel',style:'cancel'}])} style={{flexDirection:'row',alignItems:'center',padding:10,gap:12,borderRadius:17}}>
             <Avatar label={item.avatar} color={item.color} online={item.online} uri={item.avatarUrl}/>
             <View style={{flex:1,borderBottomWidth:1,borderColor:C.line,paddingBottom:14,paddingTop:2}}>
               <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center'}}><View style={{flexDirection:'row',alignItems:'center',gap:4,flex:1}}><Text numberOfLines={1} style={{fontWeight:'800',color:C.ink,fontSize:14}}>{item.name}</Text>{<>{item.isOfficial?<Text style={{fontSize:9,color:'#2387e8',fontWeight:'900'}}>OFFICIAL</Text>:null}{item.isVerified?<VerifiedBadge label={item.isOfficial?'Verified Guftin Official account':'Verified channel'}/>:null}</>}</View><Text style={{fontSize:10,color:C.muted}}>{item.time}</Text></View>
@@ -4605,6 +4659,17 @@ function GuftinApp() {
         {pinMode==='reset-chat'||pinMode==='reset-app'?<Btn onPress={()=>void resetPinByEmail()} style={{padding:8}}><Text style={{color:C.green,textAlign:'center',fontWeight:'800'}}>Resend code</Text></Btn>:null}
         {(pinMode!=='unlock-app'&&pinMode!=='unlock-chat')?<Btn onPress={()=>setPinModalVisible(false)} style={{padding:8}}><Text style={{color:C.muted,textAlign:'center'}}>Cancel</Text></Btn>:null}
       </View></View>
+    </Modal>
+
+    <Modal visible={folderModalVisible} transparent animationType="fade" onRequestClose={()=>setFolderModalVisible(false)}>
+      <View style={{flex:1,backgroundColor:'#0008',justifyContent:'center',padding:24}}>
+        <View style={{backgroundColor:C.white,borderRadius:20,padding:20,gap:12}}>
+          <Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>{folderTargetChat?'Add chat to a new folder':'Create chat folder'}</Text>
+          <TextInput value={folderTitle} onChangeText={setFolderTitle} placeholder="Folder name (up to 40 characters)" maxLength={40} style={{backgroundColor:C.paper,borderRadius:12,padding:14,color:C.ink}}/>
+          <Btn onPress={()=>void createChatFolder()} disabled={!folderTitle.trim()} style={{backgroundColor:C.green,padding:13,borderRadius:12,alignItems:'center'}}><Text style={{color:'#fff',fontWeight:'900'}}>Create folder</Text></Btn>
+          <Btn onPress={()=>{setFolderModalVisible(false);setFolderTargetChat(null);}} style={{padding:9,alignItems:'center'}}><Text style={{color:C.muted,fontWeight:'800'}}>Cancel</Text></Btn>
+        </View>
+      </View>
     </Modal>
 
     <Modal visible={savedItemsOpen} animationType="slide" onRequestClose={()=>setSavedItemsOpen(false)}>
