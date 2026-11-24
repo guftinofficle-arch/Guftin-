@@ -2022,8 +2022,8 @@ function GuftinApp() {
     if(!deviceIdentity){Alert.alert('Secure device unavailable','Your local encryption key is not ready.');return;}
     setEditHistoryLoading(true);
     try{
-      const rows=await upgrade20.listMessageEditHistory(item.id);
-      const mapped=(rows||[]).map((row:any)=>{
+      const rows:any[]=(await upgrade20.listMessageEditHistory(item.id)) as any[];
+      const mapped=rows.map((row:any)=>{
         const open=(value:string)=>{try{return value?.startsWith(E2EE_PREFIX)?decryptMessageForDevice(value,deviceIdentity):'Encrypted history entry';}catch{return 'Could not decrypt this history entry on this device.';}};
         return {id:row.id,edited_at:row.edited_at,previous:open(row.previous_body_envelope),updated:open(row.new_body_envelope)};
       });
