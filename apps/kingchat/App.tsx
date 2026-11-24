@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
+import * as LocalAuthentication from 'expo-local-authentication';
 import NetInfo from '@react-native-community/netinfo';
 import {
   ActivityIndicator, Alert, Animated, AppState, BackHandler, FlatList, Image, KeyboardAvoidingView, Modal,
@@ -907,6 +908,9 @@ function GuftinApp() {
   const [appLocked,setAppLocked]=useState(false);
   const [appLockEnabled,setAppLockEnabled]=useState(false);
   const [pinBusy,setPinBusy]=useState(false);
+  const [biometricLockEnabled,setBiometricLockEnabled]=useState(false);
+  const [biometricAvailable,setBiometricAvailable]=useState(false);
+  const [biometricBusy,setBiometricBusy]=useState(false);
   const [showReadReceipts,setShowReadReceipts]=useState(true);
   const [lastSeenVisibility,setLastSeenVisibility]=useState<'everyone'|'contacts'|'nobody'|'selected'>('contacts');
   const [profilePhotoVisibility,setProfilePhotoVisibility]=useState<'everyone'|'contacts'|'nobody'|'selected'>('everyone');
@@ -2519,7 +2523,11 @@ function GuftinApp() {
     else if(pinTargetChat){setActive(pinTargetChat);setPeerLastReadAt(null);}
     Alert.alert('PIN reset','Your new PIN has been saved.');
   };
-  useEffect(()=>{if(!session?.user?.id)return;let live=true;(async()=>{const enabled=await AsyncStorage.getItem('guftin-app-lock-enabled');if(!live)return;setAppLockEnabled(enabled==='1');if(enabled==='1'&&await SecureStore.getItemAsync(pinStorageKey('app')))setAppLocked(true);})();return()=>{live=false;};},[session?.user?.id]);
+  useEffect(()=>{if(!session?.user?.id)return;let live=true;(async()=>{const enabled=await AsyncStorage.getItem('guftin-app-lock-enabled');const biometric=await AsyncStorage.getItem('guftin-biometric-lock-enabled');const hasPin=!!(await SecureStore.getItemAsync(pinStorageKey('app')));const hardware=await LocalAuthentication.hasHardwareAsync().catch(()=>false);const enrolled=await LocalAuthentication.isEnrolledAsync().catch(()=>false);if(!live)return;setAppLockEnabled(enabled==='1'&&hasPin);setBiometricAvailable(hardware&&enrolled);setBiometricLockEnabled(biometric==='1'&&enabled==='1'&&hasPin&&hardware&&enrolled);if(enabled==='1'&&hasPin)setAppLocked(true);})();return()=>{live=false;};},[session?.user?.id]);
+
+  const runBiometricUnlock=async()=>{try{setBiometricBusy(true);const hardware=await LocalAuthentication.hasHardwareAsync();const enrolled=await LocalAuthentication.isEnrolledAsync();if(!hardware||!enrolled){setBiometricAvailable(false);Alert.alert('Biometrics unavailable','Set up fingerprint or face unlock in your phone settings, or use your Guftin PIN.');return;}const result=await LocalAuthentication.authenticateAsync({promptMessage:'Unlock Guftin',cancelLabel:'Use PIN',disableDeviceFallback:true,biometricsSecurityLevel:'strong'});if(result.success){setAppLocked(false);setPinModalVisible(false);setPinEntry('');}else if(result.error!=='user_cancel'&&result.error!=='system_cancel'&&result.error!=='app_cancel'){Alert.alert('Biometric unlock not completed','Use your Guftin PIN to unlock the app.');}}catch(error:any){Alert.alert('Biometric unlock unavailable',error?.message||'Use your Guftin PIN.');}finally{setBiometricBusy(false);}};
+
+  const setBiometricLock=async(enabled:boolean)=>{if(!enabled){await AsyncStorage.removeItem('guftin-biometric-lock-enabled');setBiometricLockEnabled(false);return;}try{const hasPin=!!(await SecureStore.getItemAsync(pinStorageKey('app')));if(!hasPin){Alert.alert('Set App Lock PIN first','Create your Guftin App PIN before enabling fingerprint or face unlock.');return;}const hardware=await LocalAuthentication.hasHardwareAsync();const enrolled=await LocalAuthentication.isEnrolledAsync();if(!hardware||!enrolled){Alert.alert('Biometrics not set up','Set up fingerprint or face unlock in your phone settings first.');return;}const check=await LocalAuthentication.authenticateAsync({promptMessage:'Confirm biometric unlock for Guftin',cancelLabel:'Cancel',disableDeviceFallback:true,biometricsSecurityLevel:'strong'});if(!check.success)return;await AsyncStorage.setItem('guftin-biometric-lock-enabled','1');setBiometricAvailable(true);setBiometricLockEnabled(true);}catch(error:any){Alert.alert('Could not enable biometric lock',error?.message||'Please try again.');}};
 
   const openChat=async(chat:Chat)=>{
     const permanentlyUnlocked=await AsyncStorage.getItem('guftin-chat-lock-disabled:'+chat.id);
@@ -4839,7 +4847,7 @@ function GuftinApp() {
     </Modal>
 
     <Modal visible={appLocked} transparent animationType="fade" onRequestClose={()=>{}}>
-      <View style={{flex:1,backgroundColor:C.white,justifyContent:'center',alignItems:'center',padding:24}}><Text style={{fontSize:25,fontWeight:'900',color:C.ink,marginBottom:12}}>Guftin is locked</Text><Btn onPress={()=>startPinFlow('unlock-app')} style={{backgroundColor:C.green,padding:15,borderRadius:13,width:'100%'}}><Text style={{color:'#fff',fontWeight:'900',textAlign:'center'}}>Enter App PIN</Text></Btn></View>
+      <View style={{flex:1,backgroundColor:C.white,justifyContent:'center',alignItems:'center',padding:24}}><Text style={{fontSize:25,fontWeight:'900',color:C.ink,marginBottom:12}}>Guftin is locked</Text>{biometricLockEnabled&&biometricAvailable?<Btn disabled={biometricBusy} onPress={()=>void runBiometricUnlock()} style={{backgroundColor:C.green,padding:15,borderRadius:13,width:'100%',marginBottom:10}}>{biometricBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900',textAlign:'center'}}>Use fingerprint / face unlock</Text>}</Btn>:null}<Btn onPress={()=>startPinFlow('unlock-app')} style={{backgroundColor:C.mint,padding:15,borderRadius:13,width:'100%'}}><Text style={{color:C.green,fontWeight:'900',textAlign:'center'}}>Enter App PIN</Text></Btn></View>
     </Modal>
     <Modal visible={pinModalVisible} transparent animationType="fade" onRequestClose={()=>{if(pinMode==='unlock-app'||pinMode==='unlock-chat')return;setPinModalVisible(false);}}>
       <View style={{flex:1,backgroundColor:'#0009',justifyContent:'center',padding:24}}><View style={{backgroundColor:C.white,borderRadius:22,padding:22,gap:12}}>
@@ -4944,6 +4952,7 @@ function GuftinApp() {
           {phoneVerifyError?<Text style={{color:C.ink,fontSize:11,lineHeight:16,marginTop:6}}>{phoneVerifyError}</Text>:null}
         </View>
         <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingVertical:12}}><View style={{flex:1,paddingRight:12}}><Text style={{color:C.ink,fontWeight:'800'}}>App Lock</Text><Text style={{color:C.muted,fontSize:11}}>Require a PIN to open Guftin</Text></View><Switch value={appLockEnabled} onValueChange={async enabled=>{if(enabled){startPinFlow('set-app');}else{await AsyncStorage.removeItem('guftin-app-lock-enabled');setAppLockEnabled(false);}}} trackColor={{true:C.green}}/></View>
+        <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingVertical:12}}><View style={{flex:1,paddingRight:12}}><Text style={{color:C.ink,fontWeight:'800'}}>Fingerprint / Face Unlock</Text><Text style={{color:C.muted,fontSize:11}}>{biometricAvailable?'Use your phone biometrics with PIN fallback':'Requires enrolled fingerprint or face unlock and an App PIN'}</Text></View><Switch value={biometricLockEnabled} disabled={!appLockEnabled} onValueChange={value=>void setBiometricLock(value)} trackColor={{true:C.green}}/></View>
         <Btn onPress={()=>{setSettingsOpen(false);setPermissionSetupStep(0);setPermissionSetupAutoSave(mediaAutoDownload);setPermissionSetupFullScreenOpened(false);setPermissionSetupNotice('');setPermissionSetupVisible(true);}} style={{backgroundColor:C.mint,padding:12,borderRadius:13,marginBottom:7}}>
           <Text style={{color:C.green,fontWeight:'900',textAlign:'center'}}>Review app permissions</Text>
         </Btn>
