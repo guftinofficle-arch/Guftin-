@@ -1016,6 +1016,8 @@ function GuftinApp() {
   const [chatDetailsOpen,setChatDetailsOpen]=useState(false);
   const [chatDetails,setChatDetails]=useState<any>(null);
   const [chatDetailsLoading,setChatDetailsLoading]=useState(false);
+  const [groupEditTitle,setGroupEditTitle]=useState('');
+  const [groupAdminBusy,setGroupAdminBusy]=useState(false);
 
   const [profileName,setProfileName]=useState('');
   const [profileUsername,setProfileUsername]=useState('');
@@ -3865,11 +3867,73 @@ function GuftinApp() {
         const avatar=person.avatar_url?(await getSignedMediaUrl(person.avatar_url))||null:null;
         return {...member,...person,avatar_signed_url:avatar,is_me:member.user_id===session.user.id};
       }));
-      setChatDetails({conversation,members:details});
+      const groupPhotoSigned=conversation.photo_url?await getSignedMediaUrl(conversation.photo_url):null;
+      setGroupEditTitle(conversation.title||'');
+      setChatDetails({conversation:{...conversation,photo_signed_url:groupPhotoSigned},members:details});
       setChatDetailsOpen(true);
     }catch(e:any){
       Alert.alert('Details could not load',e?.message||'Please try again.');
     }finally{setChatDetailsLoading(false);}
+  };
+
+  const saveGroupDetails=async()=>{
+    if(!active||!chatDetails||groupAdminBusy)return;
+    const title=groupEditTitle.trim();
+    if(title.length<2||title.length>60){Alert.alert('Group name required','Use 2 to 60 characters.');return;}
+    setGroupAdminBusy(true);
+    try{
+      const {error}=await supabase.rpc('kc_update_group_details',{p_conversation_id:active.id,p_title:title,p_photo_url:null});
+      if(error)throw error;
+      setChatDetails((prev:any)=>({...prev,conversation:{...prev.conversation,title}}));
+      setActive((prev:any)=>prev?.id===active.id?{...prev,name:title,avatar:initials(title)}:prev);
+      void loadInbox();
+      Alert.alert('Group updated','The group name has been changed.');
+    }catch(e:any){Alert.alert('Could not update group',e?.message||'Please try again.');}
+    finally{setGroupAdminBusy(false);}
+  };
+  const chooseGroupPhoto=async()=>{
+    if(!active||!session||!chatDetails)return;
+    const permission=await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if(!permission.granted){Alert.alert('Permission needed','Allow photo access to choose a group photo.');return;}
+    const result=await ImagePicker.launchImageLibraryAsync({mediaTypes:['images'],allowsEditing:true,aspect:[1,1],quality:0.85});
+    if(result.canceled||!result.assets?.[0])return;
+    setGroupAdminBusy(true);
+    try{
+      const asset=result.assets[0],file=new File(asset.uri);
+      if(file.size>10*1024*1024)throw new Error('Group photo must be under 10 MB.');
+      const bytes=new Uint8Array(await file.arrayBuffer()),path=session.user.id+'/groups/'+active.id+'/'+Date.now()+'_'+ExpoCrypto.randomUUID()+'.jpg';
+      const {error:uploadError}=await supabase.storage.from('chat-media').upload(path,bytes,{contentType:'image/jpeg',upsert:false});bytes.fill(0);
+      if(uploadError)throw uploadError;
+      const {error}=await supabase.rpc('kc_update_group_details',{p_conversation_id:active.id,p_title:null,p_photo_url:path});
+      if(error)throw error;
+      const signed=await getSignedMediaUrl(path);
+      setChatDetails((prev:any)=>({...prev,conversation:{...prev.conversation,photo_url:path,photo_signed_url:signed}}));
+      setActive((prev:any)=>prev?.id===active.id?{...prev,avatarUrl:signed}:prev);
+      void loadInbox();
+      Alert.alert('Group photo updated','The new group photo is now saved.');
+    }catch(e:any){Alert.alert('Could not update group photo',e?.message||'Please try again.');}
+    finally{setGroupAdminBusy(false);}
+  };
+  const setGroupMemberAdmin=async(member:any,makeAdmin:boolean)=>{
+    if(!active||groupAdminBusy)return;
+    setGroupAdminBusy(true);
+    try{
+      const {error}=await supabase.rpc('kc_set_group_admin',{p_conversation_id:active.id,p_member_id:member.user_id,p_make_admin:makeAdmin});
+      if(error)throw error;
+      setChatDetails((prev:any)=>({...prev,members:prev.members.map((m:any)=>m.user_id===member.user_id?{...m,role:makeAdmin?'admin':'member'}:m)}));
+    }catch(e:any){Alert.alert('Could not change admin',e?.message||'Please try again.');}
+    finally{setGroupAdminBusy(false);}
+  };
+  const transferGroupOwnership=async(member:any,keepAdmin:boolean)=>{
+    if(!active||groupAdminBusy)return;
+    setGroupAdminBusy(true);
+    try{
+      const {error}=await supabase.rpc('kc_transfer_group_ownership',{p_conversation_id:active.id,p_new_owner_id:member.user_id,p_keep_old_owner_admin:keepAdmin});
+      if(error)throw error;
+      setChatDetails((prev:any)=>({...prev,conversation:{...prev.conversation,created_by:member.user_id},members:prev.members.map((m:any)=>m.user_id===member.user_id?{...m,role:'owner'}:m.user_id===session.user.id?{...m,role:keepAdmin?'admin':'member'}:m)}));
+      Alert.alert('Ownership transferred',keepAdmin?'You are still an admin.':'Your role is now member.');
+    }catch(e:any){Alert.alert('Could not transfer ownership',e?.message||'Please try again.');}
+    finally{setGroupAdminBusy(false);}
   };
 
   const loadStatuses=useCallback(async()=>{
@@ -4219,7 +4283,7 @@ function GuftinApp() {
         {chatDetailsLoading?<View style={{flex:1,alignItems:'center',justifyContent:'center'}}><ActivityIndicator color={C.green}/><Text style={{color:C.muted,marginTop:10}}>Loading contact information…</Text></View>:chatDetails?<ScrollView contentContainerStyle={{padding:18,paddingBottom:34}}>
           <View style={{alignItems:'center',backgroundColor:C.white,borderRadius:22,padding:24,marginBottom:16}}>
             <Avatar label={initials(chatDetails.conversation.kind==='group'?chatDetails.conversation.title:(chatDetails.members.find((member:any)=>member.user_id!==session.user.id)?.display_name||active.name||'G'))}
-              color={C.green} size={112} uri={chatDetails.conversation.kind==='group'?undefined:(chatDetails.members.find((member:any)=>member.user_id!==session.user.id)?.avatar_signed_url||undefined)}/>
+              color={C.green} size={112} uri={chatDetails.conversation.kind==='group'?(chatDetails.conversation.photo_signed_url||undefined):(chatDetails.members.find((member:any)=>member.user_id!==session.user.id)?.avatar_signed_url||undefined)}/>
             <Text style={{fontSize:22,fontWeight:'900',color:C.ink,marginTop:15}}>{chatDetails.conversation.kind==='group'?chatDetails.conversation.title:(chatDetails.members.find((member:any)=>member.user_id!==session.user.id)?.display_name||active.name)}</Text>
             {chatDetails.conversation.kind==='group'?<Text style={{fontSize:12,color:C.muted,marginTop:5}}>Group conversation · {chatDetails.members.length} participants</Text>:(()=>{
               const person=chatDetails.members.find((member:any)=>member.user_id!==session.user.id)||{};
@@ -4227,12 +4291,19 @@ function GuftinApp() {
             })()}
           </View>
           {chatDetails.conversation.kind==='group'?<>
+            <View style={{backgroundColor:C.white,borderRadius:18,padding:16,marginBottom:12}}>
+              <Text style={{fontSize:14,fontWeight:'900',color:C.ink,marginBottom:10}}>Group management</Text>
+              {(chatDetails.conversation.created_by===session.user.id||chatDetails.members.some((m:any)=>m.is_me&&m.role==='admin'))?<><TextInput value={groupEditTitle} onChangeText={setGroupEditTitle} maxLength={60} placeholder="Group name" style={{backgroundColor:C.paper,borderRadius:12,padding:12,color:C.ink}}/><Btn disabled={groupAdminBusy} onPress={()=>void saveGroupDetails()} style={{backgroundColor:C.green,padding:11,borderRadius:11,marginTop:8,alignItems:'center'}}><Text style={{color:'#fff',fontWeight:'900'}}>Save group name</Text></Btn><Btn disabled={groupAdminBusy} onPress={()=>void chooseGroupPhoto()} style={{backgroundColor:C.mint,padding:11,borderRadius:11,marginTop:8,alignItems:'center'}}><Text style={{color:C.green,fontWeight:'900'}}>Change group logo / photo</Text></Btn></>:null}
+            </View>
             <View style={{backgroundColor:C.white,borderRadius:18,padding:16}}>
               <Text style={{fontSize:14,fontWeight:'900',color:C.ink,marginBottom:8}}>Participants · {chatDetails.members.length}</Text>
               {chatDetails.members.map((member:any)=><View key={member.user_id} style={{flexDirection:'row',alignItems:'center',gap:11,paddingVertical:11,borderBottomWidth:1,borderColor:C.line}}>
                 <Avatar label={initials(member.display_name||member.username||'G')} color={colorFor(member.user_id)} size={44} uri={member.avatar_signed_url}/>
                 <View style={{flex:1}}><Text style={{fontWeight:'800',color:C.ink}}>{member.display_name||'Guftin member'}{member.is_me?' (You)':''}</Text><Text style={{fontSize:11,color:C.muted,marginTop:3}}>@{member.username||'member'}</Text></View>
-                <Text style={{fontSize:10,color:C.green,fontWeight:'800'}}>{member.role||'member'}</Text>
+                <View style={{alignItems:'flex-end',gap:5}}>
+                  <Text style={{fontSize:10,color:C.green,fontWeight:'800'}}>{member.role||'member'}</Text>
+                  {chatDetails.conversation.created_by===session.user.id&&!member.is_me&&member.role!=='owner'?<><Btn disabled={groupAdminBusy} onPress={()=>void setGroupMemberAdmin(member,member.role!=='admin')} style={{paddingHorizontal:9,paddingVertical:6,borderRadius:9,backgroundColor:C.mint}}><Text style={{fontSize:9,color:C.green,fontWeight:'900'}}>{member.role==='admin'?'Remove admin':'Make admin'}</Text></Btn><Btn disabled={groupAdminBusy} onPress={()=>Alert.alert('Transfer group ownership?', 'You can keep your admin role or transfer ownership and become a regular member.',[{text:'Cancel',style:'cancel'},{text:'Transfer and remain admin',onPress:()=>void transferGroupOwnership(member,true)},{text:'Transfer and become member',style:'destructive',onPress:()=>void transferGroupOwnership(member,false)}])} style={{paddingHorizontal:9,paddingVertical:6,borderRadius:9,backgroundColor:C.paper}}><Text style={{fontSize:9,color:C.ink,fontWeight:'900'}}>Make owner</Text></Btn></>:null}
+                </View>
               </View>)}
             </View>
           </>:(()=>{
