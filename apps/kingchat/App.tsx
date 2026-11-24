@@ -2142,14 +2142,17 @@ function GuftinApp() {
     if(isChannelHistory){
       // First visit: archive the channel's existing text history locally in pages.
       // Later visits stay on this local snapshot and do not fetch newly published posts.
-      for(let offset=0;offset<10000;offset+=200){
+      let offset=0;
+      while(true){
         const page=await supabase.from('kc_messages')
           .select('id,conversation_id,sender_id,body,message_type,attachment_url,created_at,deleted_at')
           .eq('conversation_id',conversationId)
           .order('created_at',{ascending:true}).range(offset,offset+199);
         if(page.error){if(!isConnectivityFailure(page.error))Alert.alert('Channel history could not load',page.error.message);return;}
-        data.push(...(page.data||[]));
-        if((page.data||[]).length<200)break;
+        const pageRows=page.data||[];
+        data.push(...pageRows);
+        if(pageRows.length<200)break;
+        offset+=200;
       }
     }else{
       const result=await supabase.from('kc_messages')
