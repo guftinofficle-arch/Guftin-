@@ -2825,6 +2825,25 @@ function GuftinApp() {
     setDraft('');
   };
 
+  const blockCurrentContact=async(chat:Chat)=>{
+    if(!session?.user?.id||chat.kind!=='direct')return;
+    try{
+      const {data:members,error:membersError}=await supabase.from('kc_conversation_members')
+        .select('user_id').eq('conversation_id',chat.id);
+      if(membersError)throw membersError;
+      const peer=(members||[]).map((row:any)=>row.user_id).find((id:string)=>id!==session.user.id);
+      if(!peer)throw new Error('Could not identify the other participant.');
+      const {error}=await supabase.from('kc_user_blocks').upsert(
+        {blocker_id:session.user.id,blocked_user_id:peer},
+        {onConflict:'blocker_id,blocked_user_id'}
+      );
+      if(error)throw error;
+      Alert.alert('Contact blocked','This contact has been added to your blocked users. Existing chat history has not been deleted.');
+    }catch(error:any){
+      Alert.alert('Could not block contact',error?.message||'Please try again.');
+    }
+  };
+
   const sendMessage=async()=>{
     const body=draft.trim();
     if(!body||!active||!session||sending||clearingConversationIds.current.has(active.id))return;
@@ -4492,6 +4511,7 @@ function GuftinApp() {
         </>):null}
         <Btn onPress={()=>active.kind==='channel'?showChannelOptions():Alert.alert('Chat options',active.name,[
           {text:'Chat info',onPress:()=>void openChatDetails()},
+          ...(active.kind==='direct'?[{text:'Block contact',style:'destructive' as const,onPress:()=>Alert.alert('Block this contact?', 'They will be added to your blocked users. Existing chat history will remain.',[{text:'Cancel',style:'cancel' as const},{text:'Block',style:'destructive' as const,onPress:()=>void blockCurrentContact(active)}])}]:[]),
           {text:'Chat PIN settings',onPress:()=>void (async()=>{const key=pinStorageKey('chat',active.id);const stored=await SecureStore.getItemAsync(key);const disabled=await AsyncStorage.getItem('guftin-chat-lock-disabled:'+active.id);Alert.alert('Chat PIN',active.name,stored&&disabled!=='1'?[{text:'Unlock Chat',onPress:()=>startPinFlow('unlock-chat',active)},{text:'Permanently Unlock',style:'destructive',onPress:()=>startPinFlow('remove-chat-lock',active)},{text:'Cancel',style:'cancel'}]:[{text:'Lock Chat',onPress:()=>void (async()=>{await AsyncStorage.removeItem('guftin-chat-lock-disabled:'+active.id);startPinFlow('set-chat',active);})()},{text:'Cancel',style:'cancel'}]);})()},
           {text:'Clear Chat',style:'destructive',onPress:()=>Alert.alert('Clear this chat?', 'This removes the messages from your Guftin account on this phone. The other participant keeps their chat history.',[
             {text:'Cancel',style:'cancel'},
