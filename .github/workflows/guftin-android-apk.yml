@@ -1,5 +1,5 @@
 name: Guftin Android APK — Build and Startup QA
-# QA Guftin 1.6.2 optional email/phone signup, account linking and contact discovery.
+# QA Guftin 1.6.2 offline queues, explicit status viewing, channel history and account discovery.
 
 on:
   workflow_dispatch:
