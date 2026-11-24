@@ -874,6 +874,8 @@ function GuftinApp() {
   const [sending,setSending]=useState(false);
   const [mediaPreparing,setMediaPreparing]=useState(false);
   const [statuses,setStatuses]=useState<any[]>([]);
+  const [selectedStatus,setSelectedStatus]=useState<any|null>(null);
+  const [statusOpening,setStatusOpening]=useState(false);
   const [statusComposer,setStatusComposer]=useState(false);
   const [statusText,setStatusText]=useState('');
   const [statusAsset,setStatusAsset]=useState<any>(null);
@@ -3852,96 +3854,66 @@ function GuftinApp() {
   const loadStatuses=useCallback(async()=>{
     if(!session)return;
     const statusCacheKey='guftin-cache-statuses:'+session.user.id;
-    // Paint the last successfully synced status feed immediately. Cached media
-    // is stored as an app-private file so previously loaded statuses remain
-    // viewable without a network connection.
     try{
       const cachedRaw=await AsyncStorage.getItem(statusCacheKey);
-      if(cachedRaw){
-        const cached=JSON.parse(cachedRaw);
-        if(Array.isArray(cached)){
-          const stillValid=cached.filter((item:any)=>!item.expires_at||new Date(item.expires_at).getTime()>Date.now());
-          setStatuses(stillValid);
-        }
-      }
-    }catch{ /* A damaged cache must never prevent online refresh. */ }
+      if(cachedRaw){const cached=JSON.parse(cachedRaw);if(Array.isArray(cached))setStatuses(cached.filter((item:any)=>!item.expires_at||new Date(item.expires_at).getTime()>Date.now()));}
+    }catch{}
     if(!onlineRef.current)return;
-    const {data,error}=await supabase.from('kc_status_updates')
-      .select('id,user_id,caption,media_url,created_at,expires_at')
-      .gt('expires_at',new Date().toISOString())
-      .order('created_at',{ascending:false}).limit(100);
+    const {data,error}=await supabase.from('kc_status_updates').select('id,user_id,caption,media_url,created_at,expires_at')
+      .gt('expires_at',new Date().toISOString()).order('created_at',{ascending:false}).limit(100);
     if(error){if(!isConnectivityFailure(error))Alert.alert('Statuses could not load',error.message);return;}
-    const rows=(data||[]) as any[];
+    const rows=(data||[]) as any[];if(!rows.length){setStatuses([]);return;}
     const ids=rows.map(row=>row.id);
-    if(!ids.length){setStatuses([]);return;}
-
-    // Record only the first view from this account; avoid repeated writes on refresh.
-    const viewableIds=rows.filter(row=>row.user_id!==session.user.id).map(row=>row.id);
-    if(viewableIds.length){
-      const {data:existingViews}=await supabase.from('kc_status_views')
-        .select('status_id').eq('viewer_id',session.user.id).in('status_id',viewableIds);
-      const seenIds=new Set((existingViews||[]).map((view:any)=>view.status_id));
-      const unseenIds=viewableIds.filter(id=>!seenIds.has(id));
-      if(unseenIds.length){
-        const {error:viewError}=await supabase.from('kc_status_views').upsert(
-          unseenIds.map(status_id=>({status_id,viewer_id:session.user.id})),
-          {onConflict:'status_id,viewer_id',ignoreDuplicates:true}
-        );
-        if(viewError)console.warn('Status view not recorded:',viewError.message);
-        else for(const statusId of unseenIds)void dispatchPush('status_view',statusId);
-      }
-    }
     const [peopleResult,viewsResult,likesResult,officialResult]=await Promise.all([
       supabase.from('kc_profiles').select('id,display_name,username,avatar_url').in('id',[...new Set(rows.map(row=>row.user_id))]),
       supabase.from('kc_status_views').select('status_id,viewer_id,viewed_at').in('status_id',ids),
       supabase.from('kc_status_likes').select('status_id,user_id,created_at').in('status_id',ids),
       supabase.from('kc_channels').select('owner_id').eq('is_official',true).maybeSingle()
     ]);
-    const people=new Map((peopleResult.data||[]).map((person:any)=>[person.id,person]));
-    const statusActorIds=[...new Set([
-      ...(viewsResult.data||[]).map((view:any)=>view.viewer_id),
-      ...(likesResult.data||[]).map((like:any)=>like.user_id)
-    ])];
-    const {data:statusActors}=statusActorIds.length
-      ?await supabase.from('kc_profiles').select('id,display_name,username').in('id',statusActorIds)
-      :{data:[]};
-    const statusActorMap=new Map((statusActors||[]).map((person:any)=>[person.id,person]));
+    const people=new Map((peopleResult.data||[]).map((p:any)=>[p.id,p]));
+    const actorIds=[...new Set([...(viewsResult.data||[]).map((v:any)=>v.viewer_id),...(likesResult.data||[]).map((v:any)=>v.user_id)])];
+    const {data:actors}=actorIds.length?await supabase.from('kc_profiles').select('id,display_name').in('id',actorIds):{data:[]};
+    const actorMap=new Map((actors||[]).map((p:any)=>[p.id,p]));
     const mapped=await Promise.all(rows.map(async row=>{
-      const signed=row.media_url?await getSignedMediaUrl(row.media_url):null;
-      let playableMedia=signed;
-      if(signed&&row.media_url){
-        try{
-          const rawExtension=String(row.media_url).split('.').pop()?.toLowerCase()||'jpg';
-          const extension=rawExtension.replace(/[^a-z0-9]/g,'').slice(0,5)||'jpg';
-          const localFile=new File(Paths.document,'guftin-status-'+row.id+'.'+extension);
-          if(!localFile.exists)await File.downloadFileAsync(signed,localFile);
-          if(localFile.exists)playableMedia=localFile.uri;
-        }catch(downloadError:any){
-          console.warn('Status offline media cache:',downloadError?.message||downloadError);
+      const person:any=people.get(row.user_id),avatarSigned=person?.avatar_url?await getSignedMediaUrl(person.avatar_url):null;
+      const views=(viewsResult.data||[]).filter((v:any)=>v.status_id===row.id),likes=(likesResult.data||[]).filter((v:any)=>v.status_id===row.id);
+      const ext=String(row.media_url||'').split('.').pop()?.toLowerCase().replace(/[^a-z0-9]/g,'').slice(0,5)||'jpg';
+      const local=row.media_url?new File(Paths.document,'guftin-status-'+row.id+'.'+ext):null;
+      return {...row,display_name:row.user_id===officialResult.data?.owner_id?'Guftin Official':(person?.display_name||'Guftin member'),
+        username:row.user_id===officialResult.data?.owner_id?'':(person?.username||''),is_verified:row.user_id===officialResult.data?.owner_id,
+        avatar_signed_url:avatarSigned,status_count:rows.filter(x=>x.user_id===row.user_id).length,media_signed_url:local?.exists?local.uri:null,
+        viewed_by_me:row.user_id===session.user.id||views.some((v:any)=>v.viewer_id===session.user.id),view_count:views.length,
+        viewer_names:views.map((v:any)=>(actorMap.get(v.viewer_id) as any)?.display_name||'Guftin member'),
+        liker_names:likes.map((v:any)=>(actorMap.get(v.user_id) as any)?.display_name||'Guftin member'),
+        like_count:likes.length,liked_by_me:likes.some((v:any)=>v.user_id===session.user.id)};
+    }));
+    setStatuses(mapped);void AsyncStorage.setItem(statusCacheKey,JSON.stringify(mapped)).catch(()=>{});
+  },[session,getSignedMediaUrl]);
+
+  const openStatus=async(status:any)=>{
+    if(!session||statusOpening)return;setStatusOpening(true);
+    try{
+      let localMedia:string|null=null;
+      if(status.media_url){
+        const ext=String(status.media_url).split('.').pop()?.toLowerCase().replace(/[^a-z0-9]/g,'').slice(0,5)||'jpg';
+        const local=new File(Paths.document,'guftin-status-'+status.id+'.'+ext);
+        if(!status.viewed_by_me&&!onlineRef.current)throw new Error('Connect to the internet to open a status you have not viewed yet.');
+        if(status.viewed_by_me&&local.exists)localMedia=local.uri;
+        else{
+          if(!onlineRef.current)throw new Error('This status media is not saved on this phone. Connect to the internet and try again.');
+          const signed=await getSignedMediaUrl(status.media_url);if(!signed)throw new Error('Could not create a secure status media link.');
+          await File.downloadFileAsync(signed,local);if(!local.exists)throw new Error('Status media could not be saved for offline viewing.');localMedia=local.uri;
         }
       }
-      const avatarPath=(people.get(row.user_id) as any)?.avatar_url||null;
-      const avatarSigned=avatarPath?await getSignedMediaUrl(avatarPath):null;
-      const views=(viewsResult.data||[]).filter((view:any)=>view.status_id===row.id);
-      const likes=(likesResult.data||[]).filter((like:any)=>like.status_id===row.id);
-      return {
-        ...row,
-        display_name:row.user_id===officialResult.data?.owner_id?'Guftin Official':((people.get(row.user_id) as any)?.display_name||'Guftin member'),
-        username:row.user_id===officialResult.data?.owner_id?'':((people.get(row.user_id) as any)?.username||''),
-        is_verified:row.user_id===officialResult.data?.owner_id,
-        avatar_signed_url:avatarSigned,
-        status_count:rows.filter(candidate=>candidate.user_id===row.user_id).length,
-        media_signed_url:playableMedia,
-        view_count:views.length,
-        viewer_names:views.map((view:any)=>(statusActorMap.get(view.viewer_id) as any)?.display_name||'Guftin member'),
-        liker_names:likes.map((like:any)=>(statusActorMap.get(like.user_id) as any)?.display_name||'Guftin member'),
-        like_count:likes.length,
-        liked_by_me:likes.some((like:any)=>like.user_id===session.user.id)
-      };
-    }));
-    setStatuses(mapped);
-    void AsyncStorage.setItem(statusCacheKey,JSON.stringify(mapped)).catch(()=>{});
-  },[session,getSignedMediaUrl]);
+      setSelectedStatus({...status,media_signed_url:localMedia});
+      if(!status.viewed_by_me&&status.user_id!==session.user.id){
+        const {error}=await supabase.from('kc_status_views').upsert({status_id:status.id,viewer_id:session.user.id},{onConflict:'status_id,viewer_id',ignoreDuplicates:true});
+        if(error)console.warn('Status view not recorded:',error.message);
+        else{void dispatchPush('status_view',status.id);setStatuses(prev=>prev.map(x=>x.id===status.id?{...x,viewed_by_me:true,view_count:(x.view_count||0)+1}:x));}
+      }
+    }catch(error:any){Alert.alert('Status could not open',error?.message||'Please try again.');}
+    finally{setStatusOpening(false);}
+  };
 
   const toggleStatusLike=async(status:any)=>{
     if(!session||status.user_id===session.user.id)return;
@@ -4335,12 +4307,12 @@ function GuftinApp() {
       </View>
       <Text style={{fontSize:16,fontWeight:'900',color:C.ink,marginBottom:4}}>Recent updates</Text>
       <Text style={{fontSize:11,color:C.muted,marginBottom:10}}>{new Set(statuses.map((item:any)=>item.user_id)).size} people · {statuses.length} updates shared in the last 24 hours</Text>
-      {statuses.length===0?<Text style={{color:C.muted,textAlign:'center',padding:30}}>No active statuses from your contacts yet.</Text>:statuses.map((status:any)=><View key={status.id} style={{padding:14,borderBottomWidth:1,borderColor:C.line,flexDirection:'row',gap:12}}>
+      {statuses.length===0?<Text style={{color:C.muted,textAlign:'center',padding:30}}>No active statuses from your contacts yet.</Text>:statuses.map((status:any)=><TouchableOpacity key={status.id} onPress={()=>void openStatus(status)} activeOpacity={0.8} style={{padding:14,borderBottomWidth:1,borderColor:C.line,flexDirection:'row',gap:12}}>
         <Avatar label={initials(status.display_name)} color={colorFor(status.user_id)} size={46} uri={status.avatar_signed_url}/>
         <View style={{flex:1}}>
           <View style={{flexDirection:'row',alignItems:'center',gap:5,flexWrap:'wrap'}}><Text style={{fontWeight:'900',color:C.ink}}>{status.user_id===session.user.id?'You':status.display_name}{status.username?'  @'+status.username:''}</Text>{status.is_verified?<VerifiedBadge label="Verified Guftin Official account"/>:null}</View>
-          {status.media_signed_url?(status.media_url?.toLowerCase().match(/\.(mp4|mov|m4v)$/)?<VideoBubble uri={status.media_signed_url}/>:<Image source={{uri:status.media_signed_url}} style={{width:210,height:190,borderRadius:14,marginTop:8}} resizeMode="cover"/>):null}
-          {status.caption?<Text style={{color:C.ink,lineHeight:20,marginTop:5}}>{status.caption}</Text>:null}
+          <Text style={{color:status.viewed_by_me?C.muted:C.green,fontSize:11,fontWeight:'900',marginTop:8}}>{status.media_url?(status.viewed_by_me?'Viewed · Tap to replay':'New status · Tap to view'):'Text status · Tap to read'}</Text>
+          {status.caption?<Text numberOfLines={2} style={{color:C.ink,lineHeight:20,marginTop:5}}>{status.caption}</Text>:null}
           <Text style={{color:C.muted,fontSize:10,marginTop:5}}>{timeLabel(status.created_at)} · {status.status_count} status update{status.status_count===1?'':'s'} from this person</Text>
           {status.user_id===session.user.id?<View style={{marginTop:8,padding:10,borderRadius:12,backgroundColor:C.paper}}>
             <Text style={{fontSize:11,color:C.green,fontWeight:'900'}}>◉ {status.view_count||0} views  ·  ♥ {status.like_count||0} likes</Text>
@@ -4350,7 +4322,7 @@ function GuftinApp() {
             <Text style={{fontSize:11,fontWeight:'900',color:status.liked_by_me?'#c74768':C.green}}>{status.liked_by_me?'♥ Liked':'♡ Like status'}</Text>
           </Btn>}
         </View>
-      </View>)}
+      </TouchableOpacity>)}
     </ScrollView>:null}
     {tab==='Channels'?<ScrollView contentContainerStyle={{padding:18,paddingBottom:30}}>
       <View style={{backgroundColor:C.paper,borderRadius:20,padding:18,marginBottom:16}}>
@@ -4553,6 +4525,20 @@ function GuftinApp() {
         <Text style={{color:C.ink,fontWeight:'800',marginTop:10}}>Sync interval</Text><View style={{flexDirection:'row',gap:8,marginTop:10}}>{[15,30,60].map(seconds=><Btn key={seconds} onPress={()=>setSyncIntervalSeconds(seconds)} style={{flex:1,padding:12,borderRadius:12,backgroundColor:syncIntervalSeconds===seconds?C.green:C.paper,alignItems:'center'}}><Text style={{color:syncIntervalSeconds===seconds?'#fff':C.ink,fontWeight:'800'}}>{seconds}s</Text></Btn>)}</View>
         <Btn onPress={()=>setSettingsOpen(false)} style={{backgroundColor:C.green,padding:15,borderRadius:14,alignItems:'center',marginTop:20}}><Text style={{color:'#fff',fontWeight:'900'}}>Done</Text></Btn>
       </View></View>
+    </Modal>
+
+    <Modal visible={!!selectedStatus} transparent animationType="fade" onRequestClose={()=>setSelectedStatus(null)}>
+      <View style={{flex:1,backgroundColor:'#000e',justifyContent:'center',padding:18}}>
+        <View style={{backgroundColor:C.white,borderRadius:22,padding:18,maxHeight:'88%'}}>
+          <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginBottom:12}}>
+            <Text style={{fontSize:17,fontWeight:'900',color:C.ink}}>{selectedStatus?.display_name||'Status'}</Text>
+            <Btn onPress={()=>setSelectedStatus(null)} style={{padding:8}}><Text style={{fontSize:18,color:C.ink}}>✕</Text></Btn>
+          </View>
+          {selectedStatus?.media_signed_url?(selectedStatus?.media_url?.toLowerCase().match(/\.(mp4|mov|m4v)$/)?<VideoBubble uri={selectedStatus.media_signed_url}/>:<Image source={{uri:selectedStatus.media_signed_url}} style={{width:'100%',height:360,borderRadius:14}} resizeMode="contain"/>):null}
+          {selectedStatus?.caption?<Text style={{color:C.ink,fontSize:15,lineHeight:22,marginTop:12}}>{selectedStatus.caption}</Text>:null}
+          <Text style={{color:C.muted,fontSize:11,marginTop:10}}>{selectedStatus?.view_count||0} views · {selectedStatus?.like_count||0} likes</Text>
+        </View>
+      </View>
     </Modal>
 
     <Modal visible={statusComposer} transparent animationType="fade" onRequestClose={()=>setStatusComposer(false)}>
