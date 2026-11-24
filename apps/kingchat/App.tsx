@@ -2186,6 +2186,10 @@ function GuftinApp() {
     if(chatPin){startPinFlow('unlock-chat',chat);return;}
     setPeerLastReadAt(null);
     setActive(chat);
+    // A username-added contact has a local-only pending:<user UUID> placeholder,
+    // not a persisted conversation UUID. Never send that placeholder to Postgres.
+    // The real conversation is created by ensureActiveDirectConversation() on send/call.
+    if(chat.pendingContactId || chat.id.startsWith('pending:'))return;
     // The active-chat effect performs the single initial load; do not fetch twice.
     void supabase.from('kc_conversation_members').update({hidden_at:null})
       .eq('conversation_id',chat.id).eq('user_id',session.user.id);
