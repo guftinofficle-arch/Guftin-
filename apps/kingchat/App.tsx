@@ -908,6 +908,10 @@ function GuftinApp() {
   const [appLockEnabled,setAppLockEnabled]=useState(false);
   const [pinBusy,setPinBusy]=useState(false);
   const [showReadReceipts,setShowReadReceipts]=useState(true);
+  const [lastSeenVisibility,setLastSeenVisibility]=useState<'everyone'|'contacts'|'nobody'|'selected'>('contacts');
+  const [profilePhotoVisibility,setProfilePhotoVisibility]=useState<'everyone'|'contacts'|'nobody'|'selected'>('everyone');
+  const [aboutVisibility,setAboutVisibility]=useState<'everyone'|'contacts'|'nobody'|'selected'>('everyone');
+  const [privacySettingsLoaded,setPrivacySettingsLoaded]=useState(false);
   const [mediaAutoDownload,setMediaAutoDownload]=useState(false);
   const [onlineVisibility,setOnlineVisibility]=useState(true);
   const [autoSync,setAutoSync]=useState(true);
@@ -1752,6 +1756,60 @@ function GuftinApp() {
     }catch(error:any){Alert.alert('Saved Items unavailable',error?.message||'Please try again.');}
     finally{setSavedItemsLoading(false);}
   };
+
+  const savePrivacyPreferences=async(patch:any)=>{
+    if(!session?.user?.id)return false;
+    const payload={
+      user_id:session.user.id,
+      last_seen_visibility:lastSeenVisibility,
+      online_visibility:onlineVisibility?'everyone':'nobody',
+      profile_photo_visibility:profilePhotoVisibility,
+      about_visibility:aboutVisibility,
+      read_receipts_enabled:showReadReceipts,
+      group_invites_visibility:'contacts',
+      ...patch,
+      updated_at:new Date().toISOString()
+    };
+    const {error}=await supabase.from('kc_user_privacy_settings').upsert(payload,{onConflict:'user_id'});
+    if(error){Alert.alert('Privacy setting not saved',error.message);return false;}
+    return true;
+  };
+
+  const choosePrivacyVisibility=(setting:'last_seen_visibility'|'profile_photo_visibility'|'about_visibility',label:string,current:string,setValue:(v:any)=>void)=>{
+    const options=['everyone','contacts','nobody','selected'];
+    Alert.alert(label,'Who can see this information?',[
+      ...options.map(value=>({text:(value===current?'✓ ':'')+value[0].toUpperCase()+value.slice(1),onPress:()=>void (async()=>{
+        const updated=await savePrivacyPreferences({[setting]:value});
+        if(updated)setValue(value);
+      })()})),
+      {text:'Cancel',style:'cancel'}
+    ]);
+  };
+
+  useEffect(()=>{
+    let mounted=true;
+    if(!session?.user?.id){setPrivacySettingsLoaded(false);return;}
+    void (async()=>{
+      const {data,error}=await supabase.from('kc_user_privacy_settings')
+        .select('last_seen_visibility,online_visibility,profile_photo_visibility,about_visibility,read_receipts_enabled')
+        .eq('user_id',session.user.id).maybeSingle();
+      if(error){console.warn('Privacy settings could not be loaded:',error.message);if(mounted)setPrivacySettingsLoaded(true);return;}
+      if(data){
+        if(mounted){
+          setLastSeenVisibility(data.last_seen_visibility||'contacts');
+          setOnlineVisibility(data.online_visibility!=='nobody');
+          setProfilePhotoVisibility(data.profile_photo_visibility||'everyone');
+          setAboutVisibility(data.about_visibility||'everyone');
+          setShowReadReceipts(data.read_receipts_enabled!==false);
+        }
+      }else{
+        const {error:insertError}=await supabase.from('kc_user_privacy_settings').insert({user_id:session.user.id});
+        if(insertError)console.warn('Default privacy settings could not be created:',insertError.message);
+      }
+      if(mounted)setPrivacySettingsLoaded(true);
+    })();
+    return ()=>{mounted=false;};
+  },[session?.user?.id]);
 
   const removeSavedItem=async(id:string)=>{
     if(!session?.user?.id)return;
@@ -4744,8 +4802,18 @@ function GuftinApp() {
         })()} style={{backgroundColor:C.mint,padding:12,borderRadius:13,marginBottom:7}}>
           <Text style={{color:C.green,fontWeight:'900',textAlign:'center'}}>Allow full-screen incoming calls</Text>
         </Btn>
-        <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingVertical:12}}><View style={{flex:1,paddingRight:12}}><Text style={{color:C.ink,fontWeight:'800'}}>Show online status</Text><Text style={{color:C.muted,fontSize:11}}>Let contacts see when you are online</Text></View><Switch value={onlineVisibility} onValueChange={setOnlineVisibility} trackColor={{true:C.green}}/></View>
-        <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingVertical:12}}><View style={{flex:1,paddingRight:12}}><Text style={{color:C.ink,fontWeight:'800'}}>Read receipts</Text><Text style={{color:C.muted,fontSize:11}}>Show seen status on messages</Text></View><Switch value={showReadReceipts} onValueChange={setShowReadReceipts} trackColor={{true:C.green}}/></View>
+        <Text style={{color:C.green,fontWeight:'900',marginTop:8,marginBottom:2}}>Privacy controls</Text>
+        <Btn onPress={()=>choosePrivacyVisibility('last_seen_visibility','Last seen',lastSeenVisibility,setLastSeenVisibility)} style={{paddingVertical:11,borderBottomWidth:1,borderColor:C.line}}>
+          <Text style={{color:C.ink,fontWeight:'800'}}>Last Seen</Text><Text style={{color:C.muted,fontSize:11,marginTop:3}}>{lastSeenVisibility[0].toUpperCase()+lastSeenVisibility.slice(1)}</Text>
+        </Btn>
+        <Btn onPress={()=>choosePrivacyVisibility('profile_photo_visibility','Profile picture',profilePhotoVisibility,setProfilePhotoVisibility)} style={{paddingVertical:11,borderBottomWidth:1,borderColor:C.line}}>
+          <Text style={{color:C.ink,fontWeight:'800'}}>Profile Picture</Text><Text style={{color:C.muted,fontSize:11,marginTop:3}}>{profilePhotoVisibility[0].toUpperCase()+profilePhotoVisibility.slice(1)}</Text>
+        </Btn>
+        <Btn onPress={()=>choosePrivacyVisibility('about_visibility','About',aboutVisibility,setAboutVisibility)} style={{paddingVertical:11,borderBottomWidth:1,borderColor:C.line}}>
+          <Text style={{color:C.ink,fontWeight:'800'}}>About</Text><Text style={{color:C.muted,fontSize:11,marginTop:3}}>{aboutVisibility[0].toUpperCase()+aboutVisibility.slice(1)}</Text>
+        </Btn>
+        <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingVertical:12}}><View style={{flex:1,paddingRight:12}}><Text style={{color:C.ink,fontWeight:'800'}}>Show online status</Text><Text style={{color:C.muted,fontSize:11}}>Let contacts see when you are online</Text></View><Switch value={onlineVisibility} onValueChange={async value=>{if(await savePrivacyPreferences({online_visibility:value?'everyone':'nobody'}))setOnlineVisibility(value);}} trackColor={{true:C.green}}/></View>
+        <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingVertical:12}}><View style={{flex:1,paddingRight:12}}><Text style={{color:C.ink,fontWeight:'800'}}>Read receipts</Text><Text style={{color:C.muted,fontSize:11}}>Show seen status on messages</Text></View><Switch value={showReadReceipts} onValueChange={async value=>{if(await savePrivacyPreferences({read_receipts_enabled:value}))setShowReadReceipts(value);}} trackColor={{true:C.green}}/></View>
         <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingVertical:12}}><View style={{flex:1,paddingRight:12}}><Text style={{color:C.ink,fontWeight:'800'}}>Push notifications on this phone</Text><Text style={{color:C.muted,fontSize:11}}>Messages, status likes/views, and incoming call alerts with Accept/Decline</Text></View><Switch value={pushEnabled} disabled={pushBusy} onValueChange={enabled=>enabled?void enablePushNotifications():void disablePushNotifications()} trackColor={{true:C.green}}/></View>
         <Btn disabled={pushBusy||!session} onPress={()=>void testPushNotifications()} style={{backgroundColor:C.mint,padding:12,borderRadius:13,marginTop:2,marginBottom:7,opacity:pushBusy ? .55 : 1}}>
           <Text style={{color:C.green,fontWeight:'900',textAlign:'center'}}>{pushBusy?'Checking notification service…':'Send test notification to this phone'}</Text>
