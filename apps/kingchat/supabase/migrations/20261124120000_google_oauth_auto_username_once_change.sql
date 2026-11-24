@@ -45,9 +45,9 @@ begin
   from public.kc_profiles p where p.id=v_uid for update;
 
   if v_existing is null then
-    v_base := pg_catalog.trim(both '_' from pg_catalog.regexp_replace(
+    v_base := pg_catalog.btrim(pg_catalog.regexp_replace(
       pg_catalog.lower(v_name), '[^a-z0-9]+', '_', 'g'
-    ));
+    ), '_');
     v_base := left(v_base,18);
     if length(v_base)<3 then v_base := 'guftin_user'; end if;
 
