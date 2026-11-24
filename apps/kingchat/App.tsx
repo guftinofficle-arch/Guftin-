@@ -850,6 +850,7 @@ function GuftinApp() {
   const [messages,setMessages]=useState<Record<string,Message[]>>({});
   const [peerLastReadAt,setPeerLastReadAt]=useState<string|null>(null);
   const activeConversationIdRef=useRef<string|null>(null);
+  const activeConversationKindRef=useRef<string|null>(null);
   const chatMessagesListRef=useRef<FlatList<Message>|null>(null);
   const loadMessagesRef=useRef<((id:string)=>Promise<void>)|null>(null);
   const flushPendingMessagesRef=useRef<(()=>Promise<void>)|null>(null);
@@ -863,7 +864,8 @@ function GuftinApp() {
   },[]);
   useEffect(()=>{
     activeConversationIdRef.current=active?.id||null;
-  },[active?.id]);
+    activeConversationKindRef.current=active?.kind||null;
+  },[active?.id,active?.kind]);
   const [draft,setDraft]=useState('');
   const [search,setSearch]=useState('');
   const [searching,setSearching]=useState(false);
@@ -2127,7 +2129,7 @@ function GuftinApp() {
       });
     }
     const channelHistoryKey='guftin-channel-history-loaded:'+session.user.id+':'+conversationId;
-    const isChannelHistory=active?.kind==='channel';
+    const isChannelHistory=activeConversationIdRef.current===conversationId&&activeConversationKindRef.current==='channel';
     if(isChannelHistory){
       try{
         if(await AsyncStorage.getItem(channelHistoryKey)==='1')return;
