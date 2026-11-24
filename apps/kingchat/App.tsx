@@ -4174,6 +4174,7 @@ function GuftinApp() {
           <Text style={{textAlign:'right',fontSize:9,color:C.muted,marginTop:5}}>
             {timeLabel(item.created_at)}{item.pending?' · Queued':item.mine ? " · " + (showReadReceipts && peerLastReadAt && new Date(peerLastReadAt).getTime() >= new Date(item.created_at).getTime() ? "✓✓ Read" : deliveredByMessage[item.id] ? "✓✓ Delivered" : "✓ Sent") : ""}
           </Text>
+          {item.pending?<Btn onPress={()=>{void flushPendingMessagesRef.current?.();void flushPendingMediaRef.current?.();}} style={{marginTop:6,alignSelf:'flex-end',paddingHorizontal:10,paddingVertical:5,borderRadius:9,backgroundColor:C.mint}}><Text style={{fontSize:10,color:C.green,fontWeight:'900'}}>↻ Retry sending</Text></Btn>:null}
         </TouchableOpacity>}/>
       <View style={{flexDirection:'row',alignItems:'center',padding:11,gap:8,backgroundColor:C.white,borderTopWidth:1,borderColor:C.line}}>
         {active.kind==='channel'&&!active.isChannelOwner
