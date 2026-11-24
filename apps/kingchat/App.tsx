@@ -260,7 +260,7 @@ const THEMES:any = {
   night:{ink:'#edf3ff',muted:'#9baac0',green:'#77b9ff',mint:'#223d5d',paper:'#101a2b',white:'#1a2940',line:'#2a3b54',red:'#ff8894'}
 };
 type Chat = { id:string; name:string; avatar:string; avatarUrl?:string; color:string; last:string; time:string; unread:number; online:boolean; kind:string; lastAt:number; isOfficial?:boolean; isVerified?:boolean; isChannelOwner?:boolean; inviteCode?:string; isPublic?:boolean; ownerId?:string; description?:string; hasConversationActivity?:boolean; hasCallActivity?:boolean; pendingContactId?:string; hasPendingActivity?:boolean };
-type Message = { id:string; conversation_id:string; sender_id:string|null; body:string|null; message_type:string; attachment_url?:string|null; created_at:string; mine:boolean; deleted_at?:string|null; pending?:boolean };
+type Message = { id:string; conversation_id:string; sender_id:string|null; body:string|null; message_type:string; attachment_url?:string|null; created_at:string; edited_at?:string|null; mine:boolean; deleted_at?:string|null; pending?:boolean };
 const sortInboxChats=(items:Chat[])=>items.slice().sort((a,b)=>(Number(!!b.isOfficial)-Number(!!a.isOfficial))||((Number(b.lastAt)||0)-(Number(a.lastAt)||0)));
 const normalizeGuftinPhone=(value:string):string|null=>{
   const raw=String(value||'').trim();
@@ -890,6 +890,13 @@ function GuftinApp() {
   const [advancedCenterOpen,setAdvancedCenterOpen]=useState(false);
   const [advancedCenterLoading,setAdvancedCenterLoading]=useState(false);
   const [advancedCenterRows,setAdvancedCenterRows]=useState<Array<{label:string;count:number;detail:string;ok:boolean}>>([]);
+  const [editModalVisible,setEditModalVisible]=useState(false);
+  const [editingMessage,setEditingMessage]=useState<Message|null>(null);
+  const [editDraft,setEditDraft]=useState('');
+  const [editBusy,setEditBusy]=useState(false);
+  const [editHistoryVisible,setEditHistoryVisible]=useState(false);
+  const [editHistoryLoading,setEditHistoryLoading]=useState(false);
+  const [editHistoryRows,setEditHistoryRows]=useState<any[]>([]);
   const [savedItemsOpen,setSavedItemsOpen]=useState(false);
   const [savedItems,setSavedItems]=useState<any[]>([]);
   const [savedItemsLoading,setSavedItemsLoading]=useState(false);
@@ -1289,7 +1296,7 @@ function GuftinApp() {
       const directConversationIds=rows.filter(r=>r.conversation?.kind==='direct').map(r=>r.conversation_id).filter(Boolean);
       const [memberResult,messageResult,hiddenResult,channelResult,callResult]=await Promise.all([
         supabase.from('kc_conversation_members').select('conversation_id,user_id,last_read_at,joined_at').in('conversation_id',ids),
-        supabase.from('kc_messages').select('id,conversation_id,sender_id,body,message_type,created_at,deleted_at')
+        supabase.from('kc_messages').select('id,conversation_id,sender_id,body,message_type,created_at,edited_at,deleted_at')
           .in('conversation_id',ids).is('deleted_at',null).order('created_at',{ascending:false}).limit(500),
         supabase.from('kc_message_hidden').select('message_id').eq('user_id',session.user.id),
         supabase.from('kc_channels').select('conversation_id,owner_id,title,description,logo_path,invite_code,is_public,is_official,is_verified').in('conversation_id',ids),
@@ -1962,6 +1969,54 @@ function GuftinApp() {
     Alert.alert('Report submitted','Thank you. This message has been reported for review.');
   };
 
+  const startEditMessage=(item:Message)=>{
+    if(!item.mine||item.message_type!=='text'||item.deleted_at||item.pending)return;
+    if(Date.now()-new Date(item.created_at).getTime()>15*60*1000){Alert.alert('Edit time expired','Messages can only be edited for 15 minutes after sending.');return;}
+    setEditingMessage(item);setEditDraft(item.body||'');setEditModalVisible(true);
+  };
+
+  const saveEditedMessage=async()=>{
+    const item=editingMessage;
+    const body=editDraft.trim();
+    if(!item||!session?.user?.id||!deviceIdentity||editBusy)return;
+    if(!body){Alert.alert('Message is empty','Enter the updated message text.');return;}
+    if(Date.now()-new Date(item.created_at).getTime()>15*60*1000){Alert.alert('Edit time expired','Messages can only be edited for 15 minutes after sending.');return;}
+    setEditBusy(true);
+    try{
+      const {data:members,error:membersError}=await supabase.from('kc_conversation_members').select('user_id').eq('conversation_id',item.conversation_id);
+      if(membersError)throw membersError;
+      const memberIds=[...new Set((members||[]).map((row:any)=>row.user_id))] as string[];
+      if(!memberIds.includes(session.user.id))throw new Error('You are no longer a member of this conversation.');
+      const {data:devices,error:devicesError}=await supabase.from('kc_e2ee_devices').select('id,user_id,public_key').in('user_id',memberIds).is('revoked_at',null);
+      if(devicesError)throw devicesError;
+      const registeredUsers=new Set((devices||[]).map((device:any)=>device.user_id));
+      if(memberIds.some(id=>!registeredUsers.has(id)))throw new Error('Every conversation member must have a registered encryption device before this message can be edited.');
+      const encryptedBody=encryptMessageForDevices(body,devices||[],deviceIdentity);
+      const {data,error}=await supabase.rpc('kc_edit_message',{p_message_id:item.id,p_new_body_envelope:encryptedBody});
+      if(error)throw error;
+      const editedAt=typeof data==='string'?data:new Date().toISOString();
+      setMessages(prev=>({...prev,[item.conversation_id]:(prev[item.conversation_id]||[]).map(message=>message.id===item.id?{...message,body,edited_at:editedAt}:message)}));
+      setChats(prev=>prev.map(chat=>chat.id===item.conversation_id?{...chat,last:body}:chat));
+      setEditModalVisible(false);setEditingMessage(null);setEditDraft('');
+      Alert.alert('Message edited','Your encrypted message was updated. Previous versions are retained in edit history.');
+    }catch(error:any){Alert.alert('Message not edited',error?.message||'Please try again.');}
+    finally{setEditBusy(false);}
+  };
+
+  const loadMessageEditHistory=async(item:Message)=>{
+    if(!deviceIdentity){Alert.alert('Secure device unavailable','Your local encryption key is not ready.');return;}
+    setEditHistoryLoading(true);
+    try{
+      const rows=await upgrade20.listMessageEditHistory(item.id);
+      const mapped=(rows||[]).map((row:any)=>{
+        const open=(value:string)=>{try{return value?.startsWith(E2EE_PREFIX)?decryptMessageForDevice(value,deviceIdentity):'Encrypted history entry';}catch{return 'Could not decrypt this history entry on this device.';}};
+        return {id:row.id,edited_at:row.edited_at,previous:open(row.previous_body_envelope),updated:open(row.new_body_envelope)};
+      });
+      setEditHistoryRows(mapped);setEditHistoryVisible(true);
+    }catch(error:any){Alert.alert('Edit history unavailable',error?.message||'Please try again.');}
+    finally{setEditHistoryLoading(false);}
+  };
+
   const deleteMessage=async(item:Message)=>{
     if(!session)return;
     const hideForMe=async()=>{
@@ -1982,7 +2037,10 @@ function GuftinApp() {
         if(storageError)console.warn('Message removed but its stored media cleanup failed:',storageError.message);
       }
     };
-    const options:any[]=[{text:'Save to Saved Items',onPress:()=>void (async()=>{const {error}=await supabase.from('kc_saved_items').upsert({user_id:session.user.id,message_id:item.id,conversation_id:item.conversation_id},{onConflict:'user_id,message_id'});if(error){Alert.alert('Could not save message',error.message);return;}Alert.alert('Saved','This message is now in Saved Items.');})()},{text:'Delete for me',onPress:()=>void hideForMe()}];
+    const options:any[]=[];
+    if(item.mine&&item.message_type==='text'&&!item.deleted_at&&!item.pending&&Date.now()-new Date(item.created_at).getTime()<=15*60*1000)options.push({text:'Edit message',onPress:()=>startEditMessage(item)});
+    if(item.mine&&item.edited_at)options.push({text:'View edit history',onPress:()=>void loadMessageEditHistory(item)});
+    options.push({text:'Save to Saved Items',onPress:()=>void (async()=>{const {error}=await supabase.from('kc_saved_items').upsert({user_id:session.user.id,message_id:item.id,conversation_id:item.conversation_id},{onConflict:'user_id,message_id'});if(error){Alert.alert('Could not save message',error.message);return;}Alert.alert('Saved','This message is now in Saved Items.');})()},{text:'Delete for me',onPress:()=>void hideForMe()}];
     if(item.mine&&!item.deleted_at)options.push({text:'Delete for everyone',style:'destructive',onPress:()=>void deleteForEveryone()});
     if(!item.mine&&item.sender_id){
       options.push({text:'Report message',style:'destructive',onPress:()=>{
@@ -2421,7 +2479,7 @@ function GuftinApp() {
       let offset=0;
       while(true){
         const page=await supabase.from('kc_messages')
-          .select('id,conversation_id,sender_id,body,message_type,attachment_url,created_at,deleted_at')
+          .select('id,conversation_id,sender_id,body,message_type,attachment_url,created_at,edited_at,deleted_at')
           .eq('conversation_id',conversationId)
           .order('created_at',{ascending:true}).range(offset,offset+199);
         if(page.error){if(!isConnectivityFailure(page.error))Alert.alert('Channel history could not load',page.error.message);return;}
@@ -2432,7 +2490,7 @@ function GuftinApp() {
       }
     }else{
       const result=await supabase.from('kc_messages')
-        .select('id,conversation_id,sender_id,body,message_type,attachment_url,created_at,deleted_at')
+        .select('id,conversation_id,sender_id,body,message_type,attachment_url,created_at,edited_at,deleted_at')
         .eq('conversation_id',conversationId)
         .order('created_at',{ascending:true}).limit(200);
       if(result.error){if(!isConnectivityFailure(result.error))Alert.alert('Messages could not load',result.error.message);return;}
@@ -4596,7 +4654,7 @@ function GuftinApp() {
           </View>:<Text style={{color:C.ink,fontSize:14,lineHeight:21}}>{item.body||'Attachment'}</Text>}
           {!item.deleted_at&&['image','video'].includes(item.message_type)&&item.attachment_url?<Btn onPress={()=>void saveMediaToGallery(item)} style={{marginTop:7,paddingVertical:6,paddingHorizontal:9,borderRadius:9,backgroundColor:C.paper,alignSelf:'flex-start'}}><Text style={{fontSize:11,color:C.green,fontWeight:'800'}}>↓ Save to gallery</Text></Btn>:null}
           <Text style={{textAlign:'right',fontSize:9,color:C.muted,marginTop:5}}>
-            {timeLabel(item.created_at)}{item.pending?' · Queued':item.mine ? " · " + (showReadReceipts && peerLastReadAt && new Date(peerLastReadAt).getTime() >= new Date(item.created_at).getTime() ? "✓✓ Read" : deliveredByMessage[item.id] ? "✓✓ Delivered" : "✓ Sent") : ""}
+            {timeLabel(item.created_at)}{item.edited_at?' · Edited':''}{item.pending?' · Queued':item.mine ? " · " + (showReadReceipts && peerLastReadAt && new Date(peerLastReadAt).getTime() >= new Date(item.created_at).getTime() ? "✓✓ Read" : deliveredByMessage[item.id] ? "✓✓ Delivered" : "✓ Sent") : ""}
           </Text>
           {item.pending?<Btn onPress={()=>{void flushPendingMessagesRef.current?.(true);void flushPendingMediaRef.current?.(true);}} style={{marginTop:6,alignSelf:'flex-end',paddingHorizontal:10,paddingVertical:5,borderRadius:9,backgroundColor:C.mint}}><Text style={{fontSize:10,color:C.green,fontWeight:'900'}}>↻ Retry sending</Text></Btn>:null}
         </TouchableOpacity>}/>
@@ -4925,6 +4983,40 @@ function GuftinApp() {
           <Btn onPress={()=>{setFolderModalVisible(false);setFolderTargetChat(null);}} style={{padding:9,alignItems:'center'}}><Text style={{color:C.muted,fontWeight:'800'}}>Cancel</Text></Btn>
         </View>
       </View>
+    </Modal>
+
+    <Modal visible={editModalVisible} transparent animationType="fade" onRequestClose={()=>{if(!editBusy)setEditModalVisible(false);}}>
+      <View style={{flex:1,backgroundColor:'#0009',justifyContent:'center',padding:22}}>
+        <View style={{backgroundColor:C.white,borderRadius:20,padding:18}}>
+          <Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>Edit message</Text>
+          <Text style={{fontSize:11,color:C.muted,marginTop:5,marginBottom:12}}>Encrypted again for every active device. Editing is available for 15 minutes after sending.</Text>
+          <TextInput value={editDraft} onChangeText={setEditDraft} multiline maxLength={4000} autoFocus style={{minHeight:110,maxHeight:190,backgroundColor:C.paper,borderRadius:13,padding:13,color:C.ink,textAlignVertical:'top'}}/>
+          <View style={{flexDirection:'row',justifyContent:'flex-end',gap:10,marginTop:14}}>
+            <Btn disabled={editBusy} onPress={()=>setEditModalVisible(false)} style={{padding:12}}><Text style={{color:C.muted,fontWeight:'800'}}>Cancel</Text></Btn>
+            <Btn disabled={editBusy||!editDraft.trim()} onPress={()=>void saveEditedMessage()} style={{backgroundColor:C.green,paddingHorizontal:17,paddingVertical:12,borderRadius:11}}>{editBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Save edit</Text>}</Btn>
+          </View>
+        </View>
+      </View>
+    </Modal>
+
+    <Modal visible={editHistoryVisible} animationType="slide" onRequestClose={()=>setEditHistoryVisible(false)}>
+      <SafeAreaView style={{flex:1,backgroundColor:C.paper}}>
+        <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',padding:18,backgroundColor:C.white,borderBottomWidth:1,borderColor:C.line}}>
+          <Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>Message edit history</Text>
+          <Btn onPress={()=>setEditHistoryVisible(false)} style={{padding:8}}><Text style={{fontSize:25,color:C.ink}}>×</Text></Btn>
+        </View>
+        {editHistoryLoading?<ActivityIndicator color={C.green} style={{marginTop:25}}/>:null}
+        <ScrollView contentContainerStyle={{padding:16,gap:10}}>
+          {!editHistoryRows.length&&!editHistoryLoading?<Text style={{color:C.muted,textAlign:'center',padding:25}}>No previous edits were found.</Text>:null}
+          {editHistoryRows.map(row=><View key={row.id} style={{backgroundColor:C.white,borderRadius:13,padding:14,borderWidth:1,borderColor:C.line}}>
+            <Text style={{color:C.muted,fontSize:10,fontWeight:'800'}}>EDITED {timeLabel(row.edited_at)}</Text>
+            <Text style={{color:C.red,fontSize:11,fontWeight:'900',marginTop:9}}>PREVIOUS VERSION</Text>
+            <Text style={{color:C.ink,marginTop:4}}>{row.previous}</Text>
+            <Text style={{color:C.green,fontSize:11,fontWeight:'900',marginTop:10}}>UPDATED VERSION</Text>
+            <Text style={{color:C.ink,marginTop:4}}>{row.updated}</Text>
+          </View>)}
+        </ScrollView>
+      </SafeAreaView>
     </Modal>
 
     <Modal visible={advancedCenterOpen} animationType="slide" onRequestClose={()=>setAdvancedCenterOpen(false)}>
