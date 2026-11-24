@@ -4316,7 +4316,7 @@ function GuftinApp() {
         <View style={{flex:1}}>
           <View style={{flexDirection:'row',alignItems:'center',gap:5,flexWrap:'wrap'}}><Text style={{fontWeight:'900',color:C.ink}}>{status.user_id===session.user.id?'You':status.display_name}{status.username?'  @'+status.username:''}</Text>{status.is_verified?<VerifiedBadge label="Verified Guftin Official account"/>:null}</View>
           <Text style={{color:status.viewed_by_me?C.muted:C.green,fontSize:11,fontWeight:'900',marginTop:8}}>{status.media_url?(status.viewed_by_me?'Viewed · Tap to replay':'New status · Tap to view'):'Text status · Tap to read'}</Text>
-          <Btn onPress={()=>void openStatus(status)} disabled={statusOpening} style={{alignSelf:'flex-start',marginTop:7,paddingHorizontal:11,paddingVertical:6,borderRadius:9,backgroundColor:C.mint}}><Text style={{fontSize:10,color:C.green,fontWeight:'900'}}>Open status</Text></Btn>
+          <Btn onPress={()=>void openStatus(status)} disabled={statusOpening} style={{alignSelf:'flex-start',marginTop:7,paddingHorizontal:11,paddingVertical:6,borderRadius:9,backgroundColor:C.mint}}><Text style={{fontSize:10,color:C.green,fontWeight:'900'}}>View status</Text></Btn>
           {status.caption?<Text numberOfLines={2} style={{color:C.ink,lineHeight:20,marginTop:5}}>{status.caption}</Text>:null}
           <Text style={{color:C.muted,fontSize:10,marginTop:5}}>{timeLabel(status.created_at)} · {status.status_count} status update{status.status_count===1?'':'s'} from this person</Text>
           {status.user_id===session.user.id?<View style={{marginTop:8,padding:10,borderRadius:12,backgroundColor:C.paper}}>
