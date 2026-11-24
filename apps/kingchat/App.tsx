@@ -1970,7 +1970,7 @@ function GuftinApp() {
   };
 
   const startEditMessage=(item:Message)=>{
-    if(!item.mine||item.message_type!=='text'||item.deleted_at||item.pending)return;
+    if(active?.kind==='channel'||!item.mine||item.message_type!=='text'||item.deleted_at||item.pending)return;
     if(Date.now()-new Date(item.created_at).getTime()>15*60*1000){Alert.alert('Edit time expired','Messages can only be edited for 15 minutes after sending.');return;}
     setEditingMessage(item);setEditDraft(item.body||'');setEditModalVisible(true);
   };
@@ -1996,7 +1996,8 @@ function GuftinApp() {
       if(error)throw error;
       const editedAt=typeof data==='string'?data:new Date().toISOString();
       setMessages(prev=>({...prev,[item.conversation_id]:(prev[item.conversation_id]||[]).map(message=>message.id===item.id?{...message,body,edited_at:editedAt}:message)}));
-      setChats(prev=>prev.map(chat=>chat.id===item.conversation_id?{...chat,last:body}:chat));
+      const currentConversationMessages=messages[item.conversation_id]||[];
+      if(currentConversationMessages[currentConversationMessages.length-1]?.id===item.id)setChats(prev=>prev.map(chat=>chat.id===item.conversation_id?{...chat,last:body}:chat));
       setEditModalVisible(false);setEditingMessage(null);setEditDraft('');
       Alert.alert('Message edited','Your encrypted message was updated. Previous versions are retained in edit history.');
     }catch(error:any){Alert.alert('Message not edited',error?.message||'Please try again.');}
@@ -2038,8 +2039,8 @@ function GuftinApp() {
       }
     };
     const options:any[]=[];
-    if(item.mine&&item.message_type==='text'&&!item.deleted_at&&!item.pending&&Date.now()-new Date(item.created_at).getTime()<=15*60*1000)options.push({text:'Edit message',onPress:()=>startEditMessage(item)});
-    if(item.mine&&item.edited_at)options.push({text:'View edit history',onPress:()=>void loadMessageEditHistory(item)});
+    if(active?.kind!=='channel'&&item.mine&&item.message_type==='text'&&!item.deleted_at&&!item.pending&&Date.now()-new Date(item.created_at).getTime()<=15*60*1000)options.push({text:'Edit message',onPress:()=>startEditMessage(item)});
+    if(active?.kind!=='channel'&&item.mine&&item.edited_at)options.push({text:'View edit history',onPress:()=>void loadMessageEditHistory(item)});
     options.push({text:'Save to Saved Items',onPress:()=>void (async()=>{const {error}=await supabase.from('kc_saved_items').upsert({user_id:session.user.id,message_id:item.id,conversation_id:item.conversation_id},{onConflict:'user_id,message_id'});if(error){Alert.alert('Could not save message',error.message);return;}Alert.alert('Saved','This message is now in Saved Items.');})()},{text:'Delete for me',onPress:()=>void hideForMe()}];
     if(item.mine&&!item.deleted_at)options.push({text:'Delete for everyone',style:'destructive',onPress:()=>void deleteForEveryone()});
     if(!item.mine&&item.sender_id){
