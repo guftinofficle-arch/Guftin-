@@ -1887,6 +1887,13 @@ function GuftinApp() {
           void loadInbox();
         }
       })
+      .on('postgres_changes',{event:'DELETE',schema:'public',table:'kc_messages'},payload=>{
+        const removed=payload.old as any;
+        if(removed?.id){
+          setMessages(prev=>Object.fromEntries(Object.entries(prev).map(([conversationId,items]:any)=>[conversationId,items.filter((item:any)=>item.id!==removed.id)])));
+          void loadInbox();
+        }
+      })
       .on('postgres_changes',{event:'UPDATE',schema:'public',table:'kc_conversation_members'},payload=>{
         const member=payload.new as any;
         if(member.conversation_id===activeConversationIdRef.current && member.user_id!==session.user.id){
@@ -3869,7 +3876,7 @@ function GuftinApp() {
       }));
       const groupPhotoSigned=conversation.photo_url?await getSignedMediaUrl(conversation.photo_url):null;
       setGroupEditTitle(conversation.title||'');
-      setChatDetails({conversation:{...conversation,photo_signed_url:groupPhotoSigned},members:details});
+      setChatDetails({conversation:{...conversation,photo_signed_url:groupPhotoSigned},members:details.map((m:any)=>({...m,role:m.user_id===conversation.created_by?'owner':m.role}))});
       setChatDetailsOpen(true);
     }catch(e:any){
       Alert.alert('Details could not load',e?.message||'Please try again.');
