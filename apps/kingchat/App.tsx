@@ -1727,9 +1727,16 @@ function GuftinApp() {
       setMessages(prev=>({...prev,[item.conversation_id]:(prev[item.conversation_id]||[]).filter(m=>m.id!==item.id)}));
     };
     const deleteForEveryone=async()=>{
+      const {data:storedMessage,error:lookupError}=await supabase.from('kc_messages').select('attachment_url').eq('id',item.id).eq('sender_id',session.user.id).maybeSingle();
+      if(lookupError){Alert.alert('Message not deleted',lookupError.message);return;}
       const {error}=await supabase.rpc('kc_delete_message_for_everyone',{p_message_id:item.id});
       if(error){Alert.alert('Message not deleted',error.message);return;}
       setMessages(prev=>({...prev,[item.conversation_id]:(prev[item.conversation_id]||[]).filter(m=>m.id!==item.id)}));
+      const attachmentPath=String(storedMessage?.attachment_url||'');
+      if(attachmentPath&&attachmentPath.startsWith(session.user.id+'/')){
+        const {error:storageError}=await supabase.storage.from('chat-media').remove([attachmentPath]);
+        if(storageError)console.warn('Message removed but its stored media cleanup failed:',storageError.message);
+      }
     };
     const options:any[]=[{text:'Delete for me',onPress:()=>void hideForMe()}];
     if(item.mine&&!item.deleted_at)options.push({text:'Delete for everyone',style:'destructive',onPress:()=>void deleteForEveryone()});
