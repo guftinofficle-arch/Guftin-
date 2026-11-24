@@ -881,6 +881,10 @@ function GuftinApp() {
   const [recording,setRecording]=useState<Audio.Recording|null>(null);
   const [recordingBusy,setRecordingBusy]=useState(false);
   const [settingsOpen,setSettingsOpen]=useState(false);
+  const [accountEmailInput,setAccountEmailInput]=useState('');
+  const [accountEmailPassword,setAccountEmailPassword]=useState('');
+  const [accountEmailBusy,setAccountEmailBusy]=useState(false);
+  const [accountEmailNotice,setAccountEmailNotice]=useState('');
   const [pinModalVisible,setPinModalVisible]=useState(false);
   const [pinEntry,setPinEntry]=useState('');
   const [pinConfirm,setPinConfirm]=useState('');
@@ -1170,6 +1174,13 @@ function GuftinApp() {
     const subscription=BackHandler.addEventListener('hardwareBackPress',onHardwareBack);
     return ()=>subscription.remove();
   },[liveCall,statusComposer,addOpen,settingsOpen,active,searching,tab]);
+
+  useEffect(()=>{
+    if(!session?.user?.id||!session.user.email||!session.user.email_confirmed_at)return;
+    void supabase.rpc('kc_set_email_discoverable',{p_enabled:true}).then(({error})=>{
+      if(error)console.warn('Verified email discovery could not be enabled:',error.message);
+    });
+  },[session?.user?.id,session?.user?.email,session?.user?.email_confirmed_at]);
 
   useEffect(()=>{
     const userId=session?.user?.id;
@@ -3584,6 +3595,22 @@ function GuftinApp() {
     }finally{setOtpBusy(false);}
   };
 
+  const linkEmailToAccount=async()=>{
+    const cleanEmail=accountEmailInput.trim().toLowerCase();
+    if(!session){setAccountEmailNotice('Sign in before linking an email address.');return;}
+    if(!/^\\S+@\\S+\\.\\S+$/.test(cleanEmail)){setAccountEmailNotice('Enter a valid email address.');return;}
+    if(accountEmailPassword.length<8){setAccountEmailNotice('Create a password with at least 8 characters.');return;}
+    setAccountEmailBusy(true);setAccountEmailNotice('');
+    try{
+      const {error}=await supabase.auth.updateUser({email:cleanEmail,password:accountEmailPassword});
+      if(error)throw error;
+      setAccountEmailPassword('');
+      setAccountEmailNotice('A verification link has been sent to this email. Open it to link your email and password to this same Guftin account.');
+    }catch(e:any){
+      setAccountEmailNotice(e?.message||'Could not link this email. Please try again.');
+    }finally{setAccountEmailBusy(false);}
+  };
+
   const signInEmail=async()=>{
     const cleanEmail=email.trim().toLowerCase();
     if(!cleanEmail||!password){setAuthError('Enter your email and password.');return;}
@@ -4392,7 +4419,7 @@ function GuftinApp() {
               <View style={{width:42,height:42,borderRadius:14,backgroundColor:C.green,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:26,color:'#fff',fontWeight:'700'}}>＋</Text></View>
               <View style={{flex:1}}>
                 <Text style={{fontSize:14,fontWeight:'900',color:C.green}}>Add a new contact</Text>
-                <Text style={{fontSize:11,color:C.muted,marginTop:3}}>Find registered people by their Guftin username</Text>
+                <Text style={{fontSize:11,color:C.muted,marginTop:3}}>Find people by username, email or mobile number</Text>
               </View>
               <Text style={{fontSize:22,color:C.green,fontWeight:'700'}}>›</Text>
             </Btn>
@@ -4571,6 +4598,19 @@ function GuftinApp() {
       <View style={{flex:1,backgroundColor:'#0008',justifyContent:'flex-end'}}><View style={{backgroundColor:C.white,borderTopLeftRadius:24,borderTopRightRadius:24,padding:22}}>
         <Text style={{fontSize:21,fontWeight:'900',color:C.ink}}>Guftin settings</Text>
         <Text style={{color:C.muted,fontSize:12,marginTop:5,marginBottom:15}}>Privacy and connection preferences</Text>
+        <View style={{backgroundColor:C.mint,borderRadius:15,padding:13,marginBottom:10}}>
+          <Text style={{color:C.green,fontWeight:'900',marginBottom:5}}>Account sign-in methods</Text>
+          <Text style={{color:C.ink,fontSize:11,lineHeight:17}}>Linked email: {session?.user?.email||'Not linked'}{session?.user?.email_confirmed_at?' · verified':' · not verified'}</Text>
+          <Text style={{color:C.ink,fontSize:11,lineHeight:17,marginTop:3}}>Linked phone: {session?.user?.phone?(session.user.phone_confirmed_at?'Verified':'Awaiting verification'):'Not linked'}</Text>
+          {!session?.user?.email?<>
+            <TextInput value={accountEmailInput} onChangeText={setAccountEmailInput} placeholder="Add Gmail / email address" keyboardType="email-address" autoCapitalize="none" autoComplete="email" style={{backgroundColor:C.white,borderRadius:11,padding:12,marginTop:10,color:C.ink}}/>
+            <TextInput value={accountEmailPassword} onChangeText={setAccountEmailPassword} placeholder="Create password (at least 8 characters)" secureTextEntry autoCapitalize="none" style={{backgroundColor:C.white,borderRadius:11,padding:12,marginTop:8,color:C.ink}}/>
+            <Btn disabled={accountEmailBusy} onPress={()=>void linkEmailToAccount()} style={{backgroundColor:C.green,padding:12,borderRadius:11,alignItems:'center',marginTop:9}}>
+              {accountEmailBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Link email to this account</Text>}
+            </Btn>
+            {accountEmailNotice?<Text style={{color:C.ink,fontSize:11,lineHeight:16,marginTop:7}}>{accountEmailNotice}</Text>:null}
+          </>:null}
+        </View>
         <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingVertical:12}}><View style={{flex:1,paddingRight:12}}><Text style={{color:C.ink,fontWeight:'800'}}>App Lock</Text><Text style={{color:C.muted,fontSize:11}}>Require a PIN to open Guftin</Text></View><Switch value={appLockEnabled} onValueChange={async enabled=>{if(enabled){startPinFlow('set-app');}else{await AsyncStorage.removeItem('guftin-app-lock-enabled');setAppLockEnabled(false);}}} trackColor={{true:C.green}}/></View>
         <Btn onPress={()=>{setSettingsOpen(false);setPermissionSetupStep(0);setPermissionSetupAutoSave(mediaAutoDownload);setPermissionSetupFullScreenOpened(false);setPermissionSetupNotice('');setPermissionSetupVisible(true);}} style={{backgroundColor:C.mint,padding:12,borderRadius:13,marginBottom:7}}>
           <Text style={{color:C.green,fontWeight:'900',textAlign:'center'}}>Review app permissions</Text>
@@ -4686,7 +4726,7 @@ function GuftinApp() {
           <Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>Add a new Guftin contact</Text>
           <Text style={{color:C.muted,lineHeight:19,marginTop:7,marginBottom:12}}>Search by Guftin username, Gmail/email address, or the mobile number linked to that account.</Text>
           <TextInput value={contactUsername} onChangeText={setContactUsername} autoCapitalize="none" autoCorrect={false} placeholder="Username, email or mobile number" style={{backgroundColor:C.paper,borderRadius:14,padding:15,color:C.ink}}/>
-          <Text style={{color:C.muted,fontSize:11,lineHeight:16,marginTop:8}}>A conversation is created only when you open the person and send your first message or place a call.</Text>
+          <Text style={{color:C.muted,fontSize:11,lineHeight:16,marginTop:8}}>Search by Guftin username, verified email address or verified mobile number. A conversation is created when you send your first message or place a call.</Text>
           <Btn disabled={phoneContactsLoading} onPress={()=>void findPhoneContacts()} style={{backgroundColor:C.mint,padding:13,borderRadius:13,marginTop:12,alignItems:'center'}}>
             {phoneContactsLoading?<ActivityIndicator color={C.green}/>:<Text style={{color:C.green,fontWeight:'900'}}>Find Guftin accounts in phone contacts</Text>}
           </Btn>
