@@ -3373,7 +3373,7 @@ function GuftinApp() {
     const normalizedPhone=profilePhone.trim()?normalizeGuftinPhone(profilePhone):null;
     if(cleanName.length<2||cleanName.length>40){setAuthError('Enter your full name (2-40 characters).');return;}
     if(!/^[a-z0-9_]{3,24}$/.test(cleanUsername)){setAuthError('Username must be 3-24 characters using letters, numbers or underscore.');return;}
-    if(!/^\\S+@\\S+\\.\\S+$/.test(cleanEmail)){setAuthError('Enter a valid Gmail/email address.');return;}
+    if(!/^\S+@\S+\.\S+$/.test(cleanEmail)){setAuthError('Enter a valid Gmail/email address.');return;}
     if(password.length<8){setAuthError('Password must be at least 8 characters.');return;}
     if(profilePhone.trim()&&!normalizedPhone){setAuthError('Enter a valid mobile number or leave the optional field empty.');return;}
     setAuthBusy(true);setAuthError('');
