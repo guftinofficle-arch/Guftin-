@@ -2057,7 +2057,7 @@ function GuftinApp() {
   const createGroupPoll=async()=>{
     if(!active||active.kind!=='group'||pollBusy)return;
     const question=pollQuestion.trim();
-    const options=pollOptionsText.split('\\n').map(value=>value.trim()).filter(Boolean);
+    const options=pollOptionsText.split('\n').map(value=>value.trim()).filter(Boolean);
     if(!question||options.length<2||options.length>12){Alert.alert('Poll needs more information','Enter a question and between 2 and 12 options, one per line.');return;}
     setPollBusy(true);
     try{
@@ -5092,9 +5092,9 @@ function GuftinApp() {
           <Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>Create group poll</Text>
           <Text style={{fontSize:11,color:C.muted,marginTop:5,marginBottom:12}}>The question and every option are encrypted for group devices.</Text>
           <TextInput value={pollQuestion} onChangeText={setPollQuestion} placeholder="Ask a question" maxLength={300} style={{backgroundColor:C.paper,borderRadius:12,padding:12,color:C.ink,marginBottom:9}}/>
-          <TextInput value={pollOptionsText} onChangeText={setPollOptionsText} placeholder={'Option 1\\nOption 2\\nOption 3'} multiline maxLength={1200} style={{minHeight:110,backgroundColor:C.paper,borderRadius:12,padding:12,color:C.ink,textAlignVertical:'top'}}/>
+          <TextInput value={pollOptionsText} onChangeText={setPollOptionsText} placeholder={'Option 1\nOption 2\nOption 3'} multiline maxLength={1200} style={{minHeight:110,backgroundColor:C.paper,borderRadius:12,padding:12,color:C.ink,textAlignVertical:'top'}}/>
           <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingVertical:10}}><View style={{flex:1}}><Text style={{color:C.ink,fontWeight:'800'}}>Allow multiple choices</Text><Text style={{color:C.muted,fontSize:10}}>Members may vote for more than one option</Text></View><Switch value={pollAllowsMultiple} onValueChange={setPollAllowsMultiple} trackColor={{true:C.green}}/></View>
-          <View style={{flexDirection:'row',justifyContent:'flex-end',gap:10,marginTop:8}}><Btn disabled={pollBusy} onPress={()=>setPollCreateVisible(false)} style={{padding:12}}><Text style={{color:C.muted,fontWeight:'800'}}>Cancel</Text></Btn><Btn disabled={pollBusy||!pollQuestion.trim()||pollOptionsText.split('\\n').filter(x=>x.trim()).length<2} onPress={()=>void createGroupPoll()} style={{backgroundColor:C.green,paddingHorizontal:16,paddingVertical:12,borderRadius:11}}>{pollBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Create poll</Text>}</Btn></View>
+          <View style={{flexDirection:'row',justifyContent:'flex-end',gap:10,marginTop:8}}><Btn disabled={pollBusy} onPress={()=>setPollCreateVisible(false)} style={{padding:12}}><Text style={{color:C.muted,fontWeight:'800'}}>Cancel</Text></Btn><Btn disabled={pollBusy||!pollQuestion.trim()||pollOptionsText.split('\n').filter(x=>x.trim()).length<2} onPress={()=>void createGroupPoll()} style={{backgroundColor:C.green,paddingHorizontal:16,paddingVertical:12,borderRadius:11}}>{pollBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Create poll</Text>}</Btn></View>
         </View>
       </View>
     </Modal>
