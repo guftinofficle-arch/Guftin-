@@ -964,6 +964,8 @@ function GuftinApp() {
   },[session?.user?.id]);
 
   const [authBusy,setAuthBusy]=useState(false);
+  const [googleBusy,setGoogleBusy]=useState(false);
+  const [googleUsernameChangeAvailable,setGoogleUsernameChangeAvailable]=useState(false);
   const [authMode,setAuthMode]=useState<'login'|'signup'>('signup');
   const [fullName,setFullName]=useState('');
   const [username,setUsername]=useState('');
@@ -1212,6 +1214,8 @@ function GuftinApp() {
       return;
     }
     setProfile(data);
+    const {data:googleRenameAvailable}=await supabase.rpc('kc_google_username_change_available');
+    setGoogleUsernameChangeAvailable(googleRenameAvailable===true);
     void AsyncStorage.setItem(profileCacheKey,JSON.stringify(data)).catch(()=>{});
     setProfileName(data?.display_name||session.user.user_metadata?.display_name||'');
     setProfileUsername(data?.username||session.user.user_metadata?.username||'');
@@ -3543,6 +3547,35 @@ function GuftinApp() {
     if(error)setAuthError(error.message);
   };
 
+  const signInGoogle=async()=>{
+    if(googleBusy)return;
+    setGoogleBusy(true);setAuthError('');
+    try{
+      const redirectTo=Linking.createURL('auth/callback');
+      const {data,error}=await supabase.auth.signInWithOAuth({
+        provider:'google',
+        options:{redirectTo,skipBrowserRedirect:true,queryParams:{prompt:'select_account'}}
+      });
+      if(error)throw error;
+      if(!data?.url)throw new Error('Google sign-in could not start. Please try again.');
+      const result=await WebBrowser.openAuthSessionAsync(data.url,redirectTo);
+      if(result.type==='cancel'||result.type==='dismiss')return;
+      if(result.type!=='success'||!result.url)throw new Error('Google sign-in was not completed.');
+      const {data:authData,error:sessionError}=await supabase.auth.exchangeCodeForSession(result.url);
+      if(sessionError)throw sessionError;
+      if(!authData.session)throw new Error('Google did not return a Guftin sign-in session.');
+      const {data:googleProfile,error:profileError}=await supabase.rpc('kc_finish_google_profile');
+      if(profileError)throw profileError;
+      setProfileName(googleProfile?.display_name||authData.session.user.user_metadata?.full_name||authData.session.user.user_metadata?.name||'');
+      setProfileUsername(googleProfile?.username||'');
+      setEmail(authData.session.user.email||'');
+      setAuthError('');
+      void supabase.rpc('kc_set_email_discoverable',{p_enabled:true});
+    }catch(e:any){
+      setAuthError(e?.message||'Google sign-in failed. Please try again.');
+    }finally{setGoogleBusy(false);}
+  };
+
   const finishProfile=async()=>{
     if(!session||savingProfile)return;
     const cleanUsername=profileUsername.trim().toLowerCase().replace(/^@/,'');
@@ -3690,8 +3723,12 @@ function GuftinApp() {
     if(cleanName.length<2||cleanName.length>40){Alert.alert('Name required','Use a name between 2 and 40 characters.');return;}
     if(!/^[a-z0-9_]{3,24}$/.test(cleanUsername)){Alert.alert('Username not valid','Use 3-24 lowercase letters, numbers or underscore.');return;}
     setSavingProfile(true);
-    const {error}=await supabase.rpc('kc_finish_profile',{p_username:cleanUsername,p_display_name:cleanName});
+    const usernameChanged=Boolean(profile?.username&&cleanUsername!==profile.username);
+    const {error}=usernameChanged
+      ?await supabase.rpc('kc_change_google_username_once',{p_username:cleanUsername})
+      :await supabase.rpc('kc_finish_profile',{p_username:cleanUsername,p_display_name:cleanName});
     if(error){setSavingProfile(false);Alert.alert('Profile not saved',error.message);return;}
+    if(usernameChanged)setGoogleUsernameChangeAvailable(false);
     const {error:aboutError}=await supabase.from('kc_profiles').update({about:about.trim().slice(0,160)}).eq('id',session.user.id);
     setSavingProfile(false);
     if(aboutError){Alert.alert('About text not saved',aboutError.message);return;}
@@ -3973,8 +4010,16 @@ function GuftinApp() {
         {authError?<Text style={{color:C.red,fontSize:12,lineHeight:18,marginBottom:12}}>{authError}</Text>:null}
         {authMode==='login'?<Btn disabled={authBusy} onPress={requestPasswordReset} style={{padding:10,alignItems:'center'}}><Text style={{color:C.green,fontWeight:'800'}}>Forgot password?</Text></Btn>:null}
         <Btn disabled={authBusy} onPress={()=>authMode==='signup'?void signUpEmail():void signInEmail()} style={{backgroundColor:C.green,padding:17,borderRadius:16,alignItems:'center'}}>{authBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>{authMode==='signup'?'Create account':'Sign in'}</Text>}</Btn>
+        <View style={{flexDirection:'row',alignItems:'center',gap:12,marginVertical:14}}>
+          <View style={{flex:1,height:1,backgroundColor:C.line}}/><Text style={{color:C.muted,fontSize:11,fontWeight:'700'}}>OR</Text><View style={{flex:1,height:1,backgroundColor:C.line}}/>
+        </View>
+        <Btn disabled={googleBusy||authBusy} onPress={()=>void signInGoogle()} style={{backgroundColor:C.white,borderWidth:1,borderColor:C.line,padding:16,borderRadius:16,alignItems:'center',flexDirection:'row',justifyContent:'center',gap:10}}>
+          {googleBusy?<ActivityIndicator color={C.green}/>:<Text style={{fontSize:17,fontWeight:'900',color:'#4285F4'}}>G</Text>}
+          <Text style={{color:C.ink,fontWeight:'900'}}>{googleBusy?'Connecting to Google...':'Continue with Google'}</Text>
+        </Btn>
+        <Text style={{color:C.muted,fontSize:10,textAlign:'center',marginTop:7}}>Create a new Guftin account or sign in securely with Google.</Text>
         <Btn onPress={()=>{setAuthMode(authMode==='signup'?'login':'signup');setAuthError('');setEmailOtpPending(false);}} style={{padding:16,alignItems:'center'}}><Text style={{color:C.green,fontWeight:'800'}}>{authMode==='signup'?'Already have an account? Sign in':'New to Guftin? Create account'}</Text></Btn>
-        {authMode==='signup'?<Text style={{color:C.muted,fontSize:10,textAlign:'center',marginTop:8,lineHeight:16}}>Email verification is required. A mobile number is optional and is never used to sign in.</Text>:null}
+        {authMode==='signup'?<Text style={{color:C.muted,fontSize:10,textAlign:'center',marginTop:8,lineHeight:16}}>Email verification is required for email signup. A mobile number is optional and is never used to sign in.</Text>:null}
 
       </ScrollView>
     </SafeAreaView>;
@@ -4324,11 +4369,16 @@ function GuftinApp() {
       </View>
       <Text style={{fontWeight:'800',color:C.ink,marginTop:25,marginBottom:8}}>Display name</Text>
       <TextInput value={profileName} onChangeText={setProfileName} placeholder="Your name" maxLength={40} style={{backgroundColor:C.paper,borderRadius:14,padding:15,color:C.ink}}/>
-      <Text style={{fontWeight:'800',color:C.ink,marginTop:15,marginBottom:8}}>Username · permanent</Text>
-      {profile?.username?<View style={{backgroundColor:C.paper,borderRadius:14,padding:15,borderWidth:1,borderColor:C.line}}>
-        <Text style={{color:C.ink,fontWeight:'900'}}>@{profile.username}</Text>
-        <Text style={{color:C.muted,fontSize:11,marginTop:5}}>Your Guftin ID is locked and cannot be changed.</Text>
-      </View>:<TextInput value={profileUsername} onChangeText={v=>setProfileUsername(v.toLowerCase().replace(/[^a-z0-9_]/g,''))} placeholder="Your unique username" autoCapitalize="none" maxLength={24} style={{backgroundColor:C.paper,borderRadius:14,padding:15,color:C.ink}}/>}
+      <Text style={{fontWeight:'800',color:C.ink,marginTop:15,marginBottom:8}}>Username</Text>
+      {profile?.username&&googleUsernameChangeAvailable?
+        <View>
+          <TextInput value={profileUsername} onChangeText={v=>setProfileUsername(v.toLowerCase().replace(/[^a-z0-9_]/g,''))} placeholder="Choose your one-time new username" autoCapitalize="none" maxLength={24} style={{backgroundColor:C.paper,borderRadius:14,padding:15,color:C.ink}}/>
+          <Text style={{color:C.green,fontSize:11,marginTop:6}}>Google account benefit: you can change this username once. Saving it will lock it permanently.</Text>
+        </View>
+        :<View style={{backgroundColor:C.paper,borderRadius:14,padding:15,borderWidth:1,borderColor:C.line}}>
+          <Text style={{color:C.ink,fontWeight:'900'}}>@{profile?.username||'Not set'}</Text>
+          <Text style={{color:C.muted,fontSize:11,marginTop:5}}>Your Guftin ID is permanent and cannot be changed.</Text>
+        </View>}
       <Text style={{fontWeight:'800',color:C.ink,marginTop:15,marginBottom:8}}>About</Text>
       <TextInput value={about} onChangeText={setAbout} placeholder="A little about you" maxLength={160} multiline style={{backgroundColor:C.paper,borderRadius:14,padding:15,color:C.ink,minHeight:75,textAlignVertical:'top'}}/>
       <Btn disabled={savingProfile||profileUploading} onPress={saveProfile} style={{backgroundColor:C.green,padding:15,borderRadius:14,alignItems:'center',marginTop:10}}>{savingProfile?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'800'}}>Save profile</Text>}</Btn>
