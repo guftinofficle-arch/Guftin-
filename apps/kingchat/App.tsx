@@ -1276,9 +1276,8 @@ function GuftinApp() {
         return;
       }
       const directConversationIds=rows.filter(r=>r.conversation?.kind==='direct').map(r=>r.conversation_id).filter(Boolean);
-      const [memberResult,profileResult,messageResult,hiddenResult,channelResult,callResult]=await Promise.all([
+      const [memberResult,messageResult,hiddenResult,channelResult,callResult]=await Promise.all([
         supabase.from('kc_conversation_members').select('conversation_id,user_id,last_read_at,joined_at').in('conversation_id',ids),
-        supabase.from('kc_profiles').select('id,display_name,avatar_url,is_online').neq('id',session.user.id),
         supabase.from('kc_messages').select('id,conversation_id,sender_id,body,message_type,created_at,deleted_at')
           .in('conversation_id',ids).is('deleted_at',null).order('created_at',{ascending:false}).limit(500),
         supabase.from('kc_message_hidden').select('message_id').eq('user_id',session.user.id),
@@ -1286,24 +1285,49 @@ function GuftinApp() {
         directConversationIds.length?supabase.from('kc_call_logs').select('conversation_id').in('conversation_id',directConversationIds):Promise.resolve({data:[],error:null})
       ]);
       if(memberResult.error) throw memberResult.error;
-      if(profileResult.error) throw profileResult.error;
       if(messageResult.error) throw messageResult.error;
       if(channelResult.error) throw channelResult.error;
       if(callResult.error) console.warn('Direct chat call activity could not be checked:',callResult.error.message);
       const members=(memberResult.data||[]) as any[];
+      // Only request profiles for people in this user's conversations. Fetching
+      // every other profile on each inbox refresh scales poorly and leaks excess metadata.
+      const peerIds=[...new Set(members.filter(m=>m.user_id!==session.user.id).map(m=>m.user_id))];
+      const profileResult=peerIds.length
+        ?await supabase.from('kc_profiles').select('id,display_name,avatar_url,is_online').in('id',peerIds)
+        :{data:[],error:null};
+      if(profileResult.error) throw profileResult.error;
       const channelMap=new Map((channelResult.data||[]).map((channel:any)=>[channel.conversation_id,channel]));
       const callActivityIds=new Set(((callResult.data||[]) as any[]).map((call:any)=>call.conversation_id).filter(Boolean));
       const hiddenIds=new Set((hiddenResult.data||[]).map((row:any)=>row.message_id));
       hiddenIds.forEach(id=>hiddenMessageIds.current.add(id));
       const inboxMessages=((messageResult.data||[]) as any[]).filter(message=>!hiddenIds.has(message.id)&&!hiddenMessageIds.current.has(message.id));
-      const peerIds=[...new Set(members.filter(m=>m.user_id!==session.user.id).map(m=>m.user_id))];
-      const profiles=(profileResult.error?[]:(profileResult.data||[])) as any[];
-      const profileMap=new Map(profiles.filter(p=>peerIds.includes(p.id)).map(p=>[p.id,p]));
+      const profiles=(profileResult.data||[]) as any[];
+      const profileMap=new Map(profiles.map(p=>[p.id,p]));
+      const membersByConversation=new Map<string,any[]>();
+      for(const member of members){
+        const bucket=membersByConversation.get(member.conversation_id)||[];
+        bucket.push(member);
+        membersByConversation.set(member.conversation_id,bucket);
+      }
+      const membershipByConversation=new Map(rows.map(row=>[row.conversation_id,row]));
+      const unreadByConversation=new Map<string,number>();
+      for(const message of inboxMessages){
+        if(!message.sender_id||message.sender_id===session.user.id)continue;
+        const membership=membershipByConversation.get(message.conversation_id);
+        if(!membership)continue;
+        const readThrough=Math.max(
+          membership.last_read_at?new Date(membership.last_read_at).getTime():0,
+          membership.joined_at?new Date(membership.joined_at).getTime():0
+        );
+        if(new Date(message.created_at).getTime()>readThrough){
+          unreadByConversation.set(message.conversation_id,(unreadByConversation.get(message.conversation_id)||0)+1);
+        }
+      }
       const latest=new Map<string,any>();
       for(const message of inboxMessages) if(!latest.has(message.conversation_id)) latest.set(message.conversation_id,message);
       const mappedRows=await Promise.all(rows.map(async row=>{
         const conv=row.conversation||{};
-        const peers=members.filter(m=>m.conversation_id===row.conversation_id&&m.user_id!==session.user.id);
+        const peers=(membersByConversation.get(row.conversation_id)||[]).filter(m=>m.user_id!==session.user.id);
         const peer=peers.length?profileMap.get(peers[0].user_id):null;
         // A direct membership is not itself a conversation. Require a real registered peer profile.
         if(conv.kind==='direct'&&(!peer||!peer.id))return null;
@@ -1317,11 +1341,7 @@ function GuftinApp() {
           row.last_read_at?new Date(row.last_read_at).getTime():0,
           row.joined_at?new Date(row.joined_at).getTime():0
         );
-        const unread=inboxMessages.filter((message:any)=>
-          message.conversation_id===row.conversation_id &&
-          message.sender_id!==session.user.id &&
-          new Date(message.created_at).getTime()>readThrough
-        ).length;
+        const unread=unreadByConversation.get(row.conversation_id)||0;
         let preview='No messages yet';
         if(last){
           if(last.deleted_at)preview='This message was deleted';
@@ -1352,6 +1372,17 @@ function GuftinApp() {
       if(!isConnectivityFailure(e))Alert.alert('Inbox could not load',e?.message||'Please try again.');
     }finally{setLoading(false);}
   },[session,deviceIdentity,getSignedMediaUrl]);
+
+  // Coalesce bursts of realtime events into one inbox refresh instead of
+  // launching a full set of database queries for every individual message.
+  const inboxRefreshTimer=useRef<ReturnType<typeof setTimeout>|null>(null);
+  const scheduleInboxRefresh=useCallback(()=>{
+    if(inboxRefreshTimer.current)clearTimeout(inboxRefreshTimer.current);
+    inboxRefreshTimer.current=setTimeout(()=>{
+      inboxRefreshTimer.current=null;
+      void loadInbox();
+    },400);
+  },[loadInbox]);
 
   const loadCallHistory=useCallback(async()=>{
     if(!session)return;
@@ -2057,20 +2088,20 @@ function GuftinApp() {
             void saveMediaToGallery(item,false);
           }
         }
-        void loadInbox();
+        scheduleInboxRefresh();
       })
       .on('postgres_changes',{event:'UPDATE',schema:'public',table:'kc_messages'},payload=>{
         const updated=payload.new as any;
         if(updated.deleted_at){
           setMessages(prev=>({...prev,[updated.conversation_id]:(prev[updated.conversation_id]||[]).map(item=>item.id===updated.id?{...item,deleted_at:updated.deleted_at,body:null,attachment_url:null}:item)}));
-          void loadInbox();
+          scheduleInboxRefresh();
         }
       })
       .on('postgres_changes',{event:'DELETE',schema:'public',table:'kc_messages'},payload=>{
         const removed=payload.old as any;
         if(removed?.id){
           setMessages(prev=>Object.fromEntries(Object.entries(prev).map(([conversationId,items]:any)=>[conversationId,items.filter((item:any)=>item.id!==removed.id)])));
-          void loadInbox();
+          scheduleInboxRefresh();
         }
       })
       .on('postgres_changes',{event:'UPDATE',schema:'public',table:'kc_conversation_members'},payload=>{
@@ -2078,11 +2109,11 @@ function GuftinApp() {
         if(member.conversation_id===activeConversationIdRef.current && member.user_id!==session.user.id){
           setPeerLastReadAt(member.last_read_at||null);
         }
-        void loadInbox();
+        scheduleInboxRefresh();
       })
       .on('postgres_changes',{event:'UPDATE',schema:'public',table:'kc_profiles'},()=>{
         // Refresh names and signed avatar URLs immediately after a contact edits a profile.
-        void loadInbox();
+        scheduleInboxRefresh();
       })
       .on('postgres_changes',{event:'*',schema:'public',table:'kc_call_logs'},payload=>{
         const call=(payload.new||payload.old) as any;
@@ -2138,7 +2169,7 @@ function GuftinApp() {
     const syncTimer=setInterval(()=>{
       if(AppState.currentState==='active'){
         if(autoSync){
-          void loadInbox();
+          scheduleInboxRefresh();
           const conversationId=activeConversationIdRef.current;
           if(conversationId)void loadMessagesRef.current?.(conversationId);
         }
@@ -2148,12 +2179,13 @@ function GuftinApp() {
     },Math.max(15,syncIntervalSeconds)*1000);
     return ()=>{
       clearInterval(syncTimer);
+      if(inboxRefreshTimer.current){clearTimeout(inboxRefreshTimer.current);inboxRefreshTimer.current=null;}
       appState.remove();
       void supabase.removeChannel(channel);
       setIncomingCall(null);setOutgoingCall(null);setLiveCall(null);
       void supabase.from('kc_profiles').update({is_online:false,last_seen_at:new Date().toISOString()}).eq('id',session.user.id);
     };
-  },[session,loadProfile,loadInbox,loadCallHistory,resolveMessage,joinCall,respondToCall,acceptCallWhenReady,onlineVisibility,autoSync,syncIntervalSeconds,showReadReceipts,mediaAutoDownload]);
+  },[session,loadProfile,loadInbox,loadCallHistory,resolveMessage,joinCall,respondToCall,acceptCallWhenReady,onlineVisibility,autoSync,syncIntervalSeconds,showReadReceipts,mediaAutoDownload,scheduleInboxRefresh]);
 
   useEffect(()=>{
     let mounted=true;
