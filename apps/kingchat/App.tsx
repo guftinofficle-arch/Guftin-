@@ -892,6 +892,8 @@ function GuftinApp() {
   const [pinModalVisible,setPinModalVisible]=useState(false);
   const [pinEntry,setPinEntry]=useState('');
   const [pinConfirm,setPinConfirm]=useState('');
+  const [pinResetCode,setPinResetCode]=useState('');
+  const [pinResetEmail,setPinResetEmail]=useState('');
   const [pinMode,setPinMode]=useState<'set-chat'|'unlock-chat'|'set-app'|'unlock-app'|'reset-chat'|'reset-app'>('set-chat');
   const [pinTargetChat,setPinTargetChat]=useState<Chat|null>(null);
   const [appLocked,setAppLocked]=useState(false);
@@ -1723,10 +1725,9 @@ function GuftinApp() {
       setMessages(prev=>({...prev,[item.conversation_id]:(prev[item.conversation_id]||[]).filter(m=>m.id!==item.id)}));
     };
     const deleteForEveryone=async()=>{
-      const {error}=await supabase.from('kc_messages').update({deleted_at:new Date().toISOString()})
-        .eq('id',item.id).eq('sender_id',session.user.id);
+      const {error}=await supabase.rpc('kc_delete_message_for_everyone',{p_message_id:item.id});
       if(error){Alert.alert('Message not deleted',error.message);return;}
-      setMessages(prev=>({...prev,[item.conversation_id]:(prev[item.conversation_id]||[]).map(m=>m.id===item.id?{...m,deleted_at:new Date().toISOString(),body:null,attachment_url:null}:m)}));
+      setMessages(prev=>({...prev,[item.conversation_id]:(prev[item.conversation_id]||[]).filter(m=>m.id!==item.id)}));
     };
     const options:any[]=[{text:'Delete for me',onPress:()=>void hideForMe()}];
     if(item.mine&&!item.deleted_at)options.push({text:'Delete for everyone',style:'destructive',onPress:()=>void deleteForEveryone()});
@@ -2250,10 +2251,27 @@ function GuftinApp() {
     const emailAddress=String(session?.user?.email||'');
     if(!emailAddress){Alert.alert('Email unavailable','Sign in again to reset your PIN.');return;}
     try{
+      setPinBusy(true);
       const {error}=await supabase.auth.resetPasswordForEmail(emailAddress);
       if(error)throw error;
-      Alert.alert('Reset email sent','A password recovery code was sent to '+emailAddress+'. Verify it in the password recovery flow, then set a new PIN. PIN reset is not yet enabled in this build.');
-    }catch(e:any){Alert.alert('Could not send reset email',e?.message||'Please try again.');}
+      setPinResetEmail(emailAddress);setPinResetCode('');setPinEntry('');setPinConfirm('');
+      setPinMode(pinMode==='unlock-app'?'reset-app':'reset-chat');
+    }catch(e:any){Alert.alert('Could not send reset code',e?.message||'Please try again.');}
+    finally{setPinBusy(false);}
+  };
+  const confirmPinReset=async()=>{
+    if(!/^\d{6}$/.test(pinResetCode)){Alert.alert('Verification code required','Enter the 6-digit code sent to your email.');return;}
+    if(!/^\d{4,8}$/.test(pinEntry)){Alert.alert('Invalid PIN','Enter a new PIN with 4 to 8 digits.');return;}
+    if(pinEntry!==pinConfirm){Alert.alert('PIN mismatch','The new PIN and confirmation do not match.');return;}
+    const {error}=await supabase.auth.verifyOtp({email:pinResetEmail,token:pinResetCode,type:'recovery'});
+    if(error){Alert.alert('Code not accepted',error.message);return;}
+    const scope=pinMode==='reset-app'?'app':'chat';
+    const key=pinStorageKey(scope,scope==='chat'?pinTargetChat?.id:undefined);
+    await SecureStore.setItemAsync(key,await hashPin(pinEntry));
+    setPinModalVisible(false);setPinEntry('');setPinConfirm('');setPinResetCode('');
+    if(scope==='app'){setAppLockEnabled(true);setAppLocked(false);await AsyncStorage.setItem('guftin-app-lock-enabled','1');}
+    else if(pinTargetChat){setActive(pinTargetChat);setPeerLastReadAt(null);}
+    Alert.alert('PIN reset','Your new PIN has been saved.');
   };
   useEffect(()=>{if(!session?.user?.id)return;let live=true;(async()=>{const enabled=await AsyncStorage.getItem('guftin-app-lock-enabled');if(!live)return;setAppLockEnabled(enabled==='1');if(enabled==='1'&&await SecureStore.getItemAsync(pinStorageKey('app')))setAppLocked(true);})();return()=>{live=false;};},[session?.user?.id]);
 
@@ -4153,7 +4171,7 @@ function GuftinApp() {
         </>):null}
         <Btn onPress={()=>active.kind==='channel'?showChannelOptions():Alert.alert('Chat options',active.name,[
           {text:'Chat info',onPress:()=>void openChatDetails()},
-          {text:'Lock Chat',onPress:()=>startPinFlow('set-chat',active)},
+          {text:'Lock / Unlock Chat',onPress:()=>void (async()=>{const key=pinStorageKey('chat',active.id);const stored=await SecureStore.getItemAsync(key);if(stored)startPinFlow('unlock-chat',active);else startPinFlow('set-chat',active);})()},
           {text:'Clear Chat',style:'destructive',onPress:()=>Alert.alert('Clear this chat?', 'This removes the messages from your Guftin account on this phone. The other participant keeps their chat history.',[
             {text:'Cancel',style:'cancel'},
             {text:'Clear Chat',style:'destructive',onPress:()=>void clearChatForMe(active)}
@@ -4452,12 +4470,15 @@ function GuftinApp() {
     </Modal>
     <Modal visible={pinModalVisible} transparent animationType="fade" onRequestClose={()=>{if(pinMode==='unlock-app'||pinMode==='unlock-chat')return;setPinModalVisible(false);}}>
       <View style={{flex:1,backgroundColor:'#0009',justifyContent:'center',padding:24}}><View style={{backgroundColor:C.white,borderRadius:22,padding:22,gap:12}}>
-        <Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>{pinMode==='unlock-chat'?'Unlock Chat':pinMode==='unlock-app'?'Unlock Guftin':'Create PIN'}</Text>
-        <Text style={{fontSize:12,color:C.muted}}>{pinMode==='unlock-chat'?'Enter this chat’s PIN.':pinMode==='unlock-app'?'Enter your app PIN.':'Choose a 4–8 digit PIN and confirm it.'}</Text>
-        <TextInput value={pinEntry} onChangeText={v=>setPinEntry(v.replace(/\D/g,'').slice(0,8))} keyboardType="number-pad" secureTextEntry placeholder="PIN" style={{borderWidth:1,borderColor:C.line,borderRadius:12,padding:14,color:C.ink,fontSize:18,letterSpacing:5}} />
-        {pinMode==='set-chat'||pinMode==='set-app'?<TextInput value={pinConfirm} onChangeText={v=>setPinConfirm(v.replace(/\D/g,'').slice(0,8))} keyboardType="number-pad" secureTextEntry placeholder="Confirm PIN" style={{borderWidth:1,borderColor:C.line,borderRadius:12,padding:14,color:C.ink,fontSize:18,letterSpacing:5}}/>:null}
-        <Btn disabled={pinBusy} onPress={()=>void (async()=>{setPinBusy(true);try{if(pinMode==='unlock-chat'||pinMode==='unlock-app')await unlockPin();else await savePin();}finally{setPinBusy(false);}})()} style={{backgroundColor:C.green,padding:14,borderRadius:13}}><Text style={{color:'#fff',fontWeight:'900',textAlign:'center'}}>{pinBusy?'Please wait…':(pinMode==='unlock-chat'||pinMode==='unlock-app'?'Unlock':'Save PIN')}</Text></Btn>
+        <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}>
+          <Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>{pinMode==='unlock-chat'?'Unlock Chat':pinMode==='unlock-app'?'Unlock Guftin':pinMode==='reset-chat'||pinMode==='reset-app'?'Reset PIN':'Create PIN'}</Text>
+          <Btn onPress={()=>{if(pinMode==='unlock-chat'||pinMode==='unlock-app'){setPinModalVisible(false);setPinEntry('');if(pinMode==='unlock-chat')setActive(null);}else setPinModalVisible(false);}} style={{padding:5}}><Text style={{fontSize:23,color:C.ink}}>×</Text></Btn>
+        </View>
+        <Text style={{fontSize:12,color:C.muted}}>{pinMode==='unlock-chat'?'Enter this chat’s PIN.':pinMode==='unlock-app'?'Enter your app PIN.':pinMode==='reset-chat'||pinMode==='reset-app'?'Enter the email verification code, then choose and confirm a new PIN.':'Choose a 4–8 digit PIN and confirm it.'}</Text>
+        {pinMode==='reset-chat'||pinMode==='reset-app'?<><Text style={{fontSize:11,color:C.muted}}>Code sent to {pinResetEmail}</Text><TextInput value={pinResetCode} onChangeText={v=>setPinResetCode(v.replace(/\D/g,'').slice(0,6))} keyboardType="number-pad" placeholder="6-digit email code" style={{borderWidth:1,borderColor:C.line,borderRadius:12,padding:14,color:C.ink,fontSize:18,letterSpacing:4}}/><TextInput value={pinEntry} onChangeText={v=>setPinEntry(v.replace(/\D/g,'').slice(0,8))} keyboardType="number-pad" secureTextEntry placeholder="New PIN" style={{borderWidth:1,borderColor:C.line,borderRadius:12,padding:14,color:C.ink,fontSize:18,letterSpacing:5}}/><TextInput value={pinConfirm} onChangeText={v=>setPinConfirm(v.replace(/\D/g,'').slice(0,8))} keyboardType="number-pad" secureTextEntry placeholder="Confirm new PIN" style={{borderWidth:1,borderColor:C.line,borderRadius:12,padding:14,color:C.ink,fontSize:18,letterSpacing:5}}/></>:<><TextInput value={pinEntry} onChangeText={v=>setPinEntry(v.replace(/\D/g,'').slice(0,8))} keyboardType="number-pad" secureTextEntry placeholder="PIN" style={{borderWidth:1,borderColor:C.line,borderRadius:12,padding:14,color:C.ink,fontSize:18,letterSpacing:5}} />{pinMode==='set-chat'||pinMode==='set-app'?<TextInput value={pinConfirm} onChangeText={v=>setPinConfirm(v.replace(/\D/g,'').slice(0,8))} keyboardType="number-pad" secureTextEntry placeholder="Confirm PIN" style={{borderWidth:1,borderColor:C.line,borderRadius:12,padding:14,color:C.ink,fontSize:18,letterSpacing:5}}/>:null}</>}
+        <Btn disabled={pinBusy} onPress={()=>void (async()=>{setPinBusy(true);try{if(pinMode==='unlock-chat'||pinMode==='unlock-app')await unlockPin();else if(pinMode==='reset-chat'||pinMode==='reset-app')await confirmPinReset();else await savePin();}finally{setPinBusy(false);}})()} style={{backgroundColor:C.green,padding:14,borderRadius:13}}><Text style={{color:'#fff',fontWeight:'900',textAlign:'center'}}>{pinBusy?'Please wait…':(pinMode==='unlock-chat'||pinMode==='unlock-app'?'Unlock':pinMode==='reset-chat'||pinMode==='reset-app'?'OK':'Save PIN')}</Text></Btn>
         {(pinMode==='unlock-chat'||pinMode==='unlock-app')?<Btn onPress={()=>void resetPinByEmail()} style={{padding:10}}><Text style={{color:C.green,fontWeight:'800',textAlign:'center'}}>Forgot / Reset PIN</Text></Btn>:null}
+        {pinMode==='reset-chat'||pinMode==='reset-app'?<Btn onPress={()=>void resetPinByEmail()} style={{padding:8}}><Text style={{color:C.green,textAlign:'center',fontWeight:'800'}}>Resend code</Text></Btn>:null}
         {(pinMode!=='unlock-app'&&pinMode!=='unlock-chat')?<Btn onPress={()=>setPinModalVisible(false)} style={{padding:8}}><Text style={{color:C.muted,textAlign:'center'}}>Cancel</Text></Btn>:null}
       </View></View>
     </Modal>
