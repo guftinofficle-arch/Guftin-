@@ -3595,6 +3595,20 @@ function GuftinApp() {
     }finally{setOtpBusy(false);}
   };
 
+  const startPhoneLinkFromSettings=async()=>{
+    const normalizedPhone=normalizeGuftinPhone(profilePhone);
+    if(!session){setPhoneVerifyError('Sign in before linking a phone number.');return;}
+    if(!normalizedPhone){setPhoneVerifyError('Enter a valid mobile number, such as +923001234567.');return;}
+    setPhoneBusy(true);setPhoneVerifyError('');
+    const {error}=await supabase.auth.updateUser({phone:normalizedPhone});
+    setPhoneBusy(false);
+    if(error){setPhoneVerifyError(error.message||'Could not send the phone verification code.');return;}
+    setPhoneOtp('');
+    setPhoneVerificationPending(true);
+    setPhoneVerificationSent(true);
+    setSettingsOpen(false);
+  };
+
   const linkEmailToAccount=async()=>{
     const cleanEmail=accountEmailInput.trim().toLowerCase();
     if(!session){setAccountEmailNotice('Sign in before linking an email address.');return;}
@@ -4609,6 +4623,13 @@ function GuftinApp() {
               {accountEmailBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Link email to this account</Text>}
             </Btn>
             {accountEmailNotice?<Text style={{color:C.ink,fontSize:11,lineHeight:16,marginTop:7}}>{accountEmailNotice}</Text>:null}
+          </>:null}
+          {!session?.user?.phone?<>
+            <TextInput value={profilePhone} onChangeText={v=>{setProfilePhone(v);setPhoneVerifyError('');}} placeholder="Add mobile number (optional)" keyboardType="phone-pad" autoComplete="tel" style={{backgroundColor:C.white,borderRadius:11,padding:12,marginTop:10,color:C.ink}}/>
+            <Btn disabled={phoneBusy} onPress={()=>void startPhoneLinkFromSettings()} style={{backgroundColor:C.green,padding:12,borderRadius:11,alignItems:'center',marginTop:8}}>
+              {phoneBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Link and verify phone number</Text>}
+            </Btn>
+            {phoneVerifyError?<Text style={{color:C.red,fontSize:11,lineHeight:16,marginTop:6}}>{phoneVerifyError}</Text>:null}
           </>:null}
         </View>
         <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingVertical:12}}><View style={{flex:1,paddingRight:12}}><Text style={{color:C.ink,fontWeight:'800'}}>App Lock</Text><Text style={{color:C.muted,fontSize:11}}>Require a PIN to open Guftin</Text></View><Switch value={appLockEnabled} onValueChange={async enabled=>{if(enabled){startPinFlow('set-app');}else{await AsyncStorage.removeItem('guftin-app-lock-enabled');setAppLockEnabled(false);}}} trackColor={{true:C.green}}/></View>
