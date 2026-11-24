@@ -263,7 +263,7 @@ const sortInboxChats=(items:Chat[])=>items.slice().sort((a,b)=>(Number(!!b.isOff
 const normalizeGuftinPhone=(value:string):string|null=>{
   const raw=String(value||'').trim();
   if(!raw)return null;
-  const digits=raw.replace(/\\D/g,'');
+  const digits=raw.replace(/\D/g,'');
   let normalized='';
   if(raw.startsWith('+'))normalized='+'+digits;
   else if(digits.startsWith('00'))normalized='+'+digits.slice(2);
@@ -271,7 +271,7 @@ const normalizeGuftinPhone=(value:string):string|null=>{
   else if(digits.length===11&&digits.startsWith('0'))normalized='+92'+digits.slice(1);
   else if(digits.length===10&&digits.startsWith('3'))normalized='+92'+digits;
   else return null;
-  return /^\\+[1-9][0-9]{7,14}$/.test(normalized)?normalized:null;
+  return /^\+[1-9][0-9]{7,14}$/.test(normalized)?normalized:null;
 };
 const extractChannelInviteCode=(url:string)=>{
   const parts=url.replace(/[?#].*$/, '').split('/').filter(Boolean);
@@ -3544,16 +3544,18 @@ function GuftinApp() {
     const {error}=await supabase.rpc('kc_finish_profile',{p_username:cleanUsername,p_display_name:cleanName});
     setSavingProfile(false);
     if(error){Alert.alert('Profile not saved',error.message);return;}
-    await loadProfile();
     if(!normalizedPhone){
       setPhoneVerificationPending(false);
       setPhoneVerificationSent(false);
       setProfilePhone('');
+      await loadProfile();
       return;
     }
+    // Keep the phone-verification screen mounted while the profile refreshes.
     setPhoneVerificationPending(true);
     setPhoneVerificationSent(false);
     setPhoneOtp('');
+    await loadProfile();
     setPhoneVerifyError('');
     setPhoneBusy(true);
     const {error:phoneError}=await supabase.auth.updateUser({phone:normalizedPhone});
@@ -3577,7 +3579,7 @@ function GuftinApp() {
 
   const verifyProfilePhone=async()=>{
     const normalizedPhone=normalizeGuftinPhone(profilePhone);
-    const token=phoneOtp.replace(/\\D/g,'');
+    const token=phoneOtp.replace(/\D/g,'');
     if(!normalizedPhone){setPhoneVerifyError('Enter a valid phone number.');return;}
     if(token.length!==6){setPhoneVerifyError('Enter the complete 6-digit SMS code.');return;}
     setPhoneBusy(true);setPhoneVerifyError('');
@@ -4011,9 +4013,9 @@ function GuftinApp() {
         {phoneVerificationPending?<>
           <Text style={{fontSize:22,fontWeight:'900',color:C.ink,marginBottom:8}}>Confirm your mobile number</Text>
           <Text style={{color:C.muted,lineHeight:20,marginBottom:18}}>We sent a 6-digit SMS code to {normalizeGuftinPhone(profilePhone)||profilePhone}. Once verified, people who already have this number in their phone contacts can find your Guftin account. Your number itself is not shown to them.</Text>
-          {phoneVerificationSent?<TextInput value={phoneOtp} onChangeText={v=>{setPhoneOtp(v.replace(/\\D/g,'').slice(0,6));setPhoneVerifyError('');}} placeholder="6-digit SMS code" keyboardType="number-pad" maxLength={6} textContentType="oneTimeCode" autoComplete="sms-otp" style={{backgroundColor:C.white,borderRadius:15,padding:17,marginBottom:12,color:C.ink,fontSize:22,letterSpacing:7,textAlign:'center'}}/>:null}
+          {phoneVerificationSent?<TextInput value={phoneOtp} onChangeText={v=>{setPhoneOtp(v.replace(/\D/g,'').slice(0,6));setPhoneVerifyError('');}} placeholder="6-digit SMS code" keyboardType="number-pad" maxLength={6} textContentType="oneTimeCode" autoComplete="sms-otp" style={{backgroundColor:C.white,borderRadius:15,padding:17,marginBottom:12,color:C.ink,fontSize:22,letterSpacing:7,textAlign:'center'}}/>:null}
           {phoneVerifyError?<Text style={{color:C.red,fontSize:12,lineHeight:18,marginBottom:12}}>{phoneVerifyError}</Text>:null}
-          {phoneVerificationSent?<Btn disabled={phoneBusy||phoneOtp.replace(/\\D/g,'').length!==6} onPress={verifyProfilePhone} style={{backgroundColor:C.green,padding:17,borderRadius:16,alignItems:'center'}}>{phoneBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Verify phone number</Text>}</Btn>:<Btn disabled={phoneBusy} onPress={retryPhoneVerification} style={{backgroundColor:C.green,padding:17,borderRadius:16,alignItems:'center'}}>{phoneBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Send verification code</Text>}</Btn>}
+          {phoneVerificationSent?<Btn disabled={phoneBusy||phoneOtp.replace(/\D/g,'').length!==6} onPress={verifyProfilePhone} style={{backgroundColor:C.green,padding:17,borderRadius:16,alignItems:'center'}}>{phoneBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Verify phone number</Text>}</Btn>:<Btn disabled={phoneBusy} onPress={retryPhoneVerification} style={{backgroundColor:C.green,padding:17,borderRadius:16,alignItems:'center'}}>{phoneBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Send verification code</Text>}</Btn>}
           <Btn disabled={phoneBusy} onPress={skipPhoneSetup} style={{padding:15,alignItems:'center'}}><Text style={{color:C.muted,fontWeight:'800'}}>Continue without phone number</Text></Btn>
         </>:<>
           <Text style={{fontSize:22,fontWeight:'900',color:C.ink,marginBottom:8}}>Complete your profile</Text>
@@ -4426,7 +4428,7 @@ function GuftinApp() {
         <Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>{pinMode==='unlock-chat'?'Unlock Chat':pinMode==='unlock-app'?'Unlock Guftin':'Create PIN'}</Text>
         <Text style={{fontSize:12,color:C.muted}}>{pinMode==='unlock-chat'?'Enter this chat’s PIN.':pinMode==='unlock-app'?'Enter your app PIN.':'Choose a 4–8 digit PIN and confirm it.'}</Text>
         <TextInput value={pinEntry} onChangeText={v=>setPinEntry(v.replace(/\D/g,'').slice(0,8))} keyboardType="number-pad" secureTextEntry placeholder="PIN" style={{borderWidth:1,borderColor:C.line,borderRadius:12,padding:14,color:C.ink,fontSize:18,letterSpacing:5}} />
-        {pinMode==='set-chat'||pinMode==='set-app'?<TextInput value={pinConfirm} onChangeText={v=>setPinConfirm(v.replace(/\\D/g,'').slice(0,8))} keyboardType="number-pad" secureTextEntry placeholder="Confirm PIN" style={{borderWidth:1,borderColor:C.line,borderRadius:12,padding:14,color:C.ink,fontSize:18,letterSpacing:5}}/>:null}
+        {pinMode==='set-chat'||pinMode==='set-app'?<TextInput value={pinConfirm} onChangeText={v=>setPinConfirm(v.replace(/\D/g,'').slice(0,8))} keyboardType="number-pad" secureTextEntry placeholder="Confirm PIN" style={{borderWidth:1,borderColor:C.line,borderRadius:12,padding:14,color:C.ink,fontSize:18,letterSpacing:5}}/>:null}
         <Btn disabled={pinBusy} onPress={()=>void (async()=>{setPinBusy(true);try{if(pinMode==='unlock-chat'||pinMode==='unlock-app')await unlockPin();else await savePin();}finally{setPinBusy(false);}})()} style={{backgroundColor:C.green,padding:14,borderRadius:13}}><Text style={{color:'#fff',fontWeight:'900',textAlign:'center'}}>{pinBusy?'Please wait…':(pinMode==='unlock-chat'||pinMode==='unlock-app'?'Unlock':'Save PIN')}</Text></Btn>
         {(pinMode==='unlock-chat'||pinMode==='unlock-app')?<Btn onPress={()=>void resetPinByEmail()} style={{padding:10}}><Text style={{color:C.green,fontWeight:'800',textAlign:'center'}}>Forgot / Reset PIN</Text></Btn>:null}
         {(pinMode!=='unlock-app'&&pinMode!=='unlock-chat')?<Btn onPress={()=>setPinModalVisible(false)} style={{padding:8}}><Text style={{color:C.muted,textAlign:'center'}}>Cancel</Text></Btn>:null}
