@@ -16,7 +16,8 @@ begin
   delete from public.kc_messages where id=p_message_id and sender_id=auth.uid();
 end;
 $$;
-revoke all on function public.kc_delete_message_for_everyone(uuid) from public, anon;\ngrant execute on function public.kc_delete_message_for_everyone(uuid) to authenticated;
+revoke all on function public.kc_delete_message_for_everyone(uuid) from public, anon;
+grant execute on function public.kc_delete_message_for_everyone(uuid) to authenticated;
 
 create or replace function public.kc_update_group_details(p_conversation_id uuid,p_title text default null,p_photo_url text default null)
 returns void
@@ -40,7 +41,8 @@ begin
   where id=p_conversation_id;
 end;
 $$;
-revoke all on function public.kc_update_group_details(uuid,text,text) from public, anon;\ngrant execute on function public.kc_update_group_details(uuid,text,text) to authenticated;
+revoke all on function public.kc_update_group_details(uuid,text,text) from public, anon;
+grant execute on function public.kc_update_group_details(uuid,text,text) to authenticated;
 
 create or replace function public.kc_set_group_admin(p_conversation_id uuid,p_member_id uuid,p_make_admin boolean)
 returns void
@@ -62,7 +64,8 @@ begin
   where conversation_id=p_conversation_id and user_id=p_member_id;
 end;
 $$;
-revoke all on function public.kc_set_group_admin(uuid,uuid,boolean) from public, anon;\ngrant execute on function public.kc_set_group_admin(uuid,uuid,boolean) to authenticated;
+revoke all on function public.kc_set_group_admin(uuid,uuid,boolean) from public, anon;
+grant execute on function public.kc_set_group_admin(uuid,uuid,boolean) to authenticated;
 
 create or replace function public.kc_transfer_group_ownership(p_conversation_id uuid,p_new_owner_id uuid,p_keep_old_owner_admin boolean default true)
 returns void
@@ -86,7 +89,8 @@ begin
   update public.kc_conversations set created_by=p_new_owner_id,updated_at=now() where id=p_conversation_id;
 end;
 $$;
-revoke all on function public.kc_transfer_group_ownership(uuid,uuid,boolean) from public, anon;\ngrant execute on function public.kc_transfer_group_ownership(uuid,uuid,boolean) to authenticated;
+revoke all on function public.kc_transfer_group_ownership(uuid,uuid,boolean) from public, anon;
+grant execute on function public.kc_transfer_group_ownership(uuid,uuid,boolean) to authenticated;
 
 -- Invoker functions are constrained by these explicit row policies.
 drop policy if exists "sender hard delete own message" on public.kc_messages;
