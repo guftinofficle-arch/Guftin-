@@ -4561,7 +4561,7 @@ function GuftinApp() {
               {chatFolders.map((folder:any)=><Btn key={folder.id} onPress={()=>setActiveFolderId(folder.id)} style={{paddingHorizontal:14,paddingVertical:9,borderRadius:20,backgroundColor:activeFolderId===folder.id?C.green:C.paper}}><Text style={{color:activeFolderId===folder.id?'#fff':C.ink,fontWeight:'900',fontSize:11}}>{folder.title}</Text></Btn>)}
               <Btn onPress={()=>{setFolderTargetChat(null);setFolderTitle('');setFolderModalVisible(true);}} style={{paddingHorizontal:14,paddingVertical:9,borderRadius:20,backgroundColor:C.mint}}><Text style={{color:C.green,fontWeight:'900',fontSize:11}}>＋ Folder</Text></Btn>
             </ScrollView>
-            <Btn onPress={()=>setAddOpen(true) style={{flexDirection:'row',alignItems:'center',gap:12,padding:13,borderRadius:16,backgroundColor:C.mint}}>
+            <Btn onPress={()=>setAddOpen(true)} style={{flexDirection:'row',alignItems:'center',gap:12,padding:13,borderRadius:16,backgroundColor:C.mint}}>
               <View style={{width:42,height:42,borderRadius:14,backgroundColor:C.green,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:26,color:'#fff',fontWeight:'700'}}>＋</Text></View>
               <View style={{flex:1}}>
                 <Text style={{fontSize:14,fontWeight:'900',color:C.green}}>Add a new contact</Text>
