@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from './src/lib/supabase';
+import { upgrade20 } from './src/features/upgrade20';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 import * as ImagePicker from 'expo-image-picker';
@@ -886,6 +887,9 @@ function GuftinApp() {
   const [recording,setRecording]=useState<Audio.Recording|null>(null);
   const [recordingBusy,setRecordingBusy]=useState(false);
   const [settingsOpen,setSettingsOpen]=useState(false);
+  const [advancedCenterOpen,setAdvancedCenterOpen]=useState(false);
+  const [advancedCenterLoading,setAdvancedCenterLoading]=useState(false);
+  const [advancedCenterRows,setAdvancedCenterRows]=useState<Array<{label:string;count:number;detail:string;ok:boolean}>>([]);
   const [savedItemsOpen,setSavedItemsOpen]=useState(false);
   const [savedItems,setSavedItems]=useState<any[]>([]);
   const [savedItemsLoading,setSavedItemsLoading]=useState(false);
@@ -1792,6 +1796,25 @@ function GuftinApp() {
       setSavedItems(mapped);
     }catch(error:any){Alert.alert('Saved Items unavailable',error?.message||'Please try again.');}
     finally{setSavedItemsLoading(false);}
+  };
+
+  const loadAdvancedFeatureCenter=async()=>{
+    if(!session?.user?.id)return;
+    setAdvancedCenterLoading(true);
+    const checks:Array<{label:string;detail:string;load:()=>Promise<any>}>=[
+      {label:'Encrypted backups',detail:'Encrypted backup records',load:()=>upgrade20.listEncryptedBackups()},
+      {label:'Scheduled messages',detail:'Queued and scheduled messages',load:()=>upgrade20.listScheduledMessages()},
+      {label:'Chat folders',detail:'Your saved chat folders',load:()=>upgrade20.listChatFolders()},
+      {label:'Communities',detail:'Communities available to your account',load:()=>upgrade20.listCommunities()},
+      {label:'Business quick replies',detail:'Your saved quick replies',load:()=>upgrade20.listQuickReplies()},
+      {label:'Linked encryption devices',detail:'Registered encryption devices',load:()=>upgrade20.listEncryptionDevices()},
+      {label:'Blocked accounts',detail:'Accounts you have blocked',load:()=>upgrade20.listBlockedUsers()},
+      {label:'Your reports',detail:'Reports submitted from your account',load:()=>upgrade20.listMyReports()},
+      {label:'Your appeals',detail:'Appeals submitted from your account',load:()=>upgrade20.listMyAppeals()}
+    ];
+    const results=await Promise.all(checks.map(async item=>{try{const data=await item.load();return {label:item.label,detail:item.detail,count:Array.isArray(data)?data.length:(data?1:0),ok:true};}catch(error:any){return {label:item.label,detail:error?.message||'This feature is not available for this account yet.',count:0,ok:false};}}));
+    setAdvancedCenterRows(results);
+    setAdvancedCenterLoading(false);
   };
 
   const savePrivacyPreferences=async(patch:any)=>{
@@ -4904,6 +4927,24 @@ function GuftinApp() {
       </View>
     </Modal>
 
+    <Modal visible={advancedCenterOpen} animationType="slide" onRequestClose={()=>setAdvancedCenterOpen(false)}>
+      <SafeAreaView style={{flex:1,backgroundColor:C.paper}}>
+        <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',padding:18,backgroundColor:C.white,borderBottomWidth:1,borderColor:C.line}}>
+          <View><Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>Advanced features</Text><Text style={{fontSize:11,color:C.muted,marginTop:3}}>Connected Guftin account data</Text></View>
+          <Btn onPress={()=>setAdvancedCenterOpen(false)} style={{padding:8}}><Text style={{fontSize:25,color:C.ink}}>×</Text></Btn>
+        </View>
+        <ScrollView contentContainerStyle={{padding:16,gap:10}}>
+          <Btn onPress={()=>void loadAdvancedFeatureCenter()} disabled={advancedCenterLoading} style={{backgroundColor:C.green,padding:13,borderRadius:12,alignItems:'center'}}>{advancedCenterLoading?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Refresh feature data</Text>}</Btn>
+          {advancedCenterRows.map(row=><View key={row.label} style={{backgroundColor:C.white,borderRadius:13,padding:14,borderWidth:1,borderColor:C.line,flexDirection:'row',alignItems:'center',gap:10}}>
+            <View style={{flex:1}}><Text style={{color:C.ink,fontWeight:'900'}}>{row.label}</Text><Text style={{color:C.muted,fontSize:11,marginTop:3}}>{row.ok?row.detail:row.detail}</Text></View>
+            <Text style={{color:row.ok?C.green:C.red,fontWeight:'900'}}>{row.ok?row.count+' saved':'Unavailable'}</Text>
+          </View>)}
+          {!advancedCenterRows.length&&!advancedCenterLoading?<Text style={{color:C.muted,textAlign:'center',padding:25}}>Tap refresh to check which feature data is connected to your account.</Text>:null}
+          <Text style={{color:C.muted,fontSize:11,lineHeight:17,marginTop:8}}>This page checks stored feature data only. Features that need message encryption, delivery services, transcription/translation providers, or call screen-sharing still require their own complete workflows and tests.</Text>
+        </ScrollView>
+      </SafeAreaView>
+    </Modal>
+
     <Modal visible={savedItemsOpen} animationType="slide" onRequestClose={()=>setSavedItemsOpen(false)}>
       <SafeAreaView style={{flex:1,backgroundColor:C.paper}}>
         <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',padding:18,borderBottomWidth:1,borderColor:C.line,backgroundColor:C.white}}>
@@ -4929,6 +4970,7 @@ function GuftinApp() {
       <View style={{flex:1,backgroundColor:'#0008',justifyContent:'flex-end'}}><View style={{backgroundColor:C.white,borderTopLeftRadius:24,borderTopRightRadius:24,padding:22}}>
         <Text style={{fontSize:21,fontWeight:'900',color:C.ink}}>Guftin settings</Text>
         <Text style={{color:C.muted,fontSize:12,marginTop:5,marginBottom:15}}>Privacy and connection preferences</Text>
+        <Btn onPress={()=>{setSettingsOpen(false);setAdvancedCenterOpen(true);void loadAdvancedFeatureCenter();}} style={{backgroundColor:C.mint,borderRadius:12,padding:13,marginBottom:12}}><Text style={{color:C.green,fontWeight:'900'}}>✦  Advanced features center</Text></Btn>
         <Btn onPress={()=>{setSettingsOpen(false);setSavedItemsOpen(true);void loadSavedItems();}} style={{backgroundColor:C.mint,borderRadius:12,padding:13,marginBottom:12}}>
           <Text style={{color:C.green,fontWeight:'900'}}>★  Open Saved Items</Text>
         </Btn>
