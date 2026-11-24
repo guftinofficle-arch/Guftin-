@@ -1337,10 +1337,6 @@ function GuftinApp() {
         const avatarUrl=avatarPath?(await getSignedMediaUrl(avatarPath))||undefined:undefined;
         let last=latest.get(row.conversation_id);
         if(last&&hiddenMessageIds.current.has(last.id))last=undefined;
-        const readThrough=Math.max(
-          row.last_read_at?new Date(row.last_read_at).getTime():0,
-          row.joined_at?new Date(row.joined_at).getTime():0
-        );
         const unread=unreadByConversation.get(row.conversation_id)||0;
         let preview='No messages yet';
         if(last){
