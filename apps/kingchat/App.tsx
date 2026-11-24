@@ -1850,6 +1850,10 @@ function GuftinApp() {
     const channel=supabase.channel('kingchat-user-'+session.user.id)
       .on('postgres_changes',{event:'INSERT',schema:'public',table:'kc_messages'},async payload=>{
         const m=payload.new as any;
+        // Channel posts are deliberately history-only for followers: do not
+        // deliver new channel posts into the live inbox or download their media.
+        const {data:channelPost}=await supabase.from('kc_channels').select('conversation_id').eq('conversation_id',m.conversation_id).maybeSingle();
+        if(channelPost)return;
         const item=await resolveMessage(m);
         if(clearingConversationIds.current.has(m.conversation_id)||hiddenMessageIds.current.has(m.id))return;
         setMessages(prev=>{
@@ -2122,12 +2126,35 @@ function GuftinApp() {
         return {...prev,[conversationId]:merged.sort((a,b)=>new Date(a.created_at).getTime()-new Date(b.created_at).getTime())};
       });
     }
+    const channelHistoryKey='guftin-channel-history-loaded:'+session.user.id+':'+conversationId;
+    const isChannelHistory=active?.kind==='channel';
+    if(isChannelHistory){
+      try{
+        if(await AsyncStorage.getItem(channelHistoryKey)==='1')return;
+      }catch{}
+    }
     if(!onlineRef.current)return;
-    const {data,error}=await supabase.from('kc_messages')
-      .select('id,conversation_id,sender_id,body,message_type,attachment_url,created_at,deleted_at')
-      .eq('conversation_id',conversationId)
-      .order('created_at',{ascending:true}).limit(200);
-    if(error){if(!isConnectivityFailure(error))Alert.alert('Messages could not load',error.message);return;}
+    let data:any[]=[];
+    if(isChannelHistory){
+      // First visit: archive the channel's existing text history locally in pages.
+      // Later visits stay on this local snapshot and do not fetch newly published posts.
+      for(let offset=0;offset<10000;offset+=200){
+        const page=await supabase.from('kc_messages')
+          .select('id,conversation_id,sender_id,body,message_type,attachment_url,created_at,deleted_at')
+          .eq('conversation_id',conversationId)
+          .order('created_at',{ascending:true}).range(offset,offset+199);
+        if(page.error){if(!isConnectivityFailure(page.error))Alert.alert('Channel history could not load',page.error.message);return;}
+        data.push(...(page.data||[]));
+        if((page.data||[]).length<200)break;
+      }
+    }else{
+      const result=await supabase.from('kc_messages')
+        .select('id,conversation_id,sender_id,body,message_type,attachment_url,created_at,deleted_at')
+        .eq('conversation_id',conversationId)
+        .order('created_at',{ascending:true}).limit(200);
+      if(result.error){if(!isConnectivityFailure(result.error))Alert.alert('Messages could not load',result.error.message);return;}
+      data=result.data||[];
+    }
     const {data:hiddenRows}=await supabase.from('kc_message_hidden').select('message_id').eq('user_id',session.user.id);
     const hidden=new Set((hiddenRows||[]).map((row:any)=>row.message_id));
     const visibleRows=(data||[]).filter((message:any)=>!hidden.has(message.id));
@@ -2141,6 +2168,11 @@ function GuftinApp() {
           if(cachedItem.attachment_url.startsWith('file://')&&localFile.exists)return cachedItem;
         }catch{ /* Resolve from Supabase if the local media cache has expired. */ }
       }
+      // Channel history is text-first: retain previously cached local media,
+      // but do not fetch/download channel photos or videos during history sync.
+      if(isChannelHistory&&['image','video','file'].includes(m.message_type)){
+        return {...m,body:m.message_type==='video'?'Video':m.message_type==='image'?'Photo':'Document',attachment_url:null,mine:m.sender_id===session.user.id};
+      }
       return resolveMessage(m,cachedItem);
     }));
     const combined=[...resolved,...offlinePendingItems.filter(pending=>!resolved.some(item=>item.id===pending.id))]
@@ -2148,6 +2180,7 @@ function GuftinApp() {
     if(clearingConversationIds.current.has(conversationId)||(clearGenerationByConversation.current.get(conversationId)||0)!==loadGeneration)return;
     setMessages(prev=>({...prev,[conversationId]:combined}));
     void AsyncStorage.setItem(messageCacheKey,JSON.stringify(combined)).catch(()=>{});
+    if(isChannelHistory)void AsyncStorage.setItem(channelHistoryKey,'1').catch(()=>{});
     const ownMessageIds=visibleRows.filter((m:any)=>m.sender_id===session.user.id&&!m.deleted_at).map((m:any)=>m.id);
     const {data:memberList}=await supabase.from('kc_conversation_members').select('user_id,last_read_at').eq('conversation_id',conversationId);
     const peerMember=(memberList||[]).find((member:any)=>member.user_id!==session.user.id);
@@ -2523,7 +2556,6 @@ function GuftinApp() {
   const sendMessage=async()=>{
     const body=draft.trim();
     if(!body||!active||!session||sending||clearingConversationIds.current.has(active.id))return;
-    if(!onlineRef.current){Alert.alert('You are offline','Messages cannot be sent until your internet connection returns.');return;}
     if(active.kind==='channel'){
       if(!active.isChannelOwner){Alert.alert('Channel is read-only','Only the channel owner can publish updates.');return;}
       setSending(true);
@@ -3056,7 +3088,6 @@ function GuftinApp() {
   };
 
   const sendMedia=()=>{
-    if(!onlineRef.current){Alert.alert('You are offline','Media cannot be sent until your internet connection returns.');return;}
     if(active?.kind==='channel'){
       if(!active.isChannelOwner){Alert.alert('Channel is read-only','Only the channel owner can publish media.');return;}
       void sendChannelMedia();return;
@@ -4176,8 +4207,8 @@ function GuftinApp() {
           :<>
             <Btn disabled={mediaPreparing} onPress={sendMedia} style={{width:42,height:42,borderRadius:15,backgroundColor:C.paper,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:23,color:C.green}}>＋</Text></Btn>
             {active.kind!=='channel'?<Btn disabled={sending||recordingBusy} onPress={recording?stopVoiceRecording:startVoiceRecording} style={{width:42,height:42,borderRadius:15,backgroundColor:recording?'#fde8e8':C.paper,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:18,color:recording?C.red:C.green}}>{recording?'■':'🎙'}</Text></Btn>:null}
-            <TextInput editable={isOnline} value={draft} onChangeText={setDraft} onFocus={()=>requestAnimationFrame(()=>chatMessagesListRef.current?.scrollToEnd({animated:true}))} placeholder={!isOnline?'Offline · messages unavailable':active.kind==='channel'?'Write a channel update…':recording?'Recording… tap ■ to send':'Write a message...'} multiline maxLength={4000} style={{flex:1,minHeight:46,maxHeight:110,backgroundColor:C.paper,borderRadius:16,paddingHorizontal:15,paddingVertical:12,color:C.ink,textAlignVertical:'center'}}/>
-            <Btn disabled={!isOnline||!draft.trim()||sending} onPress={sendMessage} style={{backgroundColor:C.green,width:46,height:46,borderRadius:16,alignItems:'center',justifyContent:'center'}}>
+            <TextInput editable={true} value={draft} onChangeText={setDraft} onFocus={()=>requestAnimationFrame(()=>chatMessagesListRef.current?.scrollToEnd({animated:true}))} placeholder={!isOnline?'Offline · message will send when connected':active.kind==='channel'?'Write a channel update…':recording?'Recording… tap ■ to send':'Write a message...'} multiline maxLength={4000} style={{flex:1,minHeight:46,maxHeight:110,backgroundColor:C.paper,borderRadius:16,paddingHorizontal:15,paddingVertical:12,color:C.ink,textAlignVertical:'center'}}/>
+            <Btn disabled={!draft.trim()||sending} onPress={sendMessage} style={{backgroundColor:C.green,width:46,height:46,borderRadius:16,alignItems:'center',justifyContent:'center'}}>
               {sending?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontSize:20}}>➤</Text>}
             </Btn>
           </>}
