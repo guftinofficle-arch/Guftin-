@@ -2,7 +2,7 @@
 create or replace function public.kc_delete_message_for_everyone(p_message_id uuid)
 returns void
 language plpgsql
-security definer
+security invoker
 set search_path=public
 as $$
 declare v_sender uuid;
@@ -16,12 +16,12 @@ begin
   delete from public.kc_messages where id=p_message_id and sender_id=auth.uid();
 end;
 $$;
-grant execute on function public.kc_delete_message_for_everyone(uuid) to authenticated;
+revoke all on function public.kc_delete_message_for_everyone(uuid) from public, anon;\ngrant execute on function public.kc_delete_message_for_everyone(uuid) to authenticated;
 
 create or replace function public.kc_update_group_details(p_conversation_id uuid,p_title text default null,p_photo_url text default null)
 returns void
 language plpgsql
-security definer
+security invoker
 set search_path=public
 as $$
 declare v_owner uuid; v_role text; v_kind text;
@@ -40,12 +40,12 @@ begin
   where id=p_conversation_id;
 end;
 $$;
-grant execute on function public.kc_update_group_details(uuid,text,text) to authenticated;
+revoke all on function public.kc_update_group_details(uuid,text,text) from public, anon;\ngrant execute on function public.kc_update_group_details(uuid,text,text) to authenticated;
 
 create or replace function public.kc_set_group_admin(p_conversation_id uuid,p_member_id uuid,p_make_admin boolean)
 returns void
 language plpgsql
-security definer
+security invoker
 set search_path=public
 as $$
 declare v_owner uuid; v_kind text;
@@ -62,12 +62,12 @@ begin
   where conversation_id=p_conversation_id and user_id=p_member_id;
 end;
 $$;
-grant execute on function public.kc_set_group_admin(uuid,uuid,boolean) to authenticated;
+revoke all on function public.kc_set_group_admin(uuid,uuid,boolean) from public, anon;\ngrant execute on function public.kc_set_group_admin(uuid,uuid,boolean) to authenticated;
 
 create or replace function public.kc_transfer_group_ownership(p_conversation_id uuid,p_new_owner_id uuid,p_keep_old_owner_admin boolean default true)
 returns void
 language plpgsql
-security definer
+security invoker
 set search_path=public
 as $$
 declare v_owner uuid; v_kind text;
@@ -86,4 +86,30 @@ begin
   update public.kc_conversation_members set role='owner' where conversation_id=p_conversation_id and user_id=p_new_owner_id;
 end;
 $$;
-grant execute on function public.kc_transfer_group_ownership(uuid,uuid,boolean) to authenticated;
+revoke all on function public.kc_transfer_group_ownership(uuid,uuid,boolean) from public, anon;\ngrant execute on function public.kc_transfer_group_ownership(uuid,uuid,boolean) to authenticated;
+
+-- Invoker functions are constrained by these explicit row policies.
+drop policy if exists "sender hard delete own message" on public.kc_messages;
+create policy "sender hard delete own message" on public.kc_messages
+for delete to authenticated using(sender_id=(select auth.uid()));
+grant delete on public.kc_messages to authenticated;
+
+drop policy if exists "group owner admin update details" on public.kc_conversations;
+create policy "group owner admin update details" on public.kc_conversations
+for update to authenticated
+using(kind='group' and (created_by=(select auth.uid()) or exists(
+  select 1 from public.kc_conversation_members m
+  where m.conversation_id=id and m.user_id=(select auth.uid()) and m.role in ('owner','admin')
+)))
+with check(kind='group' and exists(
+  select 1 from public.kc_conversation_members m
+  where m.conversation_id=id and m.user_id=(select auth.uid()) and m.role in ('owner','admin')
+));
+grant update(title,photo_url,updated_at,created_by) on public.kc_conversations to authenticated;
+
+drop policy if exists "group owner manages member roles" on public.kc_conversation_members;
+create policy "group owner manages member roles" on public.kc_conversation_members
+for update to authenticated
+using(exists(select 1 from public.kc_conversations c where c.id=conversation_id and c.kind='group' and c.created_by=(select auth.uid())))
+with check(exists(select 1 from public.kc_conversations c where c.id=conversation_id and c.kind='group' and c.created_by=(select auth.uid())));
+grant update(role) on public.kc_conversation_members to authenticated;
