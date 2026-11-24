@@ -43,7 +43,13 @@
           }
         }
       ],
-      "@config-plugins/react-native-webrtc"
+      "@config-plugins/react-native-webrtc",
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Allow Guftin to use Face ID to unlock your account."
+        }
+      ]
     ],
     "icon": "./assets/guftin-icon.png",
     "description": "Guftin is a messaging and channel app. For complaints, feedback, feature requests or support, contact Guftin Official at guftinofficle@gmail.com."
