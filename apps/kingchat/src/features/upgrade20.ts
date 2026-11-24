@@ -94,9 +94,32 @@ export const upgrade20 = {
 
   // 16–18: business catalogue, quick replies, and channel analytics.
   async listBusinessProducts(ownerId?: string) {
-    let query = db.from('kc_business_products').select('*').eq('is_published', true).order('created_at', { ascending: false });
-    if (ownerId) query = query.eq('owner_id', ownerId);
+    let query = db.from('kc_business_products').select('*').order('created_at', { ascending: false });
+    query = ownerId ? query.eq('owner_id', ownerId) : query.eq('is_published', true);
     return unwrap(await query);
+  },
+  async updateBusinessProduct(id: string, patch: { title?: string; description?: string; price?: number; currency_code?: string; image_path?: string | null; availability?: 'available' | 'out_of_stock' | 'preorder'; is_published?: boolean }) {
+    const userId = await requireUserId();
+    const safe: Record<string, unknown> = {};
+    if (patch.title !== undefined) safe.title = patch.title.trim().slice(0, 120);
+    if (patch.description !== undefined) safe.description = patch.description;
+    if (patch.price !== undefined) {
+      if (!Number.isFinite(patch.price) || patch.price < 0) throw new Error('Enter a valid non-negative price.');
+      safe.price = patch.price;
+    }
+    if (patch.currency_code !== undefined) {
+      if (!/^[A-Z]{3}$/.test(patch.currency_code)) throw new Error('Currency must be a three-letter ISO code.');
+      safe.currency_code = patch.currency_code;
+    }
+    if (patch.image_path !== undefined) safe.image_path = patch.image_path;
+    if (patch.availability !== undefined) safe.availability = patch.availability;
+    if (patch.is_published !== undefined) safe.is_published = patch.is_published;
+    if (safe.title === '') throw new Error('A product title is required.');
+    return unwrap(await db.from('kc_business_products').update({ ...safe, updated_at: new Date().toISOString() }).eq('id', id).eq('owner_id', userId).select().single());
+  },
+  async deleteBusinessProduct(id: string) {
+    const userId = await requireUserId();
+    return unwrap(await db.from('kc_business_products').delete().eq('id', id).eq('owner_id', userId));
   },
   async saveBusinessProduct(product: { title: string; description?: string; price: number; currency_code: string; image_path?: string; availability?: string; is_published?: boolean }) {
     const userId = await requireUserId();
@@ -122,6 +145,16 @@ export const upgrade20 = {
     const userId = await requireUserId();
     return unwrap(await db.from('kc_message_translations').select('*').eq('message_id', messageId).eq('user_id', userId).eq('target_language', targetLanguage).maybeSingle());
   },
+  async saveTranscriptionEnvelope(messageId: string, transcriptEnvelope: string, languageCode?: string) {
+    const userId = await requireUserId();
+    if (!transcriptEnvelope.trim()) throw new Error('Encrypted transcript is required.');
+    return unwrap(await db.from('kc_message_transcriptions').upsert({ message_id: messageId, user_id: userId, transcript_envelope: transcriptEnvelope, language_code: languageCode ?? null }, { onConflict: 'message_id,user_id' }).select().single());
+  },
+  async saveTranslationEnvelope(messageId: string, targetLanguage: string, translationEnvelope: string) {
+    const userId = await requireUserId();
+    if (!/^[a-z]{2,3}(-[A-Z]{2})?$/.test(targetLanguage) || !translationEnvelope.trim()) throw new Error('A valid target language and encrypted translation are required.');
+    return unwrap(await db.from('kc_message_translations').upsert({ message_id: messageId, user_id: userId, target_language: targetLanguage, translation_envelope: translationEnvelope }, { onConflict: 'message_id,user_id,target_language' }).select().single());
+  },
 
   // 20: user reporting and appeal submission.
   async reportMessage(messageId: string, reason: string, details?: string) {
@@ -130,11 +163,6 @@ export const upgrade20 = {
     if (!cleanReason) throw new Error('A report reason is required.');
     return unwrap(await db.from('kc_spam_reports').insert({ reporter_id: reporterId, message_id: messageId, reason: cleanReason, details: details?.trim().slice(0, 2000) ?? null }).select().single());
   },
-  async listMyReports() {
-    const userId = await requireUserId();
-    return unwrap(await db.from('kc_spam_reports').select('*').eq('reporter_id', userId).order('created_at', { ascending: false }));
-  },
-
   async getFeaturePreferences() {
     const userId = await requireUserId();
     return unwrap(await db.from('kc_feature_preferences').select('*').eq('user_id', userId).maybeSingle());
@@ -150,11 +178,19 @@ export const upgrade20 = {
     if (!input.public_key.trim() || !input.device_label.trim()) throw new Error('A device key and label are required.');
     return unwrap(await db.from('kc_e2ee_devices').insert({ user_id: userId, ...input, last_active_at: new Date().toISOString() }).select().single());
   },
-  async createScheduledMessage(input: { conversation_id: string; body_envelope: string; message_type: string; attachment_path?: string | null; scheduled_at: string }) {
+  async createScheduledMessage(input: { conversation_id: string; body_envelope?: string | null; message_type: 'text' | 'image' | 'video' | 'audio' | 'file'; attachment_path?: string | null; scheduled_at: string }) {
     const senderId = await requireUserId();
     const when = new Date(input.scheduled_at);
     if (!Number.isFinite(when.getTime()) || when.getTime() <= Date.now()) throw new Error('Choose a future delivery time.');
-    return unwrap(await db.from('kc_scheduled_messages').insert({ ...input, sender_id: senderId, delivery_status: 'pending' }).select().single());
+    if (!input.body_envelope && !input.attachment_path) throw new Error('A scheduled message needs encrypted text or an attachment.');
+    return unwrap(await db.from('kc_scheduled_messages').insert({ ...input, sender_id: senderId, delivery_status: 'queued' }).select().single());
+  },
+  async cancelQueuedMessage(id: string) {
+    const userId = await requireUserId();
+    return unwrap(await db.from('kc_scheduled_messages').update({ delivery_status: 'cancelled', updated_at: new Date().toISOString() }).eq('id', id).eq('sender_id', userId).in('delivery_status', ['queued','failed']).select().maybeSingle());
+  },
+  async listMessageEditHistory(messageId: string) {
+    return unwrap(await db.from('kc_message_edit_history').select('id,message_id,editor_id,previous_body_envelope,new_body_envelope,edited_at').eq('message_id', messageId).order('edited_at', { ascending: false }));
   },
   async createPoll(input: { conversation_id: string; question_envelope: string; options: string[]; allows_multiple?: boolean; is_anonymous?: boolean; expires_at?: string | null }) {
     const creatorId = await requireUserId();
@@ -176,9 +212,15 @@ export const upgrade20 = {
     const userId = await requireUserId();
     return unwrap(await db.from('kc_poll_votes').upsert({ poll_id: pollId, option_id: optionId, user_id: userId }, { onConflict: 'poll_id,option_id,user_id' }).select().single());
   },
+  async closePoll(pollId: string) {
+    return unwrap(await db.from('kc_polls').update({ closed_at: new Date().toISOString() }).eq('id', pollId).is('closed_at', null).select().single());
+  },
   async respondToGroupEvent(eventId: string, response: 'going' | 'maybe' | 'not_going') {
     const userId = await requireUserId();
     return unwrap(await db.from('kc_group_event_rsvps').upsert({ event_id: eventId, user_id: userId, response, updated_at: new Date().toISOString() }, { onConflict: 'event_id,user_id' }).select().single());
+  },
+  async cancelGroupEvent(eventId: string) {
+    return unwrap(await db.from('kc_group_events').update({ cancelled_at: new Date().toISOString() }).eq('id', eventId).is('cancelled_at', null).select().single());
   },
   async createGroupEvent(input: { conversation_id: string; title_envelope: string; details_envelope?: string | null; location_envelope?: string | null; starts_at: string; ends_at?: string | null; reminder_minutes?: number }) {
     const creatorId = await requireUserId();
