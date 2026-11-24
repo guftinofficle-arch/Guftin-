@@ -99,6 +99,7 @@ module.exports = ({ config }) => ({
     },
     permissions: [
       ...(config.android?.permissions || []),
+      "android.permission.READ_CONTACTS",
       "android.permission.CAMERA",
       "android.permission.RECORD_AUDIO",
       "android.permission.VIBRATE",
@@ -125,6 +126,12 @@ module.exports = ({ config }) => ({
   },
   plugins: [
     ...(config.plugins || []),
+    [
+      "expo-contacts",
+      {
+        contactsPermission: "Guftin checks your phone contacts only when you choose Find Guftin accounts."
+      }
+    ],
     [
       "expo-media-library",
       {
