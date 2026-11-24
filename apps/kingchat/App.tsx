@@ -12,6 +12,7 @@ import { supabase } from './src/lib/supabase';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 import * as ImagePicker from 'expo-image-picker';
+import * as ExpoContacts from 'expo-contacts';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Sharing from 'expo-sharing';
 import * as MediaLibrary from 'expo-media-library';
@@ -259,6 +260,19 @@ const THEMES:any = {
 type Chat = { id:string; name:string; avatar:string; avatarUrl?:string; color:string; last:string; time:string; unread:number; online:boolean; kind:string; lastAt:number; isOfficial?:boolean; isVerified?:boolean; isChannelOwner?:boolean; inviteCode?:string; isPublic?:boolean; ownerId?:string; description?:string; hasConversationActivity?:boolean; hasCallActivity?:boolean; pendingContactId?:string; hasPendingActivity?:boolean };
 type Message = { id:string; conversation_id:string; sender_id:string|null; body:string|null; message_type:string; attachment_url?:string|null; created_at:string; mine:boolean; deleted_at?:string|null; pending?:boolean };
 const sortInboxChats=(items:Chat[])=>items.slice().sort((a,b)=>(Number(!!b.isOfficial)-Number(!!a.isOfficial))||((Number(b.lastAt)||0)-(Number(a.lastAt)||0)));
+const normalizeGuftinPhone=(value:string):string|null=>{
+  const raw=String(value||'').trim();
+  if(!raw)return null;
+  const digits=raw.replace(/\\D/g,'');
+  let normalized='';
+  if(raw.startsWith('+'))normalized='+'+digits;
+  else if(digits.startsWith('00'))normalized='+'+digits.slice(2);
+  else if(digits.startsWith('92'))normalized='+'+digits;
+  else if(digits.length===11&&digits.startsWith('0'))normalized='+92'+digits.slice(1);
+  else if(digits.length===10&&digits.startsWith('3'))normalized='+92'+digits;
+  else return null;
+  return /^\\+[1-9][0-9]{7,14}$/.test(normalized)?normalized:null;
+};
 const extractChannelInviteCode=(url:string)=>{
   const parts=url.replace(/[?#].*$/, '').split('/').filter(Boolean);
   const channelIndex=parts.findIndex(part=>part.toLowerCase()==='channel');
@@ -962,6 +976,8 @@ function GuftinApp() {
   const [addOpen,setAddOpen]=useState(false);
   const [contactUsername,setContactUsername]=useState('');
   const [adding,setAdding]=useState(false);
+  const [phoneContactMatches,setPhoneContactMatches]=useState<any[]>([]);
+  const [phoneContactsLoading,setPhoneContactsLoading]=useState(false);
   const [groupCreateOpen,setGroupCreateOpen]=useState(false);
   const [groupName,setGroupName]=useState('');
   const [groupContacts,setGroupContacts]=useState<any[]>([]);
@@ -991,6 +1007,12 @@ function GuftinApp() {
 
   const [profileName,setProfileName]=useState('');
   const [profileUsername,setProfileUsername]=useState('');
+  const [profilePhone,setProfilePhone]=useState('');
+  const [phoneOtp,setPhoneOtp]=useState('');
+  const [phoneVerificationPending,setPhoneVerificationPending]=useState(false);
+  const [phoneVerificationSent,setPhoneVerificationSent]=useState(false);
+  const [phoneVerifyError,setPhoneVerifyError]=useState('');
+  const [phoneBusy,setPhoneBusy]=useState(false);
   const [about,setAbout]=useState('');
   const [savingProfile,setSavingProfile]=useState(false);
   const handledAuthUrls=useRef(new Set<string>());
@@ -3509,16 +3531,78 @@ function GuftinApp() {
     if(error)setAuthError(error.message);
   };
 
-  const finishProfile=async()=>{
+  const finishProfile=async(skipPhone=false)=>{
     if(!session||savingProfile)return;
     const cleanUsername=profileUsername.trim().toLowerCase().replace(/^@/,'');
     const cleanName=profileName.trim();
+    const cleanPhone=skipPhone?'':profilePhone.trim();
+    const normalizedPhone=cleanPhone?normalizeGuftinPhone(cleanPhone):null;
     if(!/^[a-z0-9_]{3,24}$/.test(cleanUsername)){Alert.alert('Username not valid','Use 3-24 lowercase letters, numbers or underscore.');return;}
     if(cleanName.length<2||cleanName.length>40){Alert.alert('Name required','Use a name between 2 and 40 characters.');return;}
+    if(cleanPhone&&!normalizedPhone){Alert.alert('Phone number not valid','Enter an international number such as +923001234567, or a Pakistani mobile number beginning with 03.');return;}
     setSavingProfile(true);
     const {error}=await supabase.rpc('kc_finish_profile',{p_username:cleanUsername,p_display_name:cleanName});
     setSavingProfile(false);
     if(error){Alert.alert('Profile not saved',error.message);return;}
+    await loadProfile();
+    if(!normalizedPhone){
+      setPhoneVerificationPending(false);
+      setPhoneVerificationSent(false);
+      setProfilePhone('');
+      return;
+    }
+    setPhoneVerificationPending(true);
+    setPhoneVerificationSent(false);
+    setPhoneOtp('');
+    setPhoneVerifyError('');
+    setPhoneBusy(true);
+    const {error:phoneError}=await supabase.auth.updateUser({phone:normalizedPhone});
+    setPhoneBusy(false);
+    if(phoneError){
+      setPhoneVerifyError(phoneError.message||'Guftin could not send a verification code. You can retry or continue without adding a phone number.');
+      return;
+    }
+    setPhoneVerificationSent(true);
+  };
+
+  const retryPhoneVerification=async()=>{
+    const normalizedPhone=normalizeGuftinPhone(profilePhone);
+    if(!normalizedPhone){setPhoneVerifyError('Enter a valid international phone number.');return;}
+    setPhoneBusy(true);setPhoneVerifyError('');
+    const {error}=await supabase.auth.updateUser({phone:normalizedPhone});
+    setPhoneBusy(false);
+    if(error){setPhoneVerifyError(error.message||'Could not send the verification code.');return;}
+    setPhoneVerificationSent(true);
+  };
+
+  const verifyProfilePhone=async()=>{
+    const normalizedPhone=normalizeGuftinPhone(profilePhone);
+    const token=phoneOtp.replace(/\\D/g,'');
+    if(!normalizedPhone){setPhoneVerifyError('Enter a valid phone number.');return;}
+    if(token.length!==6){setPhoneVerifyError('Enter the complete 6-digit SMS code.');return;}
+    setPhoneBusy(true);setPhoneVerifyError('');
+    const {error}=await supabase.auth.verifyOtp({phone:normalizedPhone,token,type:'phone_change'});
+    if(error){setPhoneBusy(false);setPhoneVerifyError(error.message||'Phone verification failed.');return;}
+    const {error:discoveryError}=await supabase.rpc('kc_set_phone_discoverable',{p_enabled:true});
+    setPhoneBusy(false);
+    if(discoveryError){
+      setPhoneVerifyError('Your phone is verified, but Guftin could not enable contact discovery: '+discoveryError.message);
+      return;
+    }
+    setPhoneVerificationPending(false);
+    setPhoneVerificationSent(false);
+    setPhoneOtp('');
+    setProfilePhone('');
+    await loadProfile();
+  };
+
+  const skipPhoneSetup=async()=>{
+    setPhoneVerificationPending(false);
+    setPhoneVerificationSent(false);
+    setPhoneOtp('');
+    setProfilePhone('');
+    setPhoneVerifyError('');
+    await supabase.rpc('kc_set_phone_discoverable',{p_enabled:false});
     await loadProfile();
   };
 
@@ -3539,6 +3623,84 @@ function GuftinApp() {
       name,avatar:initials(name),color:colorFor(name),
       last:'Start a conversation',time:'',unread:0,online:false,kind:'direct',lastAt:0
     };
+    setPeerLastReadAt(null);
+    setActive(chat);
+  };
+
+  const findPhoneContacts=async()=>{
+    if(!session||phoneContactsLoading)return;
+    setPhoneContactsLoading(true);
+    setPhoneContactMatches([]);
+    try{
+      const permission=await ExpoContacts.requestPermissionsAsync();
+      if(permission.status!=='granted'){
+        Alert.alert('Contacts permission needed','Allow Guftin to read your phone contacts only when you choose Find Guftin accounts.');
+        return;
+      }
+      const response=await ExpoContacts.getContactsAsync({
+        fields:[ExpoContacts.Fields.Name,ExpoContacts.Fields.PhoneNumbers],
+        pageSize:1000,
+        pageOffset:0
+      });
+      const numberToContact=new Map<string,{name:string}>();
+      for(const contact of response.data||[]){
+        const savedName=(contact as any).name||[ (contact as any).firstName,(contact as any).lastName ].filter(Boolean).join(' ')||'Phone contact';
+        for(const phone of (contact as any).phoneNumbers||[]){
+          const normalized=normalizeGuftinPhone(String(phone.number||''));
+          if(normalized&&!numberToContact.has(normalized))numberToContact.set(normalized,{name:savedName});
+        }
+      }
+      const numbers=[...numberToContact.keys()].slice(0,1000);
+      if(!numbers.length){
+        Alert.alert('No phone numbers found','Save phone numbers with an international country code, or use Pakistan mobile format such as 03xxxxxxxxx.');
+        return;
+      }
+      const allMatches:any[]=[];
+      for(let offset=0;offset<numbers.length;offset+=250){
+        const batch=numbers.slice(offset,offset+250);
+        const {data,error}=await supabase.rpc('kc_lookup_phone_contacts',{p_phone_numbers:batch});
+        if(error)throw error;
+        for(const row of (data||[]) as any[]){
+          if(allMatches.some(existing=>existing.contact_id===row.contact_id))continue;
+          const local=numberToContact.get(row.matched_phone);
+          const avatar=row.avatar_url?await getSignedMediaUrl(row.avatar_url):null;
+          allMatches.push({
+            ...row,
+            local_contact_name:local?.name||row.display_name||'Phone contact',
+            avatar_signed_url:avatar||undefined
+          });
+        }
+      }
+      setPhoneContactMatches(allMatches);
+      if(!allMatches.length){
+        Alert.alert('No Guftin accounts found','None of the checked phone contacts has an account discoverable by phone number yet. You can still add people by username.');
+      }
+    }catch(error:any){
+      Alert.alert('Contacts could not be checked',error?.message||'Please try again.');
+    }finally{
+      setPhoneContactsLoading(false);
+    }
+  };
+
+  const openPhoneContactChat=(item:any)=>{
+    if(!item?.contact_id)return;
+    const name=item.display_name||item.local_contact_name||'Guftin member';
+    const chat:Chat={
+      id:'pending:'+item.contact_id,
+      pendingContactId:item.contact_id,
+      name,
+      avatar:initials(name),
+      avatarUrl:item.avatar_signed_url||undefined,
+      color:colorFor(name),
+      last:'Start a conversation',
+      time:'',
+      unread:0,
+      online:false,
+      kind:'direct',
+      lastAt:0
+    };
+    setAddOpen(false);
+    setPhoneContactMatches([]);
     setPeerLastReadAt(null);
     setActive(chat);
   };
@@ -3841,17 +4003,32 @@ function GuftinApp() {
     return <SafeAreaView style={{flex:1,alignItems:'center',justifyContent:'center',backgroundColor:C.paper}}><ActivityIndicator color={C.green}/><Text style={{color:C.muted,marginTop:10}}>Loading your account…</Text></SafeAreaView>;
   }
 
-  if(!profile?.username){
+  if(!profile?.username||phoneVerificationPending){
     return <SafeAreaView style={{flex:1,backgroundColor:C.paper,padding:24,justifyContent:'center'}}>
       <StatusBar barStyle="dark-content"/>
-      <View style={{alignItems:'center',marginBottom:28}}><BrandLogo size={70}/><Heading>Set your Guftin ID</Heading></View>
-      <Text style={{fontSize:22,fontWeight:'900',color:C.ink,marginBottom:8}}>Complete your profile</Text>
-      <Text style={{color:C.muted,lineHeight:20,marginBottom:18}}>Choose a username that people can search to find and add you.</Text>
-      <TextInput value={profileName} onChangeText={setProfileName} placeholder="Your display name" autoCapitalize="words" style={{backgroundColor:C.white,borderRadius:15,padding:16,marginBottom:10,color:C.ink}}/>
-      <TextInput value={profileUsername} onChangeText={v=>setProfileUsername(v.toLowerCase().replace(/[^a-z0-9_]/g,''))} placeholder="Username (3-24 characters)" autoCapitalize="none" style={{backgroundColor:C.white,borderRadius:15,padding:16,marginBottom:10,color:C.ink}}/>
-      <Text style={{fontSize:11,color:C.muted,marginBottom:14}}>Allowed: lowercase letters, numbers and underscore.</Text>
-      <Btn disabled={savingProfile} onPress={finishProfile} style={{backgroundColor:C.green,padding:17,borderRadius:16,alignItems:'center'}}>{savingProfile?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Save and continue</Text>}</Btn>
-      <Btn onPress={()=>supabase.auth.signOut()} style={{padding:15,alignItems:'center'}}><Text style={{color:C.red,fontWeight:'700'}}>Sign out</Text></Btn>
+      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{flexGrow:1,justifyContent:'center'}}>
+        <View style={{alignItems:'center',marginBottom:26}}><BrandLogo size={70}/><Heading>{phoneVerificationPending?'Verify your phone number':'Set your Guftin ID'}</Heading></View>
+        {phoneVerificationPending?<>
+          <Text style={{fontSize:22,fontWeight:'900',color:C.ink,marginBottom:8}}>Confirm your mobile number</Text>
+          <Text style={{color:C.muted,lineHeight:20,marginBottom:18}}>We sent a 6-digit SMS code to {normalizeGuftinPhone(profilePhone)||profilePhone}. Once verified, people who already have this number in their phone contacts can find your Guftin account. Your number itself is not shown to them.</Text>
+          {phoneVerificationSent?<TextInput value={phoneOtp} onChangeText={v=>{setPhoneOtp(v.replace(/\\D/g,'').slice(0,6));setPhoneVerifyError('');}} placeholder="6-digit SMS code" keyboardType="number-pad" maxLength={6} textContentType="oneTimeCode" autoComplete="sms-otp" style={{backgroundColor:C.white,borderRadius:15,padding:17,marginBottom:12,color:C.ink,fontSize:22,letterSpacing:7,textAlign:'center'}}/>:null}
+          {phoneVerifyError?<Text style={{color:C.red,fontSize:12,lineHeight:18,marginBottom:12}}>{phoneVerifyError}</Text>:null}
+          {phoneVerificationSent?<Btn disabled={phoneBusy||phoneOtp.replace(/\\D/g,'').length!==6} onPress={verifyProfilePhone} style={{backgroundColor:C.green,padding:17,borderRadius:16,alignItems:'center'}}>{phoneBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Verify phone number</Text>}</Btn>:<Btn disabled={phoneBusy} onPress={retryPhoneVerification} style={{backgroundColor:C.green,padding:17,borderRadius:16,alignItems:'center'}}>{phoneBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Send verification code</Text>}</Btn>}
+          <Btn disabled={phoneBusy} onPress={skipPhoneSetup} style={{padding:15,alignItems:'center'}}><Text style={{color:C.muted,fontWeight:'800'}}>Continue without phone number</Text></Btn>
+        </>:<>
+          <Text style={{fontSize:22,fontWeight:'900',color:C.ink,marginBottom:8}}>Complete your profile</Text>
+          <Text style={{color:C.muted,lineHeight:20,marginBottom:18}}>Choose a username that people can search to find and add you.</Text>
+          <TextInput value={profileName} onChangeText={setProfileName} placeholder="Your display name" autoCapitalize="words" style={{backgroundColor:C.white,borderRadius:15,padding:16,marginBottom:10,color:C.ink}}/>
+          <TextInput value={profileUsername} onChangeText={v=>setProfileUsername(v.toLowerCase().replace(/[^a-z0-9_]/g,''))} placeholder="Username (3-24 characters)" autoCapitalize="none" style={{backgroundColor:C.white,borderRadius:15,padding:16,marginBottom:10,color:C.ink}}/>
+          <Text style={{fontSize:11,color:C.muted,marginBottom:14}}>Allowed: lowercase letters, numbers and underscore.</Text>
+          <Text style={{fontSize:13,fontWeight:'900',color:C.ink,marginBottom:7}}>Mobile number (optional)</Text>
+          <TextInput value={profilePhone} onChangeText={v=>{setProfilePhone(v);setPhoneVerifyError('');}} placeholder="+92 300 1234567" keyboardType="phone-pad" autoComplete="tel" style={{backgroundColor:C.white,borderRadius:15,padding:16,marginBottom:8,color:C.ink}}/>
+          <Text style={{fontSize:11,color:C.muted,lineHeight:17,marginBottom:14}}>You can skip this. Add a number only if you want people who have it saved in their phone contacts to find your Guftin account. It must be verified by SMS; your number stays private.</Text>
+          <Btn disabled={savingProfile} onPress={()=>void finishProfile(false)} style={{backgroundColor:C.green,padding:17,borderRadius:16,alignItems:'center'}}>{savingProfile?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>{profilePhone.trim()?'Save and verify number':'Save and continue'}</Text>}</Btn>
+          <Btn disabled={savingProfile} onPress={()=>void finishProfile(true)} style={{padding:14,alignItems:'center'}}><Text style={{color:C.muted,fontWeight:'800'}}>Skip phone number</Text></Btn>
+        </>}
+        <Btn onPress={()=>supabase.auth.signOut()} style={{padding:12,alignItems:'center'}}><Text style={{color:C.red,fontWeight:'700'}}>Sign out</Text></Btn>
+      </ScrollView>
     </SafeAreaView>;
   }
 
@@ -4371,15 +4548,30 @@ function GuftinApp() {
     </Modal>
     <Modal visible={addOpen} transparent animationType="fade" onRequestClose={()=>setAddOpen(false)}>
       <View style={{flex:1,backgroundColor:'#0008',justifyContent:'center',padding:22}}>
-        <View style={{backgroundColor:C.white,borderRadius:22,padding:22}}>
+        <View style={{backgroundColor:C.white,borderRadius:22,padding:20,maxHeight:'88%'}}>
           <Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>Add a new Guftin contact</Text>
-          <Text style={{color:C.muted,lineHeight:19,marginTop:7,marginBottom:16}}>Enter the exact username of a registered Guftin user. Example: ali_786</Text>
+          <Text style={{color:C.muted,lineHeight:19,marginTop:7,marginBottom:12}}>Find someone by their Guftin username, or check your phone contacts for verified Guftin accounts.</Text>
           <TextInput value={contactUsername} onChangeText={v=>setContactUsername(v.toLowerCase().replace(/[^a-z0-9_]/g,''))} autoCapitalize="none" placeholder="Username (without @)" style={{backgroundColor:C.paper,borderRadius:14,padding:15,color:C.ink}}/>
-          <Text style={{color:C.muted,fontSize:11,lineHeight:16,marginTop:9}}>The contact is saved to your Guftin contacts. A conversation is created only when you send the first message or place a call.</Text>
-          <Btn onPress={()=>{setAddOpen(false);void openGroupCreator();}} style={{padding:12,alignSelf:'flex-start',marginTop:12}}><Text style={{color:C.green,fontWeight:'800'}}>👥 Create a group instead</Text></Btn>
-          <View style={{flexDirection:'row',justifyContent:'flex-end',gap:10,marginTop:18}}>
+          <Text style={{color:C.muted,fontSize:11,lineHeight:16,marginTop:8}}>A conversation is created only when you open the person and send your first message or place a call.</Text>
+          <Btn disabled={phoneContactsLoading} onPress={()=>void findPhoneContacts()} style={{backgroundColor:C.mint,padding:13,borderRadius:13,marginTop:12,alignItems:'center'}}>
+            {phoneContactsLoading?<ActivityIndicator color={C.green}/>:<Text style={{color:C.green,fontWeight:'900'}}>Find Guftin accounts in phone contacts</Text>}
+          </Btn>
+          <Text style={{color:C.muted,fontSize:10,lineHeight:15,marginTop:6}}>Guftin checks phone numbers only after you tap this button. It returns matching account details, not other people's phone numbers, and does not upload or save your address-book names.</Text>
+          {phoneContactMatches.length>0?<ScrollView style={{maxHeight:230,marginTop:8}} keyboardShouldPersistTaps="handled">
+            {phoneContactMatches.map((item:any)=><Btn key={item.contact_id} onPress={()=>openPhoneContactChat(item)} style={{flexDirection:'row',alignItems:'center',gap:10,paddingVertical:10,borderBottomWidth:1,borderColor:C.line}}>
+              {item.avatar_signed_url?<Avatar label={initials(item.display_name||'G')} color={colorFor(item.contact_id)} size={43} uri={item.avatar_signed_url}/>:<View style={{width:43,height:43,borderRadius:15,backgroundColor:C.mint,alignItems:'center',justifyContent:'center'}}><BrandLogo size={30}/></View>}
+              <View style={{flex:1}}>
+                <Text style={{fontWeight:'900',color:C.ink}}>{item.display_name||item.local_contact_name||'Guftin member'}</Text>
+                <Text style={{fontSize:11,color:C.muted,marginTop:2}}>@{item.username||'member'} · Saved as {item.local_contact_name||'Phone contact'}</Text>
+                <Text style={{fontSize:10,color:C.green,fontWeight:'900',marginTop:3}}>GUFTIN ACCOUNT</Text>
+              </View>
+              <Text style={{fontSize:20,color:C.green,fontWeight:'900'}}>›</Text>
+            </Btn>)}
+          </ScrollView>:null}
+          <Btn onPress={()=>{setAddOpen(false);void openGroupCreator();}} style={{padding:10,alignSelf:'flex-start',marginTop:8}}><Text style={{color:C.green,fontWeight:'800'}}>👥 Create a group instead</Text></Btn>
+          <View style={{flexDirection:'row',justifyContent:'flex-end',gap:10,marginTop:12}}>
             <Btn onPress={()=>setAddOpen(false)} style={{padding:13}}><Text style={{color:C.muted,fontWeight:'700'}}>Cancel</Text></Btn>
-            <Btn disabled={adding} onPress={addContact} style={{backgroundColor:C.green,paddingHorizontal:18,paddingVertical:13,borderRadius:13}}>{adding?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'800'}}>Add contact</Text>}</Btn>
+            <Btn disabled={adding} onPress={addContact} style={{backgroundColor:C.green,paddingHorizontal:18,paddingVertical:13,borderRadius:13}}>{adding?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'800'}}>Add by username</Text>}</Btn>
           </View>
         </View>
       </View>
