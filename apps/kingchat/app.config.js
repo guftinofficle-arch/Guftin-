@@ -97,6 +97,10 @@ module.exports = ({ config }) => ({
       foregroundImage: "./assets/guftin-icon.png",
       backgroundColor: "#031522"
     },
+    blockedPermissions: [
+      ...(config.android?.blockedPermissions || []),
+      "android.permission.WRITE_CONTACTS"
+    ],
     permissions: [
       ...(config.android?.permissions || []),
       "android.permission.READ_CONTACTS",
