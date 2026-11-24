@@ -4409,6 +4409,14 @@ function GuftinApp() {
         <View style={{backgroundColor:C.mint,borderRadius:15,padding:13,marginBottom:10}}>
           <Text style={{color:C.green,fontWeight:'900',marginBottom:5}}>Account sign-in methods</Text>
           <Text style={{color:C.ink,fontSize:11,lineHeight:17}}>Linked email: {session?.user?.email||'Not linked'}{session?.user?.email_confirmed_at?' · verified':' · not verified'}</Text>
+          {!session?.user?.email?<>
+            <TextInput value={accountEmailInput} onChangeText={setAccountEmailInput} placeholder="Add Gmail / email address" keyboardType="email-address" autoCapitalize="none" autoComplete="email" style={{backgroundColor:C.white,borderRadius:11,padding:12,marginTop:10,color:C.ink}}/>
+            <TextInput value={accountEmailPassword} onChangeText={setAccountEmailPassword} placeholder="Create password (at least 8 characters)" secureTextEntry autoCapitalize="none" style={{backgroundColor:C.white,borderRadius:11,padding:12,marginTop:8,color:C.ink}}/>
+            <Btn disabled={accountEmailBusy} onPress={()=>void linkEmailToAccount()} style={{backgroundColor:C.green,padding:12,borderRadius:11,alignItems:'center',marginTop:9}}>
+              {accountEmailBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Link email and password</Text>}
+            </Btn>
+            {accountEmailNotice?<Text style={{color:C.ink,fontSize:11,lineHeight:16,marginTop:7}}>{accountEmailNotice}</Text>:null}
+          </>:null}
           <Text style={{color:C.ink,fontSize:11,lineHeight:17,marginTop:3}}>Optional mobile number: {profilePhone||'Not added'}</Text>
           <TextInput value={profilePhone} onChangeText={setProfilePhone} placeholder="Add or update mobile number (Optional)" keyboardType="phone-pad" autoComplete="tel" style={{backgroundColor:C.white,borderRadius:11,padding:12,marginTop:10,color:C.ink}}/>
           <Btn disabled={phoneBusy} onPress={()=>void (async()=>{
