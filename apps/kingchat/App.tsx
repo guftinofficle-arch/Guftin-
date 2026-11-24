@@ -1917,6 +1917,21 @@ function GuftinApp() {
     setFolderModalVisible(false);setFolderTitle('');setFolderTargetChat(null);
   };
 
+  const reportMessage=async(item:Message,reason:'spam'|'scam'|'harassment'|'impersonation'|'suspicious_link'|'other')=>{
+    if(!session?.user?.id||!item.sender_id||item.mine)return;
+    const {error}=await supabase.from('kc_spam_reports').insert({
+      reporter_id:session.user.id,
+      target_user_id:item.sender_id,
+      message_id:item.id,
+      reason
+    });
+    if(error){
+      Alert.alert('Report not sent',error.message||'Please try again.');
+      return;
+    }
+    Alert.alert('Report submitted','Thank you. This message has been reported for review.');
+  };
+
   const deleteMessage=async(item:Message)=>{
     if(!session)return;
     const hideForMe=async()=>{
@@ -1939,8 +1954,22 @@ function GuftinApp() {
     };
     const options:any[]=[{text:'Save to Saved Items',onPress:()=>void (async()=>{const {error}=await supabase.from('kc_saved_items').upsert({user_id:session.user.id,message_id:item.id,conversation_id:item.conversation_id},{onConflict:'user_id,message_id'});if(error){Alert.alert('Could not save message',error.message);return;}Alert.alert('Saved','This message is now in Saved Items.');})()},{text:'Delete for me',onPress:()=>void hideForMe()}];
     if(item.mine&&!item.deleted_at)options.push({text:'Delete for everyone',style:'destructive',onPress:()=>void deleteForEveryone()});
+    if(!item.mine&&item.sender_id){
+      options.push({text:'Report message',style:'destructive',onPress:()=>{
+        const reasons:any[]=[
+          {text:'Spam',onPress:()=>void reportMessage(item,'spam')},
+          {text:'Scam or fraud',onPress:()=>void reportMessage(item,'scam')},
+          {text:'Harassment',onPress:()=>void reportMessage(item,'harassment')},
+          {text:'Impersonation',onPress:()=>void reportMessage(item,'impersonation')},
+          {text:'Suspicious link',onPress:()=>void reportMessage(item,'suspicious_link')},
+          {text:'Other',onPress:()=>void reportMessage(item,'other')},
+          {text:'Cancel',style:'cancel'}
+        ];
+        Alert.alert('Report message','Choose the reason for your report.',reasons);
+      }});
+    }
     options.push({text:'Cancel',style:'cancel'});
-    Alert.alert('Delete message','Choose where to delete this message.',options);
+    Alert.alert('Message options','Save, delete, or report this message.',options);
   };
 
   const joinCall=useCallback(async(call:any)=>{
