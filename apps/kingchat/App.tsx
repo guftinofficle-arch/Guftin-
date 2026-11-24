@@ -853,8 +853,8 @@ function GuftinApp() {
   const activeConversationKindRef=useRef<string|null>(null);
   const chatMessagesListRef=useRef<FlatList<Message>|null>(null);
   const loadMessagesRef=useRef<((id:string)=>Promise<void>)|null>(null);
-  const flushPendingMessagesRef=useRef<(()=>Promise<void>)|null>(null);
-  const flushPendingMediaRef=useRef<(()=>Promise<void>)|null>(null);
+  const flushPendingMessagesRef=useRef<((force?:boolean)=>Promise<void>)|null>(null);
+  const flushPendingMediaRef=useRef<((force?:boolean)=>Promise<void>)|null>(null);
   const flushingPendingMessages=useRef(false);
   const flushingPendingMedia=useRef(false);
   const onlineRef=useRef(false);
@@ -2835,7 +2835,7 @@ function GuftinApp() {
     }
   };
 
-  const flushPendingMessages=useCallback(async()=>{
+  const flushPendingMessages=useCallback(async(force=false)=>{
     if(!session||!deviceIdentity||e2eeStatus!=='ready'||!onlineRef.current||flushingPendingMessages.current)return;
     flushingPendingMessages.current=true;
     try{
@@ -2847,6 +2847,7 @@ function GuftinApp() {
       for(let index=0;index<queue.length;index++){
         const pending=queue[index];
         if(clearingConversationIds.current.has(pending.conversation_id))continue;
+        if(!force&&Number(pending.nextAttemptAt||0)>Date.now()){remaining.push(pending);continue;}
         try{
           const {data:members,error:membersError}=await supabase.from('kc_conversation_members')
             .select('user_id').eq('conversation_id',pending.conversation_id);
@@ -2880,8 +2881,12 @@ function GuftinApp() {
           ]}));
           void dispatchPush('message',saved.id);
         }catch(error:any){
-          remaining.push(...queue.slice(index));
-          if(!isConnectivityFailure(error))console.warn('Pending message remains queued:',error?.message||error);
+          const attempts=(Number(pending.attempts)||0)+1;
+          const transient=isConnectivityFailure(error);
+          const delay=Math.min(transient?120000:900000,(transient?5000:30000)*Math.pow(2,Math.min(attempts-1,6)));
+          remaining.push({...pending,attempts,nextAttemptAt:Date.now()+delay,lastError:String(error?.message||error||'Send failed').slice(0,180)});
+          remaining.push(...queue.slice(index+1));
+          if(!transient)console.warn('Pending message paused with backoff:',error?.message||error);
           break;
         }
       }
@@ -2935,7 +2940,7 @@ function GuftinApp() {
       JSON.stringify(messages[conversationId]||[])).catch(()=>{});
   };
 
-  const flushPendingMedia=useCallback(async()=>{
+  const flushPendingMedia=useCallback(async(force=false)=>{
     if(!session||!deviceIdentity||e2eeStatus!=='ready'||!onlineRef.current||flushingPendingMedia.current)return;
     flushingPendingMedia.current=true;
     try{
@@ -2947,6 +2952,7 @@ function GuftinApp() {
       for(let index=0;index<queue.length;index++){
         const pending=queue[index];
         if(clearingConversationIds.current.has(pending.conversation_id))continue;
+        if(!force&&Number(pending.nextAttemptAt||0)>Date.now()){remaining.push(pending);continue;}
         let plainBytes:Uint8Array|undefined;
         let outboundCipher:Uint8Array|undefined;
         try{
@@ -3040,8 +3046,12 @@ function GuftinApp() {
           try{if(localEncrypted.exists)localEncrypted.delete();}catch{}
           try{if(outboundFile.exists)outboundFile.delete();}catch{}
         }catch(error:any){
-          remaining.push(...queue.slice(index));
-          if(!isConnectivityFailure(error))console.warn('Pending media remains queued:',error?.message||error);
+          const attempts=(Number(pending.attempts)||0)+1;
+          const transient=isConnectivityFailure(error);
+          const delay=Math.min(transient?120000:900000,(transient?5000:30000)*Math.pow(2,Math.min(attempts-1,6)));
+          remaining.push({...pending,attempts,nextAttemptAt:Date.now()+delay,lastError:String(error?.message||error||'Upload failed').slice(0,180)});
+          remaining.push(...queue.slice(index+1));
+          if(!transient)console.warn('Pending media paused with backoff:',error?.message||error);
           break;
         }finally{
           plainBytes?.fill(0);
@@ -4481,7 +4491,7 @@ function GuftinApp() {
           <Text style={{textAlign:'right',fontSize:9,color:C.muted,marginTop:5}}>
             {timeLabel(item.created_at)}{item.pending?' · Queued':item.mine ? " · " + (showReadReceipts && peerLastReadAt && new Date(peerLastReadAt).getTime() >= new Date(item.created_at).getTime() ? "✓✓ Read" : deliveredByMessage[item.id] ? "✓✓ Delivered" : "✓ Sent") : ""}
           </Text>
-          {item.pending?<Btn onPress={()=>{void flushPendingMessagesRef.current?.();void flushPendingMediaRef.current?.();}} style={{marginTop:6,alignSelf:'flex-end',paddingHorizontal:10,paddingVertical:5,borderRadius:9,backgroundColor:C.mint}}><Text style={{fontSize:10,color:C.green,fontWeight:'900'}}>↻ Retry sending</Text></Btn>:null}
+          {item.pending?<Btn onPress={()=>{void flushPendingMessagesRef.current?.(true);void flushPendingMediaRef.current?.(true);}} style={{marginTop:6,alignSelf:'flex-end',paddingHorizontal:10,paddingVertical:5,borderRadius:9,backgroundColor:C.mint}}><Text style={{fontSize:10,color:C.green,fontWeight:'900'}}>↻ Retry sending</Text></Btn>:null}
         </TouchableOpacity>}/>
       <View style={{flexDirection:'row',alignItems:'center',padding:11,gap:8,backgroundColor:C.white,borderTopWidth:1,borderColor:C.line}}>
         {active.kind==='channel'&&!active.isChannelOwner
