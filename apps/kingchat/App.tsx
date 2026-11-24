@@ -1197,7 +1197,6 @@ function GuftinApp() {
         setProfile(cachedProfile);
         setProfileName(cachedProfile?.display_name||'');
         setProfileUsername(cachedProfile?.username||'');
-        setProfilePhone(cachedProfile?.phone_number||'');
         setAbout(cachedProfile?.about||'');
         setProfileAvatarPath(cachedProfile?.avatar_url||'');
         setProfileReady(true);
@@ -1205,7 +1204,7 @@ function GuftinApp() {
     }catch{ /* Keep the app usable if the local profile cache is unreadable. */ }
     if(!onlineRef.current){setProfileReady(true);return;}
     const {data,error}=await supabase.from('kc_profiles')
-      .select('id,display_name,username,about,avatar_url,is_online,phone_number')
+      .select('id,display_name,username,about,avatar_url,is_online')
       .eq('id',session.user.id).maybeSingle();
     if(error){
       if(!isConnectivityFailure(error))console.warn('Profile load:',error.message);
@@ -1216,7 +1215,8 @@ function GuftinApp() {
     void AsyncStorage.setItem(profileCacheKey,JSON.stringify(data)).catch(()=>{});
     setProfileName(data?.display_name||session.user.user_metadata?.display_name||'');
     setProfileUsername(data?.username||session.user.user_metadata?.username||'');
-    setProfilePhone(data?.phone_number||'');
+    const {data:optionalPhone}=await supabase.rpc('kc_get_optional_phone');
+    setProfilePhone(typeof optionalPhone==='string'?optionalPhone:'');
     setAbout(data?.about||'');
     setProfileAvatarPath(data?.avatar_url||'');
     if(data?.avatar_url){setProfileAvatarUrl(await getSignedMediaUrl(data.avatar_url)||'');}
@@ -4409,7 +4409,7 @@ function GuftinApp() {
         <View style={{backgroundColor:C.mint,borderRadius:15,padding:13,marginBottom:10}}>
           <Text style={{color:C.green,fontWeight:'900',marginBottom:5}}>Account sign-in methods</Text>
           <Text style={{color:C.ink,fontSize:11,lineHeight:17}}>Linked email: {session?.user?.email||'Not linked'}{session?.user?.email_confirmed_at?' · verified':' · not verified'}</Text>
-          <Text style={{color:C.ink,fontSize:11,lineHeight:17,marginTop:3}}>Optional mobile number: {profile?.phone_number||'Not added'}</Text>
+          <Text style={{color:C.ink,fontSize:11,lineHeight:17,marginTop:3}}>Optional mobile number: {profilePhone||'Not added'}</Text>
           <TextInput value={profilePhone} onChangeText={setProfilePhone} placeholder="Add or update mobile number (Optional)" keyboardType="phone-pad" autoComplete="tel" style={{backgroundColor:C.white,borderRadius:11,padding:12,marginTop:10,color:C.ink}}/>
           <Btn disabled={phoneBusy} onPress={()=>void (async()=>{
             const normalized=profilePhone.trim()?normalizeGuftinPhone(profilePhone):null;
