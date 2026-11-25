@@ -13,6 +13,7 @@ import { supabase } from './src/lib/supabase';
 import { upgrade20 } from './src/features/upgrade20';
 import { CallControlButton } from './src/features/calls/CallControlButton';
 import { isStatusActive } from './src/features/status/statusUtils';
+import { saveMediaToGallery } from './src/features/media/saveMediaToGallery';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 import * as ImagePicker from 'expo-image-picker';
@@ -1772,19 +1773,7 @@ function GuftinApp() {
     }catch(error:any){console.warn('Push dispatch unavailable:',error?.message||error);}
   };
 
-  const saveMediaToGallery=async(item:any,showFeedback=true)=>{
-    if(!item?.attachment_url||!['image','video'].includes(item.message_type))return;
-    try{
-      const permission=await MediaLibrary.requestPermissionsAsync(true);
-      if(!permission.granted)throw new Error('Allow photo library permission to save this media.');
-      await MediaLibrary.saveToLibraryAsync(item.attachment_url);
-      if(showFeedback)Alert.alert('Saved to gallery','The photo/video was saved to your device gallery.');
-    }catch(e:any){
-      if(showFeedback)Alert.alert('Could not save media',e?.message||'Try again after allowing gallery permission.');
-    }
-  };
-
-  const hideChat=async(chat:Chat)=>{
+    const hideChat=async(chat:Chat)=>{
     if(!session)return;
     if(chat.isOfficial){
       Alert.alert('Guftin Official stays in your inbox','The verified official chat is kept visible so you do not miss important announcements.');
