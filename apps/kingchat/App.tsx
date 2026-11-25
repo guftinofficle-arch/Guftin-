@@ -102,6 +102,16 @@ const stopGuftinCallAudioSession = async (): Promise<void> => {
   return guftinCallAudioStopPromise;
 };
 const incomingCallNotificationId = (callId:string) => 'guftin-incoming-call-'+callId;
+const areBackgroundCallsEnabled = async ():Promise<boolean> => {
+  try {
+    const raw = await AsyncStorage.getItem('guftin-preferences');
+    const saved = raw ? JSON.parse(raw) : {};
+    return saved?.backgroundCallsEnabled !== false;
+  } catch {
+    // Keep calls enabled if an older or unreadable preferences record exists.
+    return true;
+  }
+};
 const dismissIncomingCallNotification = async (callId:string) => {
   const identifier=incomingCallNotificationId(callId);
   try{await Notifications.cancelScheduledNotificationAsync(identifier);}catch{}
@@ -142,6 +152,7 @@ const presentNativeIncomingCall = async (payload:any) => {
   const callId = typeof payload?.call_id === 'string' ? payload.call_id :
     typeof payload?.id === 'string' ? payload.id : '';
   if (!callId || Platform.OS !== 'android') return;
+  if (!(await areBackgroundCallsEnabled())) return;
   const callerName = typeof payload?.caller_name === 'string' && payload.caller_name.trim()
     ? payload.caller_name.trim() : 'Guftin contact';
   const callType = payload?.call_type === 'video' ? 'video' : 'voice';
@@ -1060,6 +1071,7 @@ function GuftinApp() {
   const [callHistory,setCallHistory]=useState<any[]>([]);
   const [adsReady,setAdsReady]=useState(false);
   const [pushEnabled,setPushEnabled]=useState(false);
+  const [backgroundCallsEnabled,setBackgroundCallsEnabled]=useState(true);
   const [pushBusy,setPushBusy]=useState(false);
   const [pushPermissionReady,setPushPermissionReady]=useState(false);
   const [permissionSetupVisible,setPermissionSetupVisible]=useState(false);
@@ -1203,6 +1215,7 @@ function GuftinApp() {
           if(typeof saved.autoSync==='boolean')setAutoSync(saved.autoSync);
           if([15,30,60].includes(saved.syncIntervalSeconds))setSyncIntervalSeconds(saved.syncIntervalSeconds);
           if(typeof saved.mediaAutoDownload==='boolean')setMediaAutoDownload(saved.mediaAutoDownload);
+          if(typeof saved.backgroundCallsEnabled==='boolean')setBackgroundCallsEnabled(saved.backgroundCallsEnabled);
           if(['emerald','ocean','violet','sunset','night'].includes(saved.themeName))setThemeName(saved.themeName);
         }catch{ /* Ignore an outdated or malformed local preferences record. */ }
       }
@@ -1213,7 +1226,7 @@ function GuftinApp() {
 
   useEffect(()=>{
     if(!settingsLoaded)return;
-    void AsyncStorage.setItem('guftin-preferences',JSON.stringify({showReadReceipts,onlineVisibility,autoSync,syncIntervalSeconds,mediaAutoDownload,themeName}));
+    void AsyncStorage.setItem('guftin-preferences',JSON.stringify({showReadReceipts,onlineVisibility,autoSync,syncIntervalSeconds,mediaAutoDownload,backgroundCallsEnabled,themeName}));
   },[settingsLoaded,showReadReceipts,onlineVisibility,autoSync,syncIntervalSeconds,mediaAutoDownload,themeName]);
 
   // Create Android notification channels at startup; request OS permissions only
@@ -2616,7 +2629,7 @@ function GuftinApp() {
     };
     const foregroundPushSubscription=Notifications.addNotificationReceivedListener((notification:any)=>{
       const data=notification?.request?.content?.data as any;
-      if(data?.type!=='incoming_call'||typeof data.call_id!=='string')return;
+      if(!backgroundCallsEnabled||data?.type!=='incoming_call'||typeof data.call_id!=='string')return;
       void supabase.from('kc_call_logs')
         .select('id,conversation_id,caller_id,callee_id,call_type,status,call_scope')
         .eq('id',data.call_id).maybeSingle().then(async({data:call,error})=>{
@@ -2637,7 +2650,7 @@ function GuftinApp() {
       subscription.remove();
       foregroundPushSubscription.remove();
     };
-  },[session,respondToCall,acceptCallWhenReady,loadInbox,joinCall]);
+  },[session,respondToCall,acceptCallWhenReady,loadInbox,joinCall,backgroundCallsEnabled]);
 
   const loadMessages=useCallback(async(conversationId:string)=>{
     if(!session||clearingConversationIds.current.has(conversationId))return;
@@ -5444,6 +5457,7 @@ function GuftinApp() {
         <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingVertical:12}}><View style={{flex:1,paddingRight:12}}><Text style={{color:C.ink,fontWeight:'800'}}>Show online status</Text><Text style={{color:C.muted,fontSize:11}}>Let contacts see when you are online</Text></View><Switch value={onlineVisibility} onValueChange={async value=>{if(await savePrivacyPreferences({online_visibility:value?'everyone':'nobody'}))setOnlineVisibility(value);}} trackColor={{true:C.green}}/></View>
         <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingVertical:12}}><View style={{flex:1,paddingRight:12}}><Text style={{color:C.ink,fontWeight:'800'}}>Read receipts</Text><Text style={{color:C.muted,fontSize:11}}>Show seen status on messages</Text></View><Switch value={showReadReceipts} onValueChange={async value=>{if(await savePrivacyPreferences({read_receipts_enabled:value}))setShowReadReceipts(value);}} trackColor={{true:C.green}}/></View>
         <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingVertical:12}}><View style={{flex:1,paddingRight:12}}><Text style={{color:C.ink,fontWeight:'800'}}>Push notifications on this phone</Text><Text style={{color:C.muted,fontSize:11}}>Messages, status likes/views, and incoming call alerts with Accept/Decline</Text></View><Switch value={pushEnabled} disabled={pushBusy} onValueChange={enabled=>enabled?void enablePushNotifications():void disablePushNotifications()} trackColor={{true:C.green}}/></View>
+        <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingVertical:12,borderBottomWidth:1,borderColor:C.line}}><View style={{flex:1,paddingRight:12}}><Text style={{color:C.ink,fontWeight:'800'}}>Background calls</Text><Text style={{color:C.muted,fontSize:11}}>Receive incoming voice/video call alerts when Guftin is in the background or closed. Requires push notifications and Android call-screen permissions.</Text></View><Switch value={backgroundCallsEnabled} onValueChange={setBackgroundCallsEnabled} trackColor={{true:C.green}}/></View>
         <Btn disabled={pushBusy||!session} onPress={()=>void testPushNotifications()} style={{backgroundColor:C.mint,padding:12,borderRadius:13,marginTop:2,marginBottom:7,opacity:pushBusy ? .55 : 1}}>
           <Text style={{color:C.green,fontWeight:'900',textAlign:'center'}}>{pushBusy?'Checking notification service…':'Send test notification to this phone'}</Text>
         </Btn>
