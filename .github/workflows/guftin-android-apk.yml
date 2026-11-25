@@ -118,7 +118,7 @@ jobs:
           }
           lines = [line for line in current.splitlines() if not any(line.startswith(key + "=") for key in settings)]
           lines.extend(f"{key}={value}" for key, value in settings.items())
-          p.write_text("\\n".join(lines) + "\\n")
+          p.write_text("\n".join(lines) + "\n")
           print(p.read_text())
           PY
 
