@@ -1139,6 +1139,18 @@ function GuftinApp() {
   const [groupContactsLoading,setGroupContactsLoading]=useState(false);
   const [groupCreating,setGroupCreating]=useState(false);
   const [channels,setChannels]=useState<any[]>([]);
+  const [hubCommunities,setHubCommunities]=useState<any[]>([]);
+  const [hubBusinessProducts,setHubBusinessProducts]=useState<any[]>([]);
+  const [myBusinessProfile,setMyBusinessProfile]=useState<any>(null);
+  const [hubLoading,setHubLoading]=useState(false);
+  const [communityCreateOpen,setCommunityCreateOpen]=useState(false);
+  const [communityDraftTitle,setCommunityDraftTitle]=useState('');
+  const [communityBusy,setCommunityBusy]=useState(false);
+  const [businessSetupOpen,setBusinessSetupOpen]=useState(false);
+  const [businessDraftName,setBusinessDraftName]=useState('');
+  const [businessDraftDescription,setBusinessDraftDescription]=useState('');
+  const [businessDraftEmail,setBusinessDraftEmail]=useState('');
+  const [businessBusy,setBusinessBusy]=useState(false);
   const [pendingChannelInvite,setPendingChannelInvite]=useState<string|null>(null);
   const [channelsLoading,setChannelsLoading]=useState(false);
   const [channelSearch,setChannelSearch]=useState('');
@@ -2879,6 +2891,33 @@ function GuftinApp() {
     void recordChannelAnalyticsEvent(supabase,channel.conversation_id,session.user.id,'view').catch(error=>console.warn('Channel view analytics unavailable:',error?.message||error));
   };
 
+  const loadUpdatesHub=useCallback(async()=>{
+    if(!session?.user?.id)return;setHubLoading(true);
+    try{
+      const [cm,pr,bp]=await Promise.all([
+        supabase.from('kc_community_members').select('community_id,role,joined_at,kc_communities!inner(id,title,owner_id,created_at)').eq('user_id',session.user.id).order('joined_at',{ascending:false}).limit(60),
+        supabase.from('kc_business_products').select('id,owner_id,title,description,price,currency_code,availability,is_published,created_at').eq('is_published',true).order('created_at',{ascending:false}).limit(40),
+        supabase.from('kc_business_profiles').select('user_id,store_name,description,contact_email,currency_code').eq('user_id',session.user.id).maybeSingle()
+      ]);
+      if(cm.error)throw cm.error;if(pr.error)throw pr.error;if(bp.error)throw bp.error;
+      setHubCommunities((cm.data||[]).map((r:any)=>({...((Array.isArray(r.kc_communities)?r.kc_communities[0]:r.kc_communities)||{}),role:r.role})).filter((x:any)=>x.id));
+      setHubBusinessProducts(pr.data||[]);setMyBusinessProfile(bp.data||null);
+    }catch(e:any){console.warn('Updates hub load:',e?.message||e);}finally{setHubLoading(false);}
+  },[session?.user?.id]);
+  const createHubCommunity=async()=>{
+    if(!communityDraftTitle.trim()||communityBusy)return;setCommunityBusy(true);
+    try{await upgrade20.createCommunity(communityDraftTitle.trim());setCommunityDraftTitle('');setCommunityCreateOpen(false);await loadUpdatesHub();Alert.alert('Community created','Your community has been saved to Guftin.');}
+    catch(e:any){Alert.alert('Community not created',e?.message||'Please try again.');}finally{setCommunityBusy(false);}
+  };
+  const saveBusinessProfile=async()=>{
+    if(!session?.user?.id||!businessDraftName.trim()||businessBusy)return;setBusinessBusy(true);
+    try{
+      const {data,error}=await supabase.from('kc_business_profiles').upsert({user_id:session.user.id,store_name:businessDraftName.trim().slice(0,80),description:businessDraftDescription.trim().slice(0,700)||null,contact_email:businessDraftEmail.trim()||null,currency_code:'PKR',updated_at:new Date().toISOString()},{onConflict:'user_id'}).select().single();
+      if(error)throw error;setMyBusinessProfile(data);setBusinessSetupOpen(false);Alert.alert('Business profile saved','Your Guftin business profile is now saved.');
+    }catch(e:any){Alert.alert('Business profile not saved',e?.message||'Please try again.');}finally{setBusinessBusy(false);}
+  };
+  useEffect(()=>{if(tab==='Updates'&&session?.user?.id)void loadUpdatesHub();},[tab,session?.user?.id,loadUpdatesHub]);
+
   const loadChannels=useCallback(async()=>{
     if(!session)return;
     setChannelsLoading(true);
@@ -3000,7 +3039,7 @@ function GuftinApp() {
     if(!session?.user?.id||!pendingChannelInvite||channelBusy)return;
     const inviteCode=pendingChannelInvite;
     setPendingChannelInvite(null);
-    setTab('Channels');
+    setTab('Updates');
     void joinChannelByInvite(inviteCode,false);
   },[session?.user?.id,pendingChannelInvite,channelBusy,joinChannelByInvite]);
 
@@ -3025,7 +3064,6 @@ function GuftinApp() {
   const shareChannelInvite=async(channel:any)=>{
     if(!channel?.invite_code)return;
     const link='https://guftin-official.pages.dev/channel/'+encodeURIComponent(channel.invite_code);
-    if(session?.user?.id)void recordChannelAnalyticsEvent(supabase,channel.conversation_id,session.user.id,'share').catch(()=>{});
     if(session?.user?.id)void recordChannelAnalyticsEvent(supabase,channel.conversation_id,session.user.id,'share').catch(()=>{});
     try{await Share.share({message:'Follow '+(channel.title||'this Guftin channel')+' on Guftin:\n'+link});}
     catch(error:any){Alert.alert('Could not share invite',error?.message||'Invite code: '+channel.invite_code);}
@@ -4965,8 +5003,8 @@ function GuftinApp() {
           <Btn onPress={()=>setSettingsOpen(true)} style={{backgroundColor:tab==='Chats'?'#ffffff20':C.paper,width:43,height:43,borderRadius:22,alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:tab==='Chats'?'#ffffff30':C.line}}><Text style={{fontSize:21,color:tab==='Chats'?'#fff':C.green}}>⚙</Text></Btn>
           {tab==='Chats'?<Btn onPress={()=>void openGroupCreator()} style={{backgroundColor:'#ffffff20',width:43,height:43,borderRadius:22,alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:'#ffffff30'}}><Text style={{fontSize:19,color:'#fff'}}>👥</Text></Btn>:null}
           {tab==='Chats'?<Btn onPress={()=>setSearching(!searching)} style={{backgroundColor:'#ffffff20',width:43,height:43,borderRadius:22,alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:'#ffffff30'}}><Text style={{fontSize:22,color:'#fff'}}>⌕</Text></Btn>:null}
-          {tab==='Channels'?<Btn onPress={()=>setChannelJoinOpen(true)} style={{backgroundColor:C.mint,width:42,height:42,borderRadius:15,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:18,color:C.green}}>↗</Text></Btn>:null}
-          {tab==='Channels'?<Btn onPress={()=>setChannelCreateOpen(true)} style={{backgroundColor:C.green,width:42,height:42,borderRadius:15,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:24,color:'#fff'}}>＋</Text></Btn>:null}
+          {tab==='Updates'?<Btn onPress={()=>setChannelJoinOpen(true)} style={{backgroundColor:C.mint,width:42,height:42,borderRadius:15,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:18,color:C.green}}>↗</Text></Btn>:null}
+          {tab==='Updates'?<Btn onPress={()=>setChannelCreateOpen(true)} style={{backgroundColor:C.green,width:42,height:42,borderRadius:15,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:24,color:'#fff'}}>＋</Text></Btn>:null}
         </View>
       </View>
     </View>
@@ -5037,31 +5075,21 @@ function GuftinApp() {
           </Btn>}
         </View>)}
       </ScrollView>}
-    </ScrollView>:null}
-    {tab==='Channels'?<ScrollView contentContainerStyle={{padding:18,paddingBottom:30}}>
-      <View style={{backgroundColor:C.paper,borderRadius:20,padding:18,marginBottom:16}}>
-        <Text style={{fontSize:19,fontWeight:'900',color:C.ink}}>Guftin Channels</Text>
-        <Text style={{fontSize:12,color:C.muted,lineHeight:18,marginTop:6}}>Create a broadcast channel, invite people with a link, and publish photos, videos or updates. Followers can view posts but cannot publish.</Text>
-        <View style={{flexDirection:'row',gap:9,marginTop:14}}>
-          <Btn onPress={()=>setChannelCreateOpen(true)} style={{flex:1,backgroundColor:C.green,padding:13,borderRadius:13,alignItems:'center'}}><Text style={{color:'#fff',fontWeight:'900'}}>＋ Create channel</Text></Btn>
-          <Btn onPress={()=>setChannelJoinOpen(true)} style={{flex:1,backgroundColor:C.mint,padding:13,borderRadius:13,alignItems:'center'}}><Text style={{color:C.green,fontWeight:'900'}}>Join by link</Text></Btn>
-        </View>
+      <View style={{marginTop:20,marginBottom:10,flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}>
+        <View style={{flex:1}}><Text style={{fontSize:18,fontWeight:'900',color:C.ink}}>Channels</Text><Text style={{fontSize:11,color:C.muted}}>Broadcast updates from creators and official accounts</Text></View>
+        <View style={{flexDirection:'row',gap:7}}><Btn onPress={()=>setChannelJoinOpen(true)} style={{backgroundColor:C.mint,padding:10,borderRadius:11}}><Text style={{color:C.green,fontWeight:'900'}}>Join</Text></Btn><Btn onPress={()=>setChannelCreateOpen(true)} style={{backgroundColor:C.green,padding:10,borderRadius:11}}><Text style={{color:'#fff',fontWeight:'900'}}>＋ Create</Text></Btn></View>
       </View>
-      {channelsLoading&&channels.length===0?<View style={{padding:30,alignItems:'center'}}><GuftinLoader color={C.green}/><Text style={{color:C.muted,marginTop:8}}>Loading channels…</Text></View>:null}
-      <TextInput value={channelSearch} onChangeText={setChannelSearch} placeholder="Search public channels by name..." autoCapitalize="none" returnKeyType="search" style={{backgroundColor:C.paper,borderRadius:14,padding:14,color:C.ink,marginBottom:15}}/>
-      <Text style={{fontSize:16,fontWeight:'900',color:C.ink,marginBottom:9}}>Your channels</Text>
-      {ownChannels.length===0?<Text style={{fontSize:12,color:C.muted,marginBottom:16}}>{channelQuery?'No channel you own matches this name.':'You have not created a channel yet.'}</Text>:ownChannels.map(channel=><View key={channel.conversation_id} style={{backgroundColor:C.white,borderRadius:17,padding:13,marginBottom:9,borderWidth:1,borderColor:C.line}}>
-        <View style={{flexDirection:'row',alignItems:'center',gap:11}}><Avatar label={initials(channel.title||'C')} color={C.green} size={46} uri={channel.logo_signed_url}/><View style={{flex:1}}><Text style={{fontSize:14,fontWeight:'900',color:C.ink}}>{channel.title||'My channel'}{channel.is_verified?<VerifiedBadge label="Verified channel"/>:null}</Text><Text style={{fontSize:10,color:C.muted,marginTop:3}}>{channel.is_public?'Public channel':'Private · invite link only'} · Owner</Text></View><Btn onPress={()=>void shareChannelInvite(channel)} style={{padding:9,borderRadius:11,backgroundColor:C.mint}}><Text style={{fontSize:11,color:C.green,fontWeight:'900'}}>Invite ↗</Text></Btn></View>
-        <Text numberOfLines={2} style={{fontSize:11,color:C.muted,lineHeight:16,marginTop:8}}>{channel.description||'No channel description'}</Text>
-        <Btn onPress={()=>openChannelChat(channel)} style={{marginTop:10,backgroundColor:C.paper,padding:10,borderRadius:11,alignItems:'center'}}><Text style={{fontSize:11,color:C.green,fontWeight:'900'}}>Open channel ›</Text></Btn>
-      </View>)}
-      <Text style={{fontSize:16,fontWeight:'900',color:C.ink,marginTop:13,marginBottom:9}}>Discover channels</Text>
-      <Text style={{fontSize:11,color:C.muted,marginBottom:9}}>Search by channel name and follow any public channel. Private channels remain invite-only.</Text>
-      {discoverChannels.length===0?<Text style={{fontSize:12,color:C.muted}}>{channelQuery?'No public channels match that name.':'No public channels to discover yet. Share your channel link to invite followers.'}</Text>:discoverChannels.map(channel=><View key={channel.conversation_id} style={{flexDirection:'row',alignItems:'center',gap:11,padding:12,borderBottomWidth:1,borderColor:C.line}}>
-        <Avatar label={initials(channel.title||'C')} color={C.green} size={44} uri={channel.logo_signed_url}/><View style={{flex:1}}><Text style={{fontSize:13,fontWeight:'900',color:C.ink}}>{channel.title||'Guftin channel'}{channel.is_verified?<VerifiedBadge label="Verified channel"/>:null}</Text><Text numberOfLines={2} style={{fontSize:10,color:C.muted,marginTop:3}}>{channel.description||'Public channel'}</Text></View>
-        {channel.isFollowing?<Btn onPress={()=>openChannelChat(channel)} style={{paddingHorizontal:13,paddingVertical:9,borderRadius:11,backgroundColor:C.mint}}><Text style={{color:C.green,fontWeight:'900',fontSize:11}}>Open</Text></Btn>:<Btn disabled={channelBusy} onPress={()=>void followPublicChannel(channel)} style={{paddingHorizontal:13,paddingVertical:9,borderRadius:11,backgroundColor:C.green}}><Text style={{color:'#fff',fontWeight:'900',fontSize:11}}>Follow</Text></Btn>}
-      </View>)}
-      <Text style={{fontSize:10,color:C.muted,lineHeight:16,marginTop:18}}>Channel posts are broadcast content. They are visible to followers and are not end-to-end encrypted like private one-to-one messages.</Text>
+      <TextInput value={channelSearch} onChangeText={setChannelSearch} placeholder="Search public channels..." autoCapitalize="none" style={{backgroundColor:C.paper,borderRadius:13,padding:13,color:C.ink,marginBottom:10}}/>
+      {channelsLoading&&channels.length===0?<Text style={{color:C.muted,padding:8}}>Loading channels…</Text>:null}
+      {ownChannels.map(channel=><View key={channel.conversation_id} style={{backgroundColor:C.white,borderRadius:15,padding:12,marginBottom:8,borderWidth:1,borderColor:C.line}}><View style={{flexDirection:'row',alignItems:'center',gap:10}}><Avatar label={initials(channel.title||'C')} color={C.green} size={43} uri={channel.logo_signed_url}/><View style={{flex:1}}><Text style={{fontWeight:'900',color:C.ink}}>{channel.title||'My channel'}</Text><Text style={{fontSize:10,color:C.muted}}>{channel.is_public?'Public':'Private'} · Owner</Text></View><Btn onPress={()=>void shareChannelInvite(channel)} style={{padding:9,backgroundColor:C.mint,borderRadius:10}}><Text style={{color:C.green,fontWeight:'900'}}>Invite</Text></Btn><Btn onPress={()=>openChannelChat(channel)} style={{padding:9,backgroundColor:C.paper,borderRadius:10}}><Text style={{color:C.green,fontWeight:'900'}}>Open</Text></Btn></View></View>)}
+      {discoverChannels.map(channel=><View key={channel.conversation_id} style={{flexDirection:'row',alignItems:'center',gap:10,backgroundColor:C.white,padding:11,borderRadius:14,marginBottom:7}}><Avatar label={initials(channel.title||'C')} color={C.green} size={42} uri={channel.logo_signed_url}/><View style={{flex:1}}><Text style={{fontWeight:'900',color:C.ink}}>{channel.title||'Guftin channel'}</Text><Text numberOfLines={2} style={{fontSize:10,color:C.muted}}>{channel.description||'Public channel'}</Text></View>{channel.isFollowing?<Btn onPress={()=>openChannelChat(channel)}><Text style={{color:C.green,fontWeight:'900'}}>Open</Text></Btn>:<Btn disabled={channelBusy} onPress={()=>void followPublicChannel(channel)} style={{padding:9,backgroundColor:C.green,borderRadius:10}}><Text style={{color:'#fff',fontWeight:'900'}}>Follow</Text></Btn>}</View>)}
+      <Text style={{fontSize:10,color:C.muted,marginTop:6}}>Channel posts are broadcast content, separate from private end-to-end encrypted chats.</Text>
+      <View style={{marginTop:22,marginBottom:10,flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}><View style={{flex:1}}><Text style={{fontSize:18,fontWeight:'900',color:C.ink}}>Business</Text><Text style={{fontSize:11,color:C.muted}}>Stores and published products on Guftin</Text></View><Btn onPress={()=>{setBusinessDraftName(myBusinessProfile?.store_name||'');setBusinessDraftDescription(myBusinessProfile?.description||'');setBusinessDraftEmail(myBusinessProfile?.contact_email||'');setBusinessSetupOpen(true);}} style={{backgroundColor:C.green,padding:10,borderRadius:11}}><Text style={{color:'#fff',fontWeight:'900'}}>{myBusinessProfile?'Edit store':'Set up store'}</Text></Btn></View>
+      {myBusinessProfile?<View style={{backgroundColor:C.mint,borderRadius:15,padding:13,marginBottom:10}}><Text style={{fontWeight:'900',fontSize:14,color:C.green}}>{myBusinessProfile.store_name}</Text><Text style={{fontSize:11,color:C.ink,marginTop:4}}>{myBusinessProfile.description||'Your business profile'}</Text><Text style={{fontSize:10,color:C.muted,marginTop:5}}>{myBusinessProfile.contact_email||'No contact email added'}</Text></View>:<Text style={{fontSize:11,color:C.muted,marginBottom:10}}>Set up a business profile to start a Guftin store.</Text>}
+      {hubBusinessProducts.length?hubBusinessProducts.map(p=><View key={p.id} style={{backgroundColor:C.white,borderRadius:14,padding:12,marginBottom:8}}><Text style={{fontWeight:'900',color:C.ink}}>{p.title}</Text><Text style={{fontSize:11,color:C.muted,marginTop:4}}>{p.description||'Business listing'}</Text><Text style={{fontSize:12,color:C.green,fontWeight:'900',marginTop:6}}>{p.price==null?'Contact business':String(p.currency_code||'PKR')+' '+String(p.price)}</Text></View>):<Text style={{fontSize:11,color:C.muted}}>No published products are available yet.</Text>}
+      <View style={{marginTop:22,marginBottom:10,flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}><View style={{flex:1}}><Text style={{fontSize:18,fontWeight:'900',color:C.ink}}>Communities</Text><Text style={{fontSize:11,color:C.muted}}>Bring your Guftin groups together</Text></View><Btn onPress={()=>setCommunityCreateOpen(true)} style={{backgroundColor:C.green,padding:10,borderRadius:11}}><Text style={{color:'#fff',fontWeight:'900'}}>＋ Create</Text></Btn></View>
+      {hubLoading?<Text style={{fontSize:11,color:C.muted,padding:8}}>Loading your business and communities…</Text>:null}
+      {hubCommunities.length?hubCommunities.map(x=><View key={x.id} style={{backgroundColor:C.white,borderRadius:14,padding:12,marginBottom:8}}><Text style={{fontWeight:'900',color:C.ink}}>{x.title}</Text><Text style={{fontSize:10,color:C.muted,marginTop:4}}>{x.role==='owner'?'Community owner':'Community member'} · {timeLabel(x.created_at)}</Text></View>):<Text style={{fontSize:11,color:C.muted}}>Your joined communities will appear here.</Text>}
     </ScrollView>:null}
     {tab==='Calls'?<ScrollView contentContainerStyle={{padding:18,paddingBottom:30}}>
       <View style={{backgroundColor:C.paper,borderRadius:18,padding:16,marginBottom:16}}>
@@ -5121,7 +5149,7 @@ function GuftinApp() {
       />
     </View>:null}
     <View style={{marginHorizontal:7,marginBottom:Math.max(insets.bottom,5),height:66,paddingTop:5,paddingBottom:5,borderRadius:27,borderWidth:1,borderColor:C.line,flexDirection:'row',alignItems:'center',justifyContent:'space-around',backgroundColor:C.white,elevation:10,shadowColor:'#123d2d',shadowOpacity:.09,shadowRadius:12,shadowOffset:{width:0,height:4}}}>
-      {([['Chats','▤'],['Updates','◉'],['Channels','◈'],['Calls','☎'],['You','●']] as string[][]).map(([t,icon])=><Btn key={t} onPress={()=>setTab(t)} style={{alignItems:'center',justifyContent:'center',minWidth:58,paddingVertical:4}}>
+      {([['Chats','▤'],['Updates','◉'],['Calls','☎'],['You','●']] as string[][]).map(([t,icon])=><Btn key={t} onPress={()=>setTab(t)} style={{alignItems:'center',justifyContent:'center',minWidth:58,paddingVertical:4}}>
         <Text style={{fontSize:20,color:tab===t?C.green:C.muted,fontWeight:'900'}}>{icon}</Text>
         <Text style={{fontSize:10,fontWeight:tab===t?'900':'600',color:tab===t?C.green:C.muted,marginTop:3}}>{t}</Text>
         {tab===t?<View style={{height:3,width:24,borderRadius:3,backgroundColor:C.green,marginTop:3}}/>:null}
@@ -5435,6 +5463,8 @@ function GuftinApp() {
       </ScrollView></View></View>
     </Modal>
 
+    <Modal visible={communityCreateOpen} transparent animationType="fade" onRequestClose={()=>setCommunityCreateOpen(false)}><View style={{flex:1,backgroundColor:'#0007',justifyContent:'center',padding:22}}><View style={{backgroundColor:C.white,borderRadius:20,padding:18}}><Text style={{fontSize:18,fontWeight:'900',color:C.ink}}>Create community</Text><TextInput value={communityDraftTitle} onChangeText={setCommunityDraftTitle} placeholder="Community name" maxLength={80} style={{backgroundColor:C.paper,borderRadius:12,padding:13,color:C.ink,marginTop:13}}/><View style={{flexDirection:'row',justifyContent:'flex-end',gap:10,marginTop:14}}><Btn onPress={()=>setCommunityCreateOpen(false)} style={{padding:12}}><Text style={{color:C.muted}}>Cancel</Text></Btn><Btn disabled={communityBusy||!communityDraftTitle.trim()} onPress={()=>void createHubCommunity()} style={{backgroundColor:C.green,padding:12,borderRadius:11}}><Text style={{color:'#fff',fontWeight:'900'}}>Create</Text></Btn></View></View></View></Modal>
+    <Modal visible={businessSetupOpen} transparent animationType="fade" onRequestClose={()=>setBusinessSetupOpen(false)}><KeyboardAvoidingView behavior={Platform.OS==='ios'?'padding':undefined} style={{flex:1,backgroundColor:'#0007',justifyContent:'center',padding:22}}><View style={{backgroundColor:C.white,borderRadius:20,padding:18}}><Text style={{fontSize:18,fontWeight:'900',color:C.ink}}>Business profile</Text><TextInput value={businessDraftName} onChangeText={setBusinessDraftName} placeholder="Store or business name" maxLength={80} style={{backgroundColor:C.paper,borderRadius:12,padding:13,color:C.ink,marginTop:12}}/><TextInput value={businessDraftDescription} onChangeText={setBusinessDraftDescription} placeholder="Describe your business" maxLength={700} multiline style={{backgroundColor:C.paper,borderRadius:12,padding:13,color:C.ink,marginTop:9,minHeight:82}}/><TextInput value={businessDraftEmail} onChangeText={setBusinessDraftEmail} placeholder="Business contact email (optional)" keyboardType="email-address" autoCapitalize="none" style={{backgroundColor:C.paper,borderRadius:12,padding:13,color:C.ink,marginTop:9}}/><View style={{flexDirection:'row',justifyContent:'flex-end',gap:10,marginTop:14}}><Btn onPress={()=>setBusinessSetupOpen(false)} style={{padding:12}}><Text style={{color:C.muted}}>Cancel</Text></Btn><Btn disabled={businessBusy||!businessDraftName.trim()} onPress={()=>void saveBusinessProfile()} style={{backgroundColor:C.green,padding:12,borderRadius:11}}><Text style={{color:'#fff',fontWeight:'900'}}>Save store</Text></Btn></View></View></KeyboardAvoidingView></Modal>
     <Modal visible={!!selectedStatus} transparent animationType="fade" onRequestClose={()=>setSelectedStatus(null)}>
       <View style={{flex:1,backgroundColor:'#000e',justifyContent:'center',padding:18}}>
         <View style={{backgroundColor:C.white,borderRadius:22,padding:18,maxHeight:'88%'}}>
