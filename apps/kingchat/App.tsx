@@ -3488,18 +3488,19 @@ function GuftinApp() {
     }
   };
 
-  const sendPhotosVideos=async()=>{
+  const sendPhotosVideos=async(selectedAsset?:ImagePicker.ImagePickerAsset)=>{
     if(!active||!session||mediaPreparing)return;
     if(!deviceIdentity||e2eeStatus!=='ready'){
       Alert.alert('Secure media is not ready','Guftin is still setting up this device encryption key.');
       return;
     }
     try{
-      const result=await ImagePicker.launchImageLibraryAsync({
-        mediaTypes:['images','videos'],allowsEditing:false,quality:0.85,videoMaxDuration:60
-      });
-      if(result.canceled||!result.assets?.length)return;
-      const asset=result.assets[0];
+      let asset=selectedAsset;
+      if(!asset){
+        const result=await ImagePicker.launchImageLibraryAsync({mediaTypes:['images','videos'],allowsEditing:false,quality:0.85,videoMaxDuration:60});
+        if(result.canceled||!result.assets?.length)return;
+        asset=result.assets[0];
+      }
       const messageType=asset.type==='video'?'video':'image';
       const file=new File(asset.uri);
       if(file.size>MAX_MEDIA_BYTES){
@@ -4780,7 +4781,7 @@ function GuftinApp() {
             </Btn>
           </>}
       </View>
-      {attachmentTrayOpen&&active.kind!=='channel'?<View style={{flexDirection:'row',justifyContent:'space-around',alignItems:'center',paddingVertical:13,paddingHorizontal:5,backgroundColor:'#fff',borderTopWidth:1,borderColor:'#f0eee9',borderBottomLeftRadius:24,borderBottomRightRadius:24}}>{[{label:'Gallery',icon:'▧',color:'#7650d8',action:()=>void sendPhotosVideos()},{label:'Camera',icon:'◉',color:'#1878d8',action:()=>void (async()=>{const p=await ImagePicker.requestCameraPermissionsAsync();if(!p.granted){Alert.alert('Permission needed','Allow camera access to take a photo.');return;}const r=await ImagePicker.launchCameraAsync({mediaTypes:['images'],quality:.85});if(!r.canceled&&r.assets?.[0])await sendMedia();})()},{label:'Video',icon:'▶',color:'#dc4773',action:()=>void (async()=>{const p=await ImagePicker.requestCameraPermissionsAsync();if(!p.granted){Alert.alert('Permission needed','Allow camera access to record video.');return;}const r=await ImagePicker.launchCameraAsync({mediaTypes:['videos'],videoMaxDuration:60});if(!r.canceled&&r.assets?.[0])await uploadSelectedMedia(r.assets[0]);})()},{label:'Voice',icon:'♩',color:'#12936b',action:()=>{setAttachmentTrayOpen(false);void (recording?stopVoiceRecording():startVoiceRecording());}},{label:'Stickers',icon:'☻',color:'#e88b16',action:()=>Alert.alert('Stickers','Choose an emoji sticker to send.',[{text:'😊',onPress:()=>{setDraft(v=>v+'😊');setAttachmentTrayOpen(false);}},{text:'❤️',onPress:()=>{setDraft(v=>v+'❤️');setAttachmentTrayOpen(false);}},{text:'😂',onPress:()=>{setDraft(v=>v+'😂');setAttachmentTrayOpen(false);}},{text:'Cancel',style:'cancel'}])}].map(item=><Btn key={item.label} onPress={()=>{setAttachmentTrayOpen(false);item.action();}} style={{alignItems:'center',minWidth:55}}><View style={{width:48,height:48,borderRadius:17,backgroundColor:item.color+'18',alignItems:'center',justifyContent:'center',marginBottom:5}}><Text style={{fontSize:23,color:item.color}}>{item.icon}</Text></View><Text style={{fontSize:11,color:C.ink,fontWeight:'700'}}>{item.label}</Text></Btn>)}</View>:null}
+      {attachmentTrayOpen&&active.kind!=='channel'?<View style={{flexDirection:'row',justifyContent:'space-around',alignItems:'center',paddingVertical:13,paddingHorizontal:5,backgroundColor:'#fff',borderTopWidth:1,borderColor:'#f0eee9',borderBottomLeftRadius:24,borderBottomRightRadius:24}}>{[{label:'Gallery',icon:'▧',color:'#7650d8',action:()=>void sendPhotosVideos()},{label:'Camera',icon:'◉',color:'#1878d8',action:()=>void (async()=>{const p=await ImagePicker.requestCameraPermissionsAsync();if(!p.granted){Alert.alert('Permission needed','Allow camera access to take a photo.');return;}const r=await ImagePicker.launchCameraAsync({mediaTypes:['images'],quality:.85});if(!r.canceled&&r.assets?.[0])await sendPhotosVideos(r.assets[0]);})()},{label:'Video',icon:'▶',color:'#dc4773',action:()=>void (async()=>{const p=await ImagePicker.requestCameraPermissionsAsync();if(!p.granted){Alert.alert('Permission needed','Allow camera access to record video.');return;}const r=await ImagePicker.launchCameraAsync({mediaTypes:['videos'],videoMaxDuration:60});if(!r.canceled&&r.assets?.[0])await sendPhotosVideos(r.assets[0]);})()},{label:'Voice',icon:'♩',color:'#12936b',action:()=>{setAttachmentTrayOpen(false);void (recording?stopVoiceRecording():startVoiceRecording());}},{label:'Stickers',icon:'☻',color:'#e88b16',action:()=>Alert.alert('Stickers','Choose an emoji sticker to send.',[{text:'😊',onPress:()=>{setDraft(v=>v+'😊');setAttachmentTrayOpen(false);}},{text:'❤️',onPress:()=>{setDraft(v=>v+'❤️');setAttachmentTrayOpen(false);}},{text:'😂',onPress:()=>{setDraft(v=>v+'😂');setAttachmentTrayOpen(false);}},{text:'Cancel',style:'cancel'}])}].map(item=><Btn key={item.label} onPress={()=>{setAttachmentTrayOpen(false);item.action();}} style={{alignItems:'center',minWidth:55}}><View style={{width:48,height:48,borderRadius:17,backgroundColor:item.color+'18',alignItems:'center',justifyContent:'center',marginBottom:5}}><Text style={{fontSize:23,color:item.color}}>{item.icon}</Text></View><Text style={{fontSize:11,color:C.ink,fontWeight:'700'}}>{item.label}</Text></Btn>)}</View>:null}
     <Modal visible={chatDetailsOpen} animationType="slide" onRequestClose={()=>setChatDetailsOpen(false)}>
       <SafeAreaView style={{flex:1,backgroundColor:C.paper}}>
         <StatusBar barStyle="dark-content"/>
