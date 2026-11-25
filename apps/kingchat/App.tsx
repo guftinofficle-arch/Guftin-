@@ -15,6 +15,7 @@ import { CallControlButton } from './src/features/calls/CallControlButton';
 import { isStatusActive } from './src/features/status/statusUtils';
 import { saveMediaToGallery } from './src/features/media/saveMediaToGallery';
 import { ChatOptionsPopover } from './src/features/chat-menu/ChatOptionsPopover';
+import { getChannelAnalytics, recordChannelAnalyticsEvent } from './src/features/channels/channelAnalytics';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 import * as ImagePicker from 'expo-image-picker';
@@ -2875,6 +2876,7 @@ function GuftinApp() {
       isPublic:channel.is_public!==false,ownerId:channel.owner_id,description:channel.description||''
     };
     void openChat(chat);
+    void recordChannelAnalyticsEvent(supabase,channel.conversation_id,session.user.id,'view').catch(error=>console.warn('Channel view analytics unavailable:',error?.message||error));
   };
 
   const loadChannels=useCallback(async()=>{
@@ -3007,6 +3009,7 @@ function GuftinApp() {
     try{
       const {error}=await supabase.rpc('kc_join_channel',{p_channel_id:channel.conversation_id,p_invite_code:null});
       if(error)throw error;
+      void recordChannelAnalyticsEvent(supabase,channel.conversation_id,session!.user.id,'follow').catch(()=>{});
       await Promise.all([loadChannels(),loadInbox()]);
       Alert.alert('Following channel','You are now following '+(channel.title||'this channel')+'.');
     }catch(error:any){Alert.alert('Could not follow channel',error?.message||'Please try again.');}
@@ -3025,11 +3028,26 @@ function GuftinApp() {
     catch(error:any){Alert.alert('Could not share invite',error?.message||'Invite code: '+channel.invite_code);}
   };
 
+  const showChannelAnalytics=async(channel:any)=>{
+    if(!session||channel?.owner_id!==session.user.id){Alert.alert('Owner access required','Only the channel owner can view channel analytics.');return;}
+    try{
+      const stats=await getChannelAnalytics(supabase,channel.conversation_id);
+      Alert.alert('Channel analytics',[
+        'Followers: '+stats.followers,
+        'Posts: '+stats.posts,
+        'Views: '+stats.views,
+        'Shares: '+stats.shares,
+        'New follows: '+stats.follows
+      ].join('\\n'));
+    }catch(error:any){Alert.alert('Analytics unavailable',error?.message||'Please try again.');}
+  };
+
   const showChannelOptions=()=>{
     if(!active||active.kind!=='channel')return;
     const channel=channels.find(row=>row.conversation_id===active.id)||active;
     const options:any[]=[];
     if(active.isChannelOwner){
+      options.push({text:'Channel analytics',onPress:()=>void showChannelAnalytics(channel)});
       options.push({text:'Edit channel name and logo',onPress:()=>openChannelEditor(channel)});
       options.push({text:'Share invite link',onPress:()=>void shareChannelInvite(channel)});
       options.push({text:'Share invite code',onPress:()=>void Share.share({message:channel.invite_code||active.inviteCode||''})});
