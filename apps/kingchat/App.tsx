@@ -890,6 +890,13 @@ function GuftinApp() {
   const [advancedCenterOpen,setAdvancedCenterOpen]=useState(false);
   const [advancedCenterLoading,setAdvancedCenterLoading]=useState(false);
   const [advancedCenterRows,setAdvancedCenterRows]=useState<Array<{label:string;count:number;detail:string;ok:boolean}>>([]);
+  const [scheduleComposerOpen,setScheduleComposerOpen]=useState(false);
+  const [scheduleDraft,setScheduleDraft]=useState('');
+  const [scheduleAtInput,setScheduleAtInput]=useState('');
+  const [scheduleBusy,setScheduleBusy]=useState(false);
+  const [scheduledMessagesOpen,setScheduledMessagesOpen]=useState(false);
+  const [scheduledMessages,setScheduledMessages]=useState<any[]>([]);
+  const [scheduledMessagesLoading,setScheduledMessagesLoading]=useState(false);
   const [editModalVisible,setEditModalVisible]=useState(false);
   const [editingMessage,setEditingMessage]=useState<Message|null>(null);
   const [editDraft,setEditDraft]=useState('');
@@ -1817,6 +1824,35 @@ function GuftinApp() {
       setSavedItems(mapped);
     }catch(error:any){Alert.alert('Saved Items unavailable',error?.message||'Please try again.');}
     finally{setSavedItemsLoading(false);}
+  };
+
+  const loadScheduledMessages=async()=>{
+    setScheduledMessagesLoading(true);
+    try{const rows:any[]=(await upgrade20.listScheduledMessages()) as any[];setScheduledMessages(rows);}
+    catch(error:any){Alert.alert('Scheduled messages unavailable',error?.message||'Could not load your scheduled messages.');}
+    finally{setScheduledMessagesLoading(false);}
+  };
+
+  const cancelScheduledMessage=async(id:string)=>{
+    try{const result=await upgrade20.cancelQueuedMessage(id);if(!result){Alert.alert('Message already processing','This message may already be in delivery. Refresh the list to check its status.');}await loadScheduledMessages();}
+    catch(error:any){Alert.alert('Could not cancel message',error?.message||'Please try again.');}
+  };
+
+  const submitScheduledMessage=async()=>{
+    if(!active||active.kind==='channel'||!session?.user?.id||scheduleBusy)return;
+    const body=scheduleDraft.trim();
+    const scheduledAt=new Date(scheduleAtInput.trim().replace(' ','T'));
+    if(!body){Alert.alert('Message is empty','Enter the text you want to send later.');return;}
+    if(!Number.isFinite(scheduledAt.getTime())||scheduledAt.getTime()<=Date.now()){Alert.alert('Choose a future time','Use local time in YYYY-MM-DD HH:mm format.');return;}
+    setScheduleBusy(true);
+    try{
+      const envelope=await encryptConversationText(active.id,body);
+      await upgrade20.createScheduledMessage({conversation_id:active.id,body_envelope:envelope,message_type:'text',scheduled_at:scheduledAt.toISOString()});
+      setScheduleComposerOpen(false);setScheduleDraft('');setScheduleAtInput('');
+      Alert.alert('Message scheduled','Guftin will securely deliver this encrypted message at the selected time.');
+      if(scheduledMessagesOpen)void loadScheduledMessages();
+    }catch(error:any){Alert.alert('Message not scheduled',error?.message||'Please try again.');}
+    finally{setScheduleBusy(false);}
   };
 
   const loadAdvancedFeatureCenter=async()=>{
@@ -4742,6 +4778,7 @@ function GuftinApp() {
         </>):null}
         <Btn onPress={()=>active.kind==='channel'?showChannelOptions():Alert.alert('Chat options',active.name,[
           {text:'Chat info',onPress:()=>void openChatDetails()},
+          ...(active.kind!=='channel'?[{text:'Schedule message',onPress:()=>{setScheduleDraft(draft);const d=new Date(Date.now()+60*60*1000);const pad=(v:number)=>String(v).padStart(2,'0');setScheduleAtInput(`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`);setScheduleComposerOpen(true);}}]:[]),
           ...(active.kind==='group'?[{text:'Create group poll',onPress:()=>{setPollQuestion('');setPollOptionsText('');setPollCreateVisible(true);}},{text:'Create group event',onPress:()=>{setEventTitle('');setEventDetails('');setEventStartsAt('');setEventCreateVisible(true);}}]:[]),
           ...(active.kind==='direct'?[{text:'Block contact',style:'destructive' as const,onPress:()=>Alert.alert('Block this contact?', 'They will be added to your blocked users. Existing chat history will remain.',[{text:'Cancel',style:'cancel' as const},{text:'Block',style:'destructive' as const,onPress:()=>void blockCurrentContact(active)}])}]:[]),
           {text:'Chat PIN settings',onPress:()=>void (async()=>{const key=pinStorageKey('chat',active.id);const stored=await SecureStore.getItemAsync(key);const disabled=await AsyncStorage.getItem('guftin-chat-lock-disabled:'+active.id);Alert.alert('Chat PIN',active.name,stored&&disabled!=='1'?[{text:'Unlock Chat',onPress:()=>startPinFlow('unlock-chat',active)},{text:'Permanently Unlock',style:'destructive',onPress:()=>startPinFlow('remove-chat-lock',active)},{text:'Cancel',style:'cancel'}]:[{text:'Lock Chat',onPress:()=>void (async()=>{await AsyncStorage.removeItem('guftin-chat-lock-disabled:'+active.id);startPinFlow('set-chat',active);})()},{text:'Cancel',style:'cancel'}]);})()},
@@ -5160,6 +5197,28 @@ function GuftinApp() {
       </View>
     </Modal>
 
+    <Modal visible={scheduleComposerOpen} transparent animationType="fade" onRequestClose={()=>{if(!scheduleBusy)setScheduleComposerOpen(false);}}>
+      <View style={{flex:1,backgroundColor:'#0009',justifyContent:'center',padding:22}}><View style={{backgroundColor:C.white,borderRadius:20,padding:18}}>
+        <Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>Schedule encrypted message</Text>
+        <Text style={{fontSize:11,color:C.muted,marginTop:5,marginBottom:12}}>The message is encrypted for the current group/contact devices before it is stored.</Text>
+        <TextInput value={scheduleDraft} onChangeText={setScheduleDraft} placeholder="Write your message…" multiline maxLength={4000} style={{minHeight:100,backgroundColor:C.paper,borderRadius:12,padding:12,color:C.ink,textAlignVertical:'top'}}/>
+        <Text style={{color:C.ink,fontWeight:'800',marginTop:12,marginBottom:6}}>Send at (your local time)</Text>
+        <TextInput value={scheduleAtInput} onChangeText={setScheduleAtInput} placeholder="YYYY-MM-DD HH:mm" autoCapitalize="none" style={{backgroundColor:C.paper,borderRadius:12,padding:12,color:C.ink}}/>
+        <View style={{flexDirection:'row',justifyContent:'flex-end',gap:10,marginTop:14}}><Btn disabled={scheduleBusy} onPress={()=>setScheduleComposerOpen(false)} style={{padding:12}}><Text style={{color:C.muted,fontWeight:'800'}}>Cancel</Text></Btn><Btn disabled={scheduleBusy||!scheduleDraft.trim()||!scheduleAtInput.trim()} onPress={()=>void submitScheduledMessage()} style={{backgroundColor:C.green,paddingHorizontal:16,paddingVertical:12,borderRadius:11}}>{scheduleBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Schedule</Text>}</Btn></View>
+      </View></View>
+    </Modal>
+
+    <Modal visible={scheduledMessagesOpen} animationType="slide" onRequestClose={()=>setScheduledMessagesOpen(false)}>
+      <SafeAreaView style={{flex:1,backgroundColor:C.paper}}>
+        <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',padding:18,backgroundColor:C.white,borderBottomWidth:1,borderColor:C.line}}><View><Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>Scheduled messages</Text><Text style={{fontSize:11,color:C.muted,marginTop:3}}>Encrypted messages waiting for delivery</Text></View><Btn onPress={()=>setScheduledMessagesOpen(false)} style={{padding:8}}><Text style={{fontSize:25,color:C.ink}}>×</Text></Btn></View>
+        <Btn onPress={()=>void loadScheduledMessages()} disabled={scheduledMessagesLoading} style={{margin:14,backgroundColor:C.green,padding:12,borderRadius:11,alignItems:'center'}}>{scheduledMessagesLoading?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Refresh</Text>}</Btn>
+        <ScrollView contentContainerStyle={{padding:14,paddingTop:0,gap:10}}>
+          {!scheduledMessagesLoading&&!scheduledMessages.length?<Text style={{color:C.muted,textAlign:'center',padding:30}}>No scheduled messages.</Text>:null}
+          {scheduledMessages.map(item=><View key={item.id} style={{backgroundColor:C.white,borderRadius:14,borderWidth:1,borderColor:C.line,padding:14}}><Text style={{color:C.ink,fontWeight:'900'}}>{new Date(item.scheduled_at).toLocaleString()}</Text><Text style={{color:item.delivery_status==='failed'?C.red:C.green,fontSize:11,fontWeight:'900',marginTop:5}}>{String(item.delivery_status).toUpperCase()}</Text>{item.last_error?<Text style={{color:C.red,fontSize:11,marginTop:5}}>{item.last_error}</Text>:null}{item.delivery_status==='queued'||item.delivery_status==='failed'?<Btn onPress={()=>void cancelScheduledMessage(item.id)} style={{alignSelf:'flex-end',paddingHorizontal:12,paddingVertical:8,backgroundColor:'#fde8e8',borderRadius:9,marginTop:8}}><Text style={{color:C.red,fontWeight:'900',fontSize:11}}>Cancel</Text></Btn>:null}</View>)}
+        </ScrollView>
+      </SafeAreaView>
+    </Modal>
+
     <Modal visible={advancedCenterOpen} animationType="slide" onRequestClose={()=>setAdvancedCenterOpen(false)}>
       <SafeAreaView style={{flex:1,backgroundColor:C.paper}}>
         <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',padding:18,backgroundColor:C.white,borderBottomWidth:1,borderColor:C.line}}>
@@ -5204,6 +5263,7 @@ function GuftinApp() {
         <Text style={{fontSize:21,fontWeight:'900',color:C.ink}}>Guftin settings</Text>
         <Text style={{color:C.muted,fontSize:12,marginTop:5,marginBottom:15}}>Privacy and connection preferences</Text>
         <Btn onPress={()=>{setSettingsOpen(false);setAdvancedCenterOpen(true);void loadAdvancedFeatureCenter();}} style={{backgroundColor:C.mint,borderRadius:12,padding:13,marginBottom:12}}><Text style={{color:C.green,fontWeight:'900'}}>✦  Advanced features center</Text></Btn>
+        <Btn onPress={()=>{setSettingsOpen(false);setScheduledMessagesOpen(true);void loadScheduledMessages();}} style={{backgroundColor:C.mint,borderRadius:12,padding:13,marginBottom:12}}><Text style={{color:C.green,fontWeight:'900'}}>◷  Scheduled messages</Text></Btn>
         <Btn onPress={()=>{setSettingsOpen(false);setSavedItemsOpen(true);void loadSavedItems();}} style={{backgroundColor:C.mint,borderRadius:12,padding:13,marginBottom:12}}>
           <Text style={{color:C.green,fontWeight:'900'}}>★  Open Saved Items</Text>
         </Btn>
