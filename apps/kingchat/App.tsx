@@ -4,7 +4,7 @@ import * as SecureStore from 'expo-secure-store';
 import * as LocalAuthentication from 'expo-local-authentication';
 import NetInfo from '@react-native-community/netinfo';
 import {
-  ActivityIndicator, Alert, Animated, AppState, BackHandler, FlatList, Image, KeyboardAvoidingView, Modal,
+  Alert, Animated, AppState, BackHandler, FlatList, Image, KeyboardAvoidingView, Modal,
   Platform, RefreshControl, ScrollView, Share, StatusBar, Switch, Text, TextInput, ToastAndroid,
   TouchableOpacity, View, useWindowDimensions
 } from 'react-native';
@@ -389,6 +389,100 @@ function Avatar({label,color,size=52,online=false,uri}:any) {
 function BrandLogo({size=78}:any) {
   return <Image source={require('./assets/guftin-official-logo.webp')} style={{width:size,height:size}} resizeMode="contain"/>;
 }
+
+const GUFTIN_WELCOME_SOUND_KEY='guftin-welcome-chime-played-v1';
+const createGuftinWelcomeChime=():Uint8Array=>{
+  const sampleRate=22050,seconds=0.78,sampleCount=Math.floor(sampleRate*seconds);
+  const buffer=new ArrayBuffer(44+sampleCount*2),view=new DataView(buffer);
+  const writeText=(offset:number,value:string)=>{for(let i=0;i<value.length;i++)view.setUint8(offset+i,value.charCodeAt(i));};
+  writeText(0,'RIFF');view.setUint32(4,36+sampleCount*2,true);writeText(8,'WAVE');
+  writeText(12,'fmt ');view.setUint32(16,16,true);view.setUint16(20,1,true);
+  view.setUint16(22,1,true);view.setUint32(24,sampleRate,true);view.setUint32(28,sampleRate*2,true);
+  view.setUint16(32,2,true);view.setUint16(34,16,true);writeText(36,'data');view.setUint32(40,sampleCount*2,true);
+  const notes=[{at:0,frequency:659.25},{at:0.22,frequency:830.61},{at:0.44,frequency:987.77}];
+  for(let i=0;i<sampleCount;i++){
+    const t=i/sampleRate;let value=0;
+    for(const note of notes){
+      const local=t-note.at;
+      if(local>=0&&local<0.20){
+        const attack=Math.min(1,local/0.018),release=Math.min(1,(0.20-local)/0.055);
+        const envelope=Math.max(0,Math.min(attack,release));
+        value+=Math.sin(2*Math.PI*note.frequency*local)*envelope*0.115;
+      }
+    }
+    view.setInt16(44+i*2,Math.max(-1,Math.min(1,value))*32767,true);
+  }
+  return new Uint8Array(buffer);
+};
+function AnimatedBrandLogo({size=78,playIntroSound=true}:any){
+  const turn=useRef(new Animated.Value(0)).current;
+  const scale=useRef(new Animated.Value(0.72)).current;
+  const glow=useRef(new Animated.Value(0)).current;
+  const soundRef=useRef<Audio.Sound|null>(null);
+  useEffect(()=>{
+    const animation=Animated.parallel([
+      Animated.timing(turn,{toValue:1,duration:1350,useNativeDriver:true}),
+      Animated.sequence([
+        Animated.timing(scale,{toValue:1.12,duration:720,useNativeDriver:true}),
+        Animated.spring(scale,{toValue:1,useNativeDriver:true,friction:5,tension:75})
+      ]),
+      Animated.sequence([
+        Animated.timing(glow,{toValue:1,duration:650,useNativeDriver:true}),
+        Animated.timing(glow,{toValue:0.35,duration:700,useNativeDriver:true})
+      ])
+    ]);
+    animation.start();
+    let mounted=true;
+    if(playIntroSound){
+      void (async()=>{
+        try{
+          const played=await AsyncStorage.getItem(GUFTIN_WELCOME_SOUND_KEY);
+          if(played==='1'||!mounted)return;
+          await AsyncStorage.setItem(GUFTIN_WELCOME_SOUND_KEY,'1');
+          const audioFile=new File(Paths.document,'guftin-welcome-chime.wav');
+          if(!audioFile.exists){audioFile.create();await audioFile.write(createGuftinWelcomeChime());}
+          const loaded=await Audio.Sound.createAsync({uri:audioFile.uri},{shouldPlay:true,volume:0.16});
+          if(!mounted){await loaded.sound.unloadAsync();return;}
+          soundRef.current=loaded.sound;
+          loaded.sound.setOnPlaybackStatusUpdate((status:any)=>{
+            if(status?.isLoaded&&status.didJustFinish){
+              const finished=soundRef.current;soundRef.current=null;
+              if(finished)void finished.unloadAsync().catch(()=>{});
+            }
+          });
+        }catch(error:any){console.warn('Guftin welcome sound unavailable:',error?.message||error);}
+      })();
+    }
+    return ()=>{
+      mounted=false;animation.stop();
+      const current=soundRef.current;soundRef.current=null;
+      if(current)void current.unloadAsync().catch(()=>{});
+    };
+  },[turn,scale,glow,playIntroSound]);
+  const rotation=turn.interpolate({inputRange:[0,1],outputRange:['0deg','720deg']});
+  const haloOpacity=glow.interpolate({inputRange:[0,1],outputRange:[0.18,0.9]});
+  const frame=size+30;
+  return <View accessibilityLabel="Guftin animated logo" style={{width:frame,height:frame,alignItems:'center',justifyContent:'center'}}>
+    <Animated.View style={{position:'absolute',width:frame-4,height:frame-4,borderRadius:frame/2,borderWidth:2,borderColor:'#16c8ff',opacity:haloOpacity,transform:[{rotate:rotation},{scale}]}}/>
+    <Animated.View style={{position:'absolute',width:frame-15,height:frame-15,borderRadius:frame/2,borderWidth:2,borderColor:'#a52cff',opacity:haloOpacity,transform:[{rotate:rotation}]}}/>
+    <Animated.View style={{transform:[{rotate:rotation},{scale}]}}>
+      <BrandLogo size={size}/>
+    </Animated.View>
+  </View>;
+}
+function GuftinLoader({color=C.green,size=22,style}:any){
+  const turn=useRef(new Animated.Value(0)).current;
+  useEffect(()=>{
+    const loop=Animated.loop(Animated.timing(turn,{toValue:1,duration:1050,useNativeDriver:true}));
+    loop.start();return ()=>loop.stop();
+  },[turn]);
+  const rotation=turn.interpolate({inputRange:[0,1],outputRange:['0deg','360deg']});
+  const diameter=Math.max(20,Number(size)||22);
+  return <Animated.View accessibilityRole="progressbar" accessibilityLabel="Loading Guftin" style={[{width:diameter,height:diameter,borderRadius:diameter/2,borderWidth:2.5,borderTopColor:color,borderRightColor:'#a62cff',borderBottomColor:'transparent',borderLeftColor:'#24caff',alignItems:'center',justifyContent:'center',transform:[{rotate:rotation}]},style]}>
+    <BrandLogo size={Math.max(13,diameter*.68)}/>
+  </Animated.View>;
+}
+
 function Heading({children}:any) { return <Text style={{fontSize:25,fontWeight:'900',color:C.ink,letterSpacing:-.6}}>{children}</Text>; }
 
 function CallControlButton({label,onPress,active=false,danger=false,disabled=false}:any) {
@@ -698,7 +792,7 @@ function CallRoomScreen({callId,callType,onHangUp,callScope,sessionUserId}:any) 
           <View style={{flexDirection:'row',gap:10,marginTop:22}}>
             <Btn disabled={recordingBusy} onPress={()=>void answerRecordingConsent('declined')} style={{flex:1,paddingVertical:14,borderRadius:13,backgroundColor:'#fbe7e8',alignItems:'center'}}><Text style={{color:'#a42f39',fontWeight:'900'}}>Decline</Text></Btn>
             <Btn disabled={recordingBusy} onPress={()=>void answerRecordingConsent('accepted')} style={{flex:1,paddingVertical:14,borderRadius:13,backgroundColor:'#16845f',alignItems:'center'}}>
-              {recordingBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Accept</Text>}
+              {recordingBusy?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Accept</Text>}
             </Btn>
           </View>
         </View>
@@ -793,7 +887,7 @@ function SecureLiveKitRoom({liveCall,onDisconnected,onHangUp,onConnected,session
 
   if(!audioReady){
     return <View style={{flex:1,alignItems:'center',justifyContent:'center',backgroundColor:'#071c1b',padding:24}}>
-      <ActivityIndicator color="#65d6b2" size="large"/>
+      <GuftinLoader color="#65d6b2" size="large"/>
       <Text style={{color:'#fff',fontWeight:'700',marginTop:14}}>Preparing secure call audio…</Text>
     </View>;
   }
@@ -4566,7 +4660,7 @@ function GuftinApp() {
 
   if(authRestoring){
     return <SafeAreaView style={{flex:1,backgroundColor:C.paper,alignItems:'center',justifyContent:'center'}}>
-      <ActivityIndicator color={C.green} size="large"/>
+      <GuftinLoader color={C.green} size="large"/>
       <Text style={{color:C.muted,marginTop:12}}>Restoring your Guftin session…</Text>
     </SafeAreaView>;
   }
@@ -4576,7 +4670,7 @@ function GuftinApp() {
       <StatusBar barStyle="dark-content"/>
       <ScrollView contentContainerStyle={{flexGrow:1,justifyContent:'center'}}>
         <View style={{alignItems:'center',marginBottom:34}}>
-          <BrandLogo size={78}/>
+          <AnimatedBrandLogo size={78}/>
           <Heading>{otpPurpose==='recovery'?'Reset your password':'Verify your email'}</Heading>
           <Text style={{color:C.muted,marginTop:10,textAlign:'center',lineHeight:22}}>We sent a 6-digit {otpPurpose==='recovery'?'password reset':'verification'} code to</Text>
           <Text style={{color:C.ink,fontWeight:'800',marginTop:4}}>{email}</Text>
@@ -4589,7 +4683,7 @@ function GuftinApp() {
           <TextInput value={confirmNewPassword} onChangeText={setConfirmNewPassword} placeholder="Confirm new password" secureTextEntry autoCapitalize="none" style={{backgroundColor:C.white,borderRadius:15,padding:16,marginBottom:12,color:C.ink}}/>
         </>:null}
         {authError?<Text style={{color:C.red,fontSize:12,lineHeight:18,marginBottom:12}}>{authError}</Text>:null}
-        <Btn disabled={otpBusy||emailOtp.length!==6||(otpPurpose==='recovery'&&(newPassword.length<8||newPassword!==confirmNewPassword))} onPress={verifyCurrentOtp} style={{backgroundColor:C.green,padding:17,borderRadius:16,alignItems:'center'}}>{otpBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>{otpPurpose==='recovery'?'Verify code & reset password':'Verify email'}</Text>}</Btn>
+        <Btn disabled={otpBusy||emailOtp.length!==6||(otpPurpose==='recovery'&&(newPassword.length<8||newPassword!==confirmNewPassword))} onPress={verifyCurrentOtp} style={{backgroundColor:C.green,padding:17,borderRadius:16,alignItems:'center'}}>{otpBusy?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>{otpPurpose==='recovery'?'Verify code & reset password':'Verify email'}</Text>}</Btn>
         <Btn disabled={otpBusy} onPress={resendCurrentOtp} style={{padding:16,alignItems:'center'}}><Text style={{color:C.green,fontWeight:'800'}}>Resend code</Text></Btn>
         <Btn disabled={otpBusy} onPress={()=>{setEmailOtpPending(false);setEmailOtp('');setNewPassword('');setConfirmNewPassword('');setAuthError('');}} style={{padding:12,alignItems:'center'}}><Text style={{color:C.muted,fontWeight:'700'}}>Back to sign in</Text></Btn>
       </ScrollView>
@@ -4601,7 +4695,7 @@ function GuftinApp() {
       <StatusBar barStyle="dark-content"/>
       <ScrollView contentContainerStyle={{flexGrow:1,justifyContent:'center'}}>
         <View style={{alignItems:'center',marginBottom:34}}>
-          <BrandLogo size={78}/>
+          <AnimatedBrandLogo size={78}/>
           <Heading>Guftin</Heading>
           <Text style={{color:C.muted,marginTop:8}}>Your world. Your people. One place.</Text>
         </View>
@@ -4619,7 +4713,7 @@ function GuftinApp() {
         </>}
         {authError?<Text style={{color:C.red,fontSize:12,lineHeight:18,marginBottom:12}}>{authError}</Text>:null}
         {authMode==='login'?<Btn disabled={authBusy} onPress={requestPasswordReset} style={{padding:10,alignItems:'center'}}><Text style={{color:C.green,fontWeight:'800'}}>Forgot password?</Text></Btn>:null}
-        <Btn disabled={authBusy} onPress={()=>authMode==='signup'?void signUpEmail():void signInEmail()} style={{backgroundColor:C.green,padding:17,borderRadius:16,alignItems:'center'}}>{authBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>{authMode==='signup'?'Create account':'Sign in'}</Text>}</Btn>
+        <Btn disabled={authBusy} onPress={()=>authMode==='signup'?void signUpEmail():void signInEmail()} style={{backgroundColor:C.green,padding:17,borderRadius:16,alignItems:'center'}}>{authBusy?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>{authMode==='signup'?'Create account':'Sign in'}</Text>}</Btn>
         <Btn onPress={()=>{setAuthMode(authMode==='signup'?'login':'signup');setAuthError('');setEmailOtpPending(false);}} style={{padding:16,alignItems:'center'}}><Text style={{color:C.green,fontWeight:'800'}}>{authMode==='signup'?'Already have an account? Sign in':'New to Guftin? Create account'}</Text></Btn>
         {authMode==='signup'?<Text style={{color:C.muted,fontSize:10,textAlign:'center',marginTop:8,lineHeight:16}}>Email verification is required for email signup. A mobile number is optional and is never used to sign in.</Text>:null}
 
@@ -4628,21 +4722,21 @@ function GuftinApp() {
   }
 
   if(!profileReady){
-    return <SafeAreaView style={{flex:1,alignItems:'center',justifyContent:'center',backgroundColor:C.paper}}><ActivityIndicator color={C.green}/><Text style={{color:C.muted,marginTop:10}}>Loading your account…</Text></SafeAreaView>;
+    return <SafeAreaView style={{flex:1,alignItems:'center',justifyContent:'center',backgroundColor:C.paper}}><GuftinLoader color={C.green}/><Text style={{color:C.muted,marginTop:10}}>Loading your account…</Text></SafeAreaView>;
   }
 
   if(!profile?.username){
     return <SafeAreaView style={{flex:1,backgroundColor:C.paper,padding:24,justifyContent:'center'}}>
       <StatusBar barStyle="dark-content"/>
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{flexGrow:1,justifyContent:'center'}}>
-        <View style={{alignItems:'center',marginBottom:26}}><BrandLogo size={70}/><Heading>Complete your Guftin profile</Heading></View>
+        <View style={{alignItems:'center',marginBottom:26}}><AnimatedBrandLogo size={70}/><Heading>Complete your Guftin profile</Heading></View>
         <Text style={{fontSize:22,fontWeight:'900',color:C.ink,marginBottom:8}}>Your account details</Text>
         <Text style={{color:C.muted,lineHeight:20,marginBottom:18}}>Choose a permanent username. Your mobile number is optional and does not need verification.</Text>
         <TextInput value={profileName} onChangeText={setProfileName} placeholder="Full name" autoCapitalize="words" style={{backgroundColor:C.white,borderRadius:15,padding:16,marginBottom:10,color:C.ink}}/>
         <TextInput value={profileUsername} onChangeText={v=>setProfileUsername(v.toLowerCase().replace(/[^a-z0-9_]/g,''))} placeholder="Username (3-24 characters)" autoCapitalize="none" style={{backgroundColor:C.white,borderRadius:15,padding:16,marginBottom:10,color:C.ink}}/>
         <Text style={{fontSize:11,color:C.muted,marginBottom:14}}>Allowed: lowercase letters, numbers and underscore.</Text>
         <TextInput value={profilePhone} onChangeText={setProfilePhone} placeholder="Mobile number (Optional)" keyboardType="phone-pad" autoComplete="tel" style={{backgroundColor:C.white,borderRadius:15,padding:16,marginBottom:14,color:C.ink}}/>
-        <Btn disabled={savingProfile} onPress={()=>void finishProfile()} style={{backgroundColor:C.green,padding:17,borderRadius:16,alignItems:'center'}}>{savingProfile?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Save and continue</Text>}</Btn>
+        <Btn disabled={savingProfile} onPress={()=>void finishProfile()} style={{backgroundColor:C.green,padding:17,borderRadius:16,alignItems:'center'}}>{savingProfile?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Save and continue</Text>}</Btn>
         <Btn onPress={()=>supabase.auth.signOut()} style={{padding:12,alignItems:'center'}}><Text style={{color:C.red,fontWeight:'700'}}>Sign out</Text></Btn>
       </ScrollView>
     </SafeAreaView>;
@@ -4685,7 +4779,7 @@ function GuftinApp() {
             <Text style={{color:C.ink,fontWeight:'800'}}>Not now</Text>
           </Btn>
           <Btn disabled={permissionSetupBusy} onPress={()=>void requestPermissionSetupStep()} style={{flex:1,padding:15,borderRadius:14,alignItems:'center',backgroundColor:C.green}}>
-            {permissionSetupBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>{step.key==='autoSave'?'Save choice':step.key==='fullScreenCalls'?(permissionSetupFullScreenOpened?'Continue':'Open settings'):'Allow'}</Text>}
+            {permissionSetupBusy?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>{step.key==='autoSave'?'Save choice':step.key==='fullScreenCalls'?(permissionSetupFullScreenOpened?'Continue':'Open settings'):'Allow'}</Text>}
           </Btn>
         </View>
         <Btn disabled={permissionSetupBusy} onPress={()=>void finishPermissionSetup()} style={{paddingVertical:14,paddingHorizontal:12,alignItems:'center',marginTop:7}}>
@@ -4753,7 +4847,7 @@ function GuftinApp() {
 ✉　☻　☆　⌁　◉
 　♡　➤　✉　☻</Text></View>
       <FlatList ref={chatMessagesListRef} data={list} keyExtractor={m=>m.id} keyboardShouldPersistTaps="handled" style={{flex:1,backgroundColor:'transparent'}} contentContainerStyle={{padding:16,gap:13,flexGrow:1,justifyContent:list.length?'flex-end':'center'}}
-        ListHeaderComponent={active.kind==='group'&&(groupPolls.length>0||groupEvents.length>0||groupCollabLoading)?<View style={{gap:10,marginBottom:10}}>{groupCollabLoading?<ActivityIndicator color={C.green}/>:null}{groupPolls.map(poll=><View key={poll.id} style={{backgroundColor:C.white,borderWidth:1,borderColor:C.line,borderRadius:15,padding:13}}><Text style={{fontSize:13,fontWeight:'900',color:C.ink}}>{poll.question}</Text><Text style={{fontSize:10,color:C.muted,marginTop:3}}>{poll.allows_multiple?'Multiple choices allowed':'Choose one option'} · {poll.kc_poll_votes?.length||0} votes</Text>{poll.options.map((option:any)=><Btn key={option.id} disabled={!!poll.closed_at||poll.myVoteOptionIds.includes(option.id)||!!poll.myVoteOptionIds.length&&!poll.allows_multiple} onPress={()=>void voteInGroupPoll(poll.id,option.id)} style={{backgroundColor:poll.myVoteOptionIds.includes(option.id)?C.mint:C.paper,borderRadius:10,padding:10,marginTop:7,alignItems:'flex-start'}}><Text style={{color:C.ink,fontSize:12,fontWeight:'800'}}>{option.label}　·　{option.voteCount}</Text></Btn>)}{poll.closed_at?<Text style={{fontSize:10,color:C.muted,marginTop:7}}>Poll closed</Text>:poll.creator_id===session?.user?.id?<Btn onPress={()=>Alert.alert('Close this poll?','Members will no longer be able to vote.',[{text:'Keep open',style:'cancel'},{text:'Close poll',style:'destructive',onPress:()=>void (async()=>{try{await upgrade20.closePoll(poll.id);await loadGroupPolls(active.id);}catch(error:any){Alert.alert('Poll not closed',error?.message||'Please try again.');}})()}])} style={{alignSelf:'flex-end',padding:7,marginTop:7}}><Text style={{fontSize:10,color:C.red,fontWeight:'900'}}>Close poll</Text></Btn>:null}</View>)}{groupEvents.map(event=><View key={event.id} style={{backgroundColor:C.white,borderWidth:1,borderColor:C.line,borderRadius:15,padding:13}}><Text style={{fontSize:13,fontWeight:'900',color:C.ink}}>{event.title}</Text><Text style={{fontSize:10,color:C.muted,marginTop:4}}>{new Date(event.starts_at).toLocaleString()} · Reminder {event.reminder_minutes} min before</Text>{event.details?<Text style={{fontSize:12,color:C.ink,marginTop:7}}>{event.details}</Text>:null}<Text style={{fontSize:10,color:C.muted,marginTop:7}}>{(event.kc_group_event_rsvps||[]).filter((r:any)=>r.response==='going').length} going · {(event.kc_group_event_rsvps||[]).filter((r:any)=>r.response==='maybe').length} maybe</Text><View style={{flexDirection:'row',gap:6,marginTop:9}}>{(['going','maybe','not_going'] as const).map(response=><Btn key={response} onPress={()=>void respondToGroupEvent(event.id,response)} style={{flex:1,padding:8,borderRadius:9,backgroundColor:(event.kc_group_event_rsvps||[]).some((r:any)=>r.user_id===session?.user?.id&&r.response===response)?C.mint:C.paper,alignItems:'center'}}><Text style={{fontSize:10,color:C.green,fontWeight:'900'}}>{response==='going'?'Going':response==='maybe'?'Maybe':'No'}</Text></Btn>)}</View>{event.creator_id===session?.user?.id?<Btn onPress={()=>cancelGroupEvent(event.id)} style={{marginTop:7,padding:7,alignSelf:'flex-end'}}><Text style={{fontSize:10,color:C.red,fontWeight:'900'}}>Cancel event</Text></Btn>:null}</View>)}</View>:null}
+        ListHeaderComponent={active.kind==='group'&&(groupPolls.length>0||groupEvents.length>0||groupCollabLoading)?<View style={{gap:10,marginBottom:10}}>{groupCollabLoading?<GuftinLoader color={C.green}/>:null}{groupPolls.map(poll=><View key={poll.id} style={{backgroundColor:C.white,borderWidth:1,borderColor:C.line,borderRadius:15,padding:13}}><Text style={{fontSize:13,fontWeight:'900',color:C.ink}}>{poll.question}</Text><Text style={{fontSize:10,color:C.muted,marginTop:3}}>{poll.allows_multiple?'Multiple choices allowed':'Choose one option'} · {poll.kc_poll_votes?.length||0} votes</Text>{poll.options.map((option:any)=><Btn key={option.id} disabled={!!poll.closed_at||poll.myVoteOptionIds.includes(option.id)||!!poll.myVoteOptionIds.length&&!poll.allows_multiple} onPress={()=>void voteInGroupPoll(poll.id,option.id)} style={{backgroundColor:poll.myVoteOptionIds.includes(option.id)?C.mint:C.paper,borderRadius:10,padding:10,marginTop:7,alignItems:'flex-start'}}><Text style={{color:C.ink,fontSize:12,fontWeight:'800'}}>{option.label}　·　{option.voteCount}</Text></Btn>)}{poll.closed_at?<Text style={{fontSize:10,color:C.muted,marginTop:7}}>Poll closed</Text>:poll.creator_id===session?.user?.id?<Btn onPress={()=>Alert.alert('Close this poll?','Members will no longer be able to vote.',[{text:'Keep open',style:'cancel'},{text:'Close poll',style:'destructive',onPress:()=>void (async()=>{try{await upgrade20.closePoll(poll.id);await loadGroupPolls(active.id);}catch(error:any){Alert.alert('Poll not closed',error?.message||'Please try again.');}})()}])} style={{alignSelf:'flex-end',padding:7,marginTop:7}}><Text style={{fontSize:10,color:C.red,fontWeight:'900'}}>Close poll</Text></Btn>:null}</View>)}{groupEvents.map(event=><View key={event.id} style={{backgroundColor:C.white,borderWidth:1,borderColor:C.line,borderRadius:15,padding:13}}><Text style={{fontSize:13,fontWeight:'900',color:C.ink}}>{event.title}</Text><Text style={{fontSize:10,color:C.muted,marginTop:4}}>{new Date(event.starts_at).toLocaleString()} · Reminder {event.reminder_minutes} min before</Text>{event.details?<Text style={{fontSize:12,color:C.ink,marginTop:7}}>{event.details}</Text>:null}<Text style={{fontSize:10,color:C.muted,marginTop:7}}>{(event.kc_group_event_rsvps||[]).filter((r:any)=>r.response==='going').length} going · {(event.kc_group_event_rsvps||[]).filter((r:any)=>r.response==='maybe').length} maybe</Text><View style={{flexDirection:'row',gap:6,marginTop:9}}>{(['going','maybe','not_going'] as const).map(response=><Btn key={response} onPress={()=>void respondToGroupEvent(event.id,response)} style={{flex:1,padding:8,borderRadius:9,backgroundColor:(event.kc_group_event_rsvps||[]).some((r:any)=>r.user_id===session?.user?.id&&r.response===response)?C.mint:C.paper,alignItems:'center'}}><Text style={{fontSize:10,color:C.green,fontWeight:'900'}}>{response==='going'?'Going':response==='maybe'?'Maybe':'No'}</Text></Btn>)}</View>{event.creator_id===session?.user?.id?<Btn onPress={()=>cancelGroupEvent(event.id)} style={{marginTop:7,padding:7,alignSelf:'flex-end'}}><Text style={{fontSize:10,color:C.red,fontWeight:'900'}}>Cancel event</Text></Btn>:null}</View>)}</View>:null}
         ListEmptyComponent={<Text style={{textAlign:'center',color:C.muted}}>No messages yet. Send the first message.</Text>}
         renderItem={({item})=><TouchableOpacity activeOpacity={1} onLongPress={active.kind==='channel'&&!active.isChannelOwner?undefined:()=>deleteMessage(item)} delayLongPress={420} style={{alignSelf:item.mine?'flex-end':'flex-start',maxWidth:'86%',backgroundColor:item.mine?'#d2f8bd':'#fff',paddingHorizontal:16,paddingVertical:13,borderRadius:23,borderBottomRightRadius:item.mine?6:23,borderTopLeftRadius:item.mine?23:6,borderWidth:1,borderColor:item.mine?'#b7e9a2':'#eeeae3',elevation:2,shadowColor:'#8c806c',shadowOpacity:.10,shadowRadius:4,shadowOffset:{width:0,height:2}}}>
           {item.deleted_at?<Text style={{fontSize:12,color:C.muted,fontStyle:'italic'}}>This message was deleted</Text>:item.message_type==='image'&&item.attachment_url?<Image source={{uri:item.attachment_url}} style={{width:210,height:210,borderRadius:12}} resizeMode="cover"/>:item.message_type==='video'&&item.attachment_url?<VideoBubble uri={item.attachment_url}/>:item.message_type==='audio'&&item.attachment_url?<AudioBubble uri={item.attachment_url}/>:item.message_type==='file'&&item.attachment_url?<View style={{minWidth:225,maxWidth:270,backgroundColor:C.paper,borderRadius:13,padding:12}}>
@@ -4778,7 +4872,7 @@ function GuftinApp() {
             {active.kind!=='channel'?<Btn disabled={sending||recordingBusy} onPress={recording?stopVoiceRecording:startVoiceRecording} style={{width:42,height:42,borderRadius:15,backgroundColor:recording?'#fde8e8':C.paper,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:18,color:recording?C.red:C.green}}>{recording?'■':'🎙'}</Text></Btn>:null}
             <TextInput editable={true} value={draft} onChangeText={setDraft} onFocus={()=>requestAnimationFrame(()=>chatMessagesListRef.current?.scrollToEnd({animated:true}))} placeholder={!isOnline?'Offline · message will send when connected':active.kind==='channel'?'Write a channel update…':recording?'Recording… tap ■ to send':'Write a message...'} multiline maxLength={4000} style={{flex:1,minHeight:48,maxHeight:110,backgroundColor:'#f6f6f6',borderRadius:25,paddingHorizontal:15,paddingVertical:12,color:C.ink,textAlignVertical:'center',borderWidth:1,borderColor:'#f0eee9'}}/>
             <Btn disabled={!draft.trim()||sending} onPress={sendMessage} style={{backgroundColor:'#08a96b',width:54,height:54,borderRadius:28,alignItems:'center',justifyContent:'center',elevation:3}}>
-              {sending?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontSize:20}}>➤</Text>}
+              {sending?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontSize:20}}>➤</Text>}
             </Btn>
           </>}
       </View>
@@ -4790,7 +4884,7 @@ function GuftinApp() {
           <Btn onPress={()=>setChatDetailsOpen(false)} style={{padding:10}}><Text style={{fontSize:25,color:C.ink}}>‹</Text></Btn>
           <Text style={{fontSize:18,fontWeight:'900',color:C.ink,marginLeft:8}}>Contact info</Text>
         </View>
-        {chatDetailsLoading?<View style={{flex:1,alignItems:'center',justifyContent:'center'}}><ActivityIndicator color={C.green}/><Text style={{color:C.muted,marginTop:10}}>Loading contact information…</Text></View>:chatDetails?<ScrollView contentContainerStyle={{padding:18,paddingBottom:34}}>
+        {chatDetailsLoading?<View style={{flex:1,alignItems:'center',justifyContent:'center'}}><GuftinLoader color={C.green}/><Text style={{color:C.muted,marginTop:10}}>Loading contact information…</Text></View>:chatDetails?<ScrollView contentContainerStyle={{padding:18,paddingBottom:34}}>
           <View style={{alignItems:'center',backgroundColor:C.white,borderRadius:22,padding:24,marginBottom:16}}>
             <Avatar label={initials(chatDetails.conversation.kind==='group'?chatDetails.conversation.title:(chatDetails.members.find((member:any)=>member.user_id!==session.user.id)?.display_name||active.name||'G'))}
               color={C.green} size={112} uri={chatDetails.conversation.kind==='group'?(chatDetails.conversation.photo_signed_url||undefined):(chatDetails.members.find((member:any)=>member.user_id!==session.user.id)?.avatar_signed_url||undefined)}/>
@@ -4878,7 +4972,7 @@ function GuftinApp() {
     {!isOnline?<View style={{backgroundColor:'#fff1d6',paddingHorizontal:16,paddingVertical:8}}><Text style={{color:'#815500',fontSize:11,fontWeight:'800',textAlign:'center'}}>Offline mode · Saved Guftin information is available. Messages and live updates need internet.</Text></View>:null}
     {tab==='Chats'?<>
       {searching?<TextInput value={search} onChangeText={setSearch} placeholder="Search your conversations..." autoFocus style={{marginHorizontal:20,marginBottom:12,padding:14,backgroundColor:C.paper,borderRadius:14,color:C.ink}}/>:null}
-      {loading&&chats.length===0?<View style={{flex:1,alignItems:'center',justifyContent:'center'}}><ActivityIndicator color={C.green}/><Text style={{color:C.muted,marginTop:10}}>Loading your conversations…</Text></View>:
+      {loading&&chats.length===0?<View style={{flex:1,alignItems:'center',justifyContent:'center'}}><GuftinLoader color={C.green}/><Text style={{color:C.muted,marginTop:10}}>Loading your conversations…</Text></View>:
         <FlatList data={visible} keyExtractor={x=>x.id} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={C.green}/>} contentContainerStyle={{paddingHorizontal:13,paddingTop:8,paddingBottom:24,flexGrow:1}}
           ListHeaderComponent={<View style={{paddingTop:4,paddingBottom:12}}>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{gap:8,paddingBottom:12}}>
@@ -4954,7 +5048,7 @@ function GuftinApp() {
           <Btn onPress={()=>setChannelJoinOpen(true)} style={{flex:1,backgroundColor:C.mint,padding:13,borderRadius:13,alignItems:'center'}}><Text style={{color:C.green,fontWeight:'900'}}>Join by link</Text></Btn>
         </View>
       </View>
-      {channelsLoading&&channels.length===0?<View style={{padding:30,alignItems:'center'}}><ActivityIndicator color={C.green}/><Text style={{color:C.muted,marginTop:8}}>Loading channels…</Text></View>:null}
+      {channelsLoading&&channels.length===0?<View style={{padding:30,alignItems:'center'}}><GuftinLoader color={C.green}/><Text style={{color:C.muted,marginTop:8}}>Loading channels…</Text></View>:null}
       <TextInput value={channelSearch} onChangeText={setChannelSearch} placeholder="Search public channels by name..." autoCapitalize="none" returnKeyType="search" style={{backgroundColor:C.paper,borderRadius:14,padding:14,color:C.ink,marginBottom:15}}/>
       <Text style={{fontSize:16,fontWeight:'900',color:C.ink,marginBottom:9}}>Your channels</Text>
       {ownChannels.length===0?<Text style={{fontSize:12,color:C.muted,marginBottom:16}}>{channelQuery?'No channel you own matches this name.':'You have not created a channel yet.'}</Text>:ownChannels.map(channel=><View key={channel.conversation_id} style={{backgroundColor:C.white,borderRadius:17,padding:13,marginBottom:9,borderWidth:1,borderColor:C.line}}>
@@ -5002,7 +5096,7 @@ function GuftinApp() {
         </View>}
       <Text style={{fontWeight:'800',color:C.ink,marginTop:15,marginBottom:8}}>About</Text>
       <TextInput value={about} onChangeText={setAbout} placeholder="A little about you" maxLength={160} multiline style={{backgroundColor:C.paper,borderRadius:14,padding:15,color:C.ink,minHeight:75,textAlignVertical:'top'}}/>
-      <Btn disabled={savingProfile||profileUploading} onPress={saveProfile} style={{backgroundColor:C.green,padding:15,borderRadius:14,alignItems:'center',marginTop:10}}>{savingProfile?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'800'}}>Save profile</Text>}</Btn>
+      <Btn disabled={savingProfile||profileUploading} onPress={saveProfile} style={{backgroundColor:C.green,padding:15,borderRadius:14,alignItems:'center',marginTop:10}}>{savingProfile?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'800'}}>Save profile</Text>}</Btn>
       <View style={{padding:15,backgroundColor:C.mint,borderRadius:14,marginTop:18}}>
         <Text style={{fontWeight:'900',color:C.green}}>🔒 Message encryption</Text>
         <Text style={{color:C.ink,fontSize:12,lineHeight:18,marginTop:6}}>{e2eeStatus==='ready'?'This device has a private key stored locally. New text messages are encrypted for each registered conversation device before upload.':'This device encryption key is not available yet. Secure text sending is paused.'}</Text>
@@ -5042,7 +5136,7 @@ function GuftinApp() {
           <Text style={{fontSize:12,color:C.muted,marginTop:5}}>Choose a name and add people from your saved contacts.</Text>
           <TextInput value={groupName} onChangeText={setGroupName} placeholder="Group name" maxLength={60} style={{backgroundColor:C.paper,borderRadius:14,padding:14,marginTop:15,color:C.ink}}/>
           <Text style={{fontSize:13,fontWeight:'900',color:C.ink,marginTop:16,marginBottom:8}}>Members ({selectedGroupIds.length})</Text>
-          {groupContactsLoading?<ActivityIndicator color={C.green} style={{padding:24}}/>:groupContacts.length===0?
+          {groupContactsLoading?<GuftinLoader color={C.green} style={{padding:24}}/>:groupContacts.length===0?
             <Text style={{color:C.muted,padding:20,textAlign:'center'}}>No saved contacts yet. Add contacts by username first.</Text>:
             <FlatList data={groupContacts} keyExtractor={(item:any)=>item.id} style={{maxHeight:300}} renderItem={({item}:any)=>{
               const selected=selectedGroupIds.includes(item.id);
@@ -5055,7 +5149,7 @@ function GuftinApp() {
           <View style={{flexDirection:'row',justifyContent:'flex-end',gap:10,marginTop:18}}>
             <Btn onPress={()=>setGroupCreateOpen(false)} style={{padding:13}}><Text style={{color:C.muted,fontWeight:'700'}}>Cancel</Text></Btn>
             <Btn disabled={groupCreating||groupContactsLoading||selectedGroupIds.length===0} onPress={()=>void createGroup()} style={{backgroundColor:C.green,paddingHorizontal:18,paddingVertical:13,borderRadius:13}}>
-              {groupCreating?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Create group</Text>}
+              {groupCreating?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Create group</Text>}
             </Btn>
           </View>
         </View>
@@ -5063,7 +5157,7 @@ function GuftinApp() {
     </Modal>
 
     <Modal visible={appLocked} transparent animationType="fade" onRequestClose={()=>{}}>
-      <View style={{flex:1,backgroundColor:C.white,justifyContent:'center',alignItems:'center',padding:24}}><Text style={{fontSize:25,fontWeight:'900',color:C.ink,marginBottom:12}}>Guftin is locked</Text>{biometricLockEnabled&&biometricAvailable?<Btn disabled={biometricBusy} onPress={()=>void runBiometricUnlock()} style={{backgroundColor:C.green,padding:15,borderRadius:13,width:'100%',marginBottom:10}}>{biometricBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900',textAlign:'center'}}>Use fingerprint / face unlock</Text>}</Btn>:null}<Btn onPress={()=>startPinFlow('unlock-app')} style={{backgroundColor:C.mint,padding:15,borderRadius:13,width:'100%'}}><Text style={{color:C.green,fontWeight:'900',textAlign:'center'}}>Enter App PIN</Text></Btn></View>
+      <View style={{flex:1,backgroundColor:C.white,justifyContent:'center',alignItems:'center',padding:24}}><Text style={{fontSize:25,fontWeight:'900',color:C.ink,marginBottom:12}}>Guftin is locked</Text>{biometricLockEnabled&&biometricAvailable?<Btn disabled={biometricBusy} onPress={()=>void runBiometricUnlock()} style={{backgroundColor:C.green,padding:15,borderRadius:13,width:'100%',marginBottom:10}}>{biometricBusy?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900',textAlign:'center'}}>Use fingerprint / face unlock</Text>}</Btn>:null}<Btn onPress={()=>startPinFlow('unlock-app')} style={{backgroundColor:C.mint,padding:15,borderRadius:13,width:'100%'}}><Text style={{color:C.green,fontWeight:'900',textAlign:'center'}}>Enter App PIN</Text></Btn></View>
     </Modal>
     <Modal visible={pinModalVisible} transparent animationType="fade" onRequestClose={()=>{if(pinMode==='unlock-app'||pinMode==='unlock-chat')return;setPinModalVisible(false);}}>
       <View style={{flex:1,backgroundColor:'#0009',justifyContent:'center',padding:24}}><View style={{backgroundColor:C.white,borderRadius:22,padding:22,gap:12}}>
@@ -5087,7 +5181,7 @@ function GuftinApp() {
           <Btn onPress={()=>setDeviceManagerOpen(false)} style={{padding:8}}><Text style={{fontSize:24,color:C.ink}}>×</Text></Btn>
         </View>
         <ScrollView contentContainerStyle={{padding:16,gap:10}}>
-          {devicesLoading?<ActivityIndicator color={C.green}/>:null}
+          {devicesLoading?<GuftinLoader color={C.green}/>:null}
           {registeredDevices.map((device:any)=><View key={device.id} style={{backgroundColor:C.white,borderRadius:14,padding:14,borderWidth:1,borderColor:C.line}}>
             <Text style={{fontWeight:'900',color:C.ink}}>{device.device_label||'Guftin device'} {device.id===deviceIdentity?.deviceId?'· This device':''}</Text>
             <Text style={{fontSize:11,color:C.muted,marginTop:4}}>{String(device.platform||'unknown').toUpperCase()} · Added {timeLabel(device.created_at)} · Last active {timeLabel(device.last_active_at||device.created_at)}</Text>
@@ -5117,7 +5211,7 @@ function GuftinApp() {
           <TextInput value={editDraft} onChangeText={setEditDraft} multiline maxLength={4000} autoFocus style={{minHeight:110,maxHeight:190,backgroundColor:C.paper,borderRadius:13,padding:13,color:C.ink,textAlignVertical:'top'}}/>
           <View style={{flexDirection:'row',justifyContent:'flex-end',gap:10,marginTop:14}}>
             <Btn disabled={editBusy} onPress={()=>setEditModalVisible(false)} style={{padding:12}}><Text style={{color:C.muted,fontWeight:'800'}}>Cancel</Text></Btn>
-            <Btn disabled={editBusy||!editDraft.trim()} onPress={()=>void saveEditedMessage()} style={{backgroundColor:C.green,paddingHorizontal:17,paddingVertical:12,borderRadius:11}}>{editBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Save edit</Text>}</Btn>
+            <Btn disabled={editBusy||!editDraft.trim()} onPress={()=>void saveEditedMessage()} style={{backgroundColor:C.green,paddingHorizontal:17,paddingVertical:12,borderRadius:11}}>{editBusy?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Save edit</Text>}</Btn>
           </View>
         </View>
       </View>
@@ -5129,7 +5223,7 @@ function GuftinApp() {
           <Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>Message edit history</Text>
           <Btn onPress={()=>setEditHistoryVisible(false)} style={{padding:8}}><Text style={{fontSize:25,color:C.ink}}>×</Text></Btn>
         </View>
-        {editHistoryLoading?<ActivityIndicator color={C.green} style={{marginTop:25}}/>:null}
+        {editHistoryLoading?<GuftinLoader color={C.green} style={{marginTop:25}}/>:null}
         <ScrollView contentContainerStyle={{padding:16,gap:10}}>
           {!editHistoryRows.length&&!editHistoryLoading?<Text style={{color:C.muted,textAlign:'center',padding:25}}>No previous edits were found.</Text>:null}
           {editHistoryRows.map(row=><View key={row.id} style={{backgroundColor:C.white,borderRadius:13,padding:14,borderWidth:1,borderColor:C.line}}>
@@ -5151,7 +5245,7 @@ function GuftinApp() {
           <TextInput value={pollQuestion} onChangeText={setPollQuestion} placeholder="Ask a question" maxLength={300} style={{backgroundColor:C.paper,borderRadius:12,padding:12,color:C.ink,marginBottom:9}}/>
           <TextInput value={pollOptionsText} onChangeText={setPollOptionsText} placeholder={'Option 1\nOption 2\nOption 3'} multiline maxLength={1200} style={{minHeight:110,backgroundColor:C.paper,borderRadius:12,padding:12,color:C.ink,textAlignVertical:'top'}}/>
           <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingVertical:10}}><View style={{flex:1}}><Text style={{color:C.ink,fontWeight:'800'}}>Allow multiple choices</Text><Text style={{color:C.muted,fontSize:10}}>Members may vote for more than one option</Text></View><Switch value={pollAllowsMultiple} onValueChange={setPollAllowsMultiple} trackColor={{true:C.green}}/></View>
-          <View style={{flexDirection:'row',justifyContent:'flex-end',gap:10,marginTop:8}}><Btn disabled={pollBusy} onPress={()=>setPollCreateVisible(false)} style={{padding:12}}><Text style={{color:C.muted,fontWeight:'800'}}>Cancel</Text></Btn><Btn disabled={pollBusy||!pollQuestion.trim()||pollOptionsText.split('\n').filter(x=>x.trim()).length<2} onPress={()=>void createGroupPoll()} style={{backgroundColor:C.green,paddingHorizontal:16,paddingVertical:12,borderRadius:11}}>{pollBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Create poll</Text>}</Btn></View>
+          <View style={{flexDirection:'row',justifyContent:'flex-end',gap:10,marginTop:8}}><Btn disabled={pollBusy} onPress={()=>setPollCreateVisible(false)} style={{padding:12}}><Text style={{color:C.muted,fontWeight:'800'}}>Cancel</Text></Btn><Btn disabled={pollBusy||!pollQuestion.trim()||pollOptionsText.split('\n').filter(x=>x.trim()).length<2} onPress={()=>void createGroupPoll()} style={{backgroundColor:C.green,paddingHorizontal:16,paddingVertical:12,borderRadius:11}}>{pollBusy?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Create poll</Text>}</Btn></View>
         </View>
       </View>
     </Modal>
@@ -5166,7 +5260,7 @@ function GuftinApp() {
           <TextInput value={eventStartsAt} onChangeText={setEventStartsAt} placeholder="Local date/time: 2026-11-25 18:30" autoCapitalize="none" style={{backgroundColor:C.paper,borderRadius:12,padding:12,color:C.ink}}/>
           <Text style={{color:C.ink,fontWeight:'800',marginTop:12}}>Reminder before event</Text>
           <View style={{flexDirection:'row',gap:7,marginTop:8}}>{[0,15,60,1440].map(minutes=><Btn key={minutes} onPress={()=>setEventReminderMinutes(minutes)} style={{flex:1,padding:9,borderRadius:9,backgroundColor:eventReminderMinutes===minutes?C.green:C.paper,alignItems:'center'}}><Text style={{fontSize:10,fontWeight:'900',color:eventReminderMinutes===minutes?'#fff':C.ink}}>{minutes===0?'Off':minutes===1440?'1 day':minutes+' min'}</Text></Btn>)}</View>
-          <View style={{flexDirection:'row',justifyContent:'flex-end',gap:10,marginTop:14}}><Btn disabled={eventBusy} onPress={()=>setEventCreateVisible(false)} style={{padding:12}}><Text style={{color:C.muted,fontWeight:'800'}}>Cancel</Text></Btn><Btn disabled={eventBusy||!eventTitle.trim()||!eventStartsAt.trim()} onPress={()=>void createGroupEvent()} style={{backgroundColor:C.green,paddingHorizontal:16,paddingVertical:12,borderRadius:11}}>{eventBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Create event</Text>}</Btn></View>
+          <View style={{flexDirection:'row',justifyContent:'flex-end',gap:10,marginTop:14}}><Btn disabled={eventBusy} onPress={()=>setEventCreateVisible(false)} style={{padding:12}}><Text style={{color:C.muted,fontWeight:'800'}}>Cancel</Text></Btn><Btn disabled={eventBusy||!eventTitle.trim()||!eventStartsAt.trim()} onPress={()=>void createGroupEvent()} style={{backgroundColor:C.green,paddingHorizontal:16,paddingVertical:12,borderRadius:11}}>{eventBusy?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Create event</Text>}</Btn></View>
         </View>
       </View>
     </Modal>
@@ -5178,14 +5272,14 @@ function GuftinApp() {
         <TextInput value={scheduleDraft} onChangeText={setScheduleDraft} placeholder="Write your message…" multiline maxLength={4000} style={{minHeight:100,backgroundColor:C.paper,borderRadius:12,padding:12,color:C.ink,textAlignVertical:'top'}}/>
         <Text style={{color:C.ink,fontWeight:'800',marginTop:12,marginBottom:6}}>Send at (your local time)</Text>
         <TextInput value={scheduleAtInput} onChangeText={setScheduleAtInput} placeholder="YYYY-MM-DD HH:mm" autoCapitalize="none" style={{backgroundColor:C.paper,borderRadius:12,padding:12,color:C.ink}}/>
-        <View style={{flexDirection:'row',justifyContent:'flex-end',gap:10,marginTop:14}}><Btn disabled={scheduleBusy} onPress={()=>setScheduleComposerOpen(false)} style={{padding:12}}><Text style={{color:C.muted,fontWeight:'800'}}>Cancel</Text></Btn><Btn disabled={scheduleBusy||!scheduleDraft.trim()||!scheduleAtInput.trim()} onPress={()=>void submitScheduledMessage()} style={{backgroundColor:C.green,paddingHorizontal:16,paddingVertical:12,borderRadius:11}}>{scheduleBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Schedule</Text>}</Btn></View>
+        <View style={{flexDirection:'row',justifyContent:'flex-end',gap:10,marginTop:14}}><Btn disabled={scheduleBusy} onPress={()=>setScheduleComposerOpen(false)} style={{padding:12}}><Text style={{color:C.muted,fontWeight:'800'}}>Cancel</Text></Btn><Btn disabled={scheduleBusy||!scheduleDraft.trim()||!scheduleAtInput.trim()} onPress={()=>void submitScheduledMessage()} style={{backgroundColor:C.green,paddingHorizontal:16,paddingVertical:12,borderRadius:11}}>{scheduleBusy?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Schedule</Text>}</Btn></View>
       </View></View>
     </Modal>
 
     <Modal visible={scheduledMessagesOpen} animationType="slide" onRequestClose={()=>setScheduledMessagesOpen(false)}>
       <SafeAreaView style={{flex:1,backgroundColor:C.paper}}>
         <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',padding:18,backgroundColor:C.white,borderBottomWidth:1,borderColor:C.line}}><View><Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>Scheduled messages</Text><Text style={{fontSize:11,color:C.muted,marginTop:3}}>Encrypted messages waiting for delivery</Text></View><Btn onPress={()=>setScheduledMessagesOpen(false)} style={{padding:8}}><Text style={{fontSize:25,color:C.ink}}>×</Text></Btn></View>
-        <Btn onPress={()=>void loadScheduledMessages()} disabled={scheduledMessagesLoading} style={{margin:14,backgroundColor:C.green,padding:12,borderRadius:11,alignItems:'center'}}>{scheduledMessagesLoading?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Refresh</Text>}</Btn>
+        <Btn onPress={()=>void loadScheduledMessages()} disabled={scheduledMessagesLoading} style={{margin:14,backgroundColor:C.green,padding:12,borderRadius:11,alignItems:'center'}}>{scheduledMessagesLoading?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Refresh</Text>}</Btn>
         <ScrollView contentContainerStyle={{padding:14,paddingTop:0,gap:10}}>
           {!scheduledMessagesLoading&&!scheduledMessages.length?<Text style={{color:C.muted,textAlign:'center',padding:30}}>No scheduled messages.</Text>:null}
           {scheduledMessages.map(item=><View key={item.id} style={{backgroundColor:C.white,borderRadius:14,borderWidth:1,borderColor:C.line,padding:14}}><Text style={{color:C.ink,fontWeight:'900'}}>{new Date(item.scheduled_at).toLocaleString()}</Text><Text style={{color:item.delivery_status==='failed'?C.red:C.green,fontSize:11,fontWeight:'900',marginTop:5}}>{String(item.delivery_status).toUpperCase()}</Text>{item.last_error?<Text style={{color:C.red,fontSize:11,marginTop:5}}>{item.last_error}</Text>:null}{item.delivery_status==='queued'||item.delivery_status==='failed'?<Btn onPress={()=>void cancelScheduledMessage(item.id)} style={{alignSelf:'flex-end',paddingHorizontal:12,paddingVertical:8,backgroundColor:'#fde8e8',borderRadius:9,marginTop:8}}><Text style={{color:C.red,fontWeight:'900',fontSize:11}}>Cancel</Text></Btn>:null}</View>)}
@@ -5200,7 +5294,7 @@ function GuftinApp() {
           <Btn onPress={()=>setAdvancedCenterOpen(false)} style={{padding:8}}><Text style={{fontSize:25,color:C.ink}}>×</Text></Btn>
         </View>
         <ScrollView contentContainerStyle={{padding:16,gap:10}}>
-          <Btn onPress={()=>void loadAdvancedFeatureCenter()} disabled={advancedCenterLoading} style={{backgroundColor:C.green,padding:13,borderRadius:12,alignItems:'center'}}>{advancedCenterLoading?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Refresh feature data</Text>}</Btn>
+          <Btn onPress={()=>void loadAdvancedFeatureCenter()} disabled={advancedCenterLoading} style={{backgroundColor:C.green,padding:13,borderRadius:12,alignItems:'center'}}>{advancedCenterLoading?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Refresh feature data</Text>}</Btn>
           {advancedCenterRows.map(row=><View key={row.label} style={{backgroundColor:C.white,borderRadius:13,padding:14,borderWidth:1,borderColor:C.line,flexDirection:'row',alignItems:'center',gap:10}}>
             <View style={{flex:1}}><Text style={{color:C.ink,fontWeight:'900'}}>{row.label}</Text><Text style={{color:C.muted,fontSize:11,marginTop:3}}>{row.ok?row.detail:row.detail}</Text></View>
             <Text style={{color:row.ok?C.green:C.red,fontWeight:'900'}}>{row.ok?row.count+' saved':'Unavailable'}</Text>
@@ -5217,7 +5311,7 @@ function GuftinApp() {
           <View><Text style={{fontSize:21,fontWeight:'900',color:C.ink}}>Saved Items</Text><Text style={{fontSize:11,color:C.muted,marginTop:3}}>Your saved messages and attachments</Text></View>
           <Btn onPress={()=>setSavedItemsOpen(false)} style={{padding:8}}><Text style={{fontSize:25,color:C.ink}}>×</Text></Btn>
         </View>
-        {savedItemsLoading?<ActivityIndicator color={C.green} style={{marginTop:30}}/>:null}
+        {savedItemsLoading?<GuftinLoader color={C.green} style={{marginTop:30}}/>:null}
         <ScrollView contentContainerStyle={{padding:16,gap:10}}>
           {!savedItemsLoading&&!savedItems.length?<Text style={{textAlign:'center',color:C.muted,padding:30}}>No saved items yet. Long-press a message and choose Save to Saved Items.</Text>:null}
           {savedItems.map((item:any)=><View key={item.id} style={{backgroundColor:C.white,borderRadius:14,padding:14,borderWidth:1,borderColor:C.line}}>
@@ -5262,7 +5356,7 @@ function GuftinApp() {
           <Text style={{color:C.green,fontWeight:'900'}}>★  Open Saved Items</Text>
         </Btn>
         <Btn onPress={()=>{setBlockedUsersOpen(v=>!v);if(!blockedUsersOpen)void loadBlockedUsers();}} style={{backgroundColor:C.mint,borderRadius:12,padding:13,marginBottom:12}}><Text style={{color:C.green,fontWeight:'900'}}>Manage blocked users　›</Text></Btn>
-        {blockedUsersOpen?<View style={{backgroundColor:C.white,borderRadius:12,padding:12,marginBottom:12,borderWidth:1,borderColor:C.line}}><Text style={{color:C.ink,fontWeight:'900',marginBottom:8}}>Blocked accounts ({blockedUsers.length})</Text>{blockedUsersLoading?<ActivityIndicator color={C.green}/>:blockedUsers.length===0?<Text style={{color:C.muted,fontSize:12}}>You have not blocked anyone.</Text>:blockedUsers.map(item=><View key={item.blocked_user_id} style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingVertical:8,borderBottomWidth:1,borderColor:C.line}}><Text numberOfLines={1} style={{color:C.ink,flex:1,fontSize:11}}>{item.blocked_user_id}</Text><Btn onPress={()=>void unblockContact(item.blocked_user_id)} style={{paddingHorizontal:12,paddingVertical:7,backgroundColor:C.paper,borderRadius:9}}><Text style={{color:C.green,fontWeight:'900'}}>Unblock</Text></Btn></View>)}</View>:null}
+        {blockedUsersOpen?<View style={{backgroundColor:C.white,borderRadius:12,padding:12,marginBottom:12,borderWidth:1,borderColor:C.line}}><Text style={{color:C.ink,fontWeight:'900',marginBottom:8}}>Blocked accounts ({blockedUsers.length})</Text>{blockedUsersLoading?<GuftinLoader color={C.green}/>:blockedUsers.length===0?<Text style={{color:C.muted,fontSize:12}}>You have not blocked anyone.</Text>:blockedUsers.map(item=><View key={item.blocked_user_id} style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingVertical:8,borderBottomWidth:1,borderColor:C.line}}><Text numberOfLines={1} style={{color:C.ink,flex:1,fontSize:11}}>{item.blocked_user_id}</Text><Btn onPress={()=>void unblockContact(item.blocked_user_id)} style={{paddingHorizontal:12,paddingVertical:7,backgroundColor:C.paper,borderRadius:9}}><Text style={{color:C.green,fontWeight:'900'}}>Unblock</Text></Btn></View>)}</View>:null}
         <Btn onPress={()=>{setSettingsOpen(false);setDeviceManagerOpen(true);void loadRegisteredDevices();}} style={{backgroundColor:C.mint,borderRadius:12,padding:13,marginBottom:12}}>
           <Text style={{color:C.green,fontWeight:'900'}}>⌁  Linked encryption devices</Text>
         </Btn>
@@ -5273,7 +5367,7 @@ function GuftinApp() {
             <TextInput value={accountEmailInput} onChangeText={setAccountEmailInput} placeholder="Add Gmail / email address" keyboardType="email-address" autoCapitalize="none" autoComplete="email" style={{backgroundColor:C.white,borderRadius:11,padding:12,marginTop:10,color:C.ink}}/>
             <TextInput value={accountEmailPassword} onChangeText={setAccountEmailPassword} placeholder="Create password (at least 8 characters)" secureTextEntry autoCapitalize="none" style={{backgroundColor:C.white,borderRadius:11,padding:12,marginTop:8,color:C.ink}}/>
             <Btn disabled={accountEmailBusy} onPress={()=>void linkEmailToAccount()} style={{backgroundColor:C.green,padding:12,borderRadius:11,alignItems:'center',marginTop:9}}>
-              {accountEmailBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Link email and password</Text>}
+              {accountEmailBusy?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Link email and password</Text>}
             </Btn>
             {accountEmailNotice?<Text style={{color:C.ink,fontSize:11,lineHeight:16,marginTop:7}}>{accountEmailNotice}</Text>:null}
           </>:null}
@@ -5289,7 +5383,7 @@ function GuftinApp() {
             await loadProfile();
             setPhoneVerifyError('Mobile number saved. No verification is required.');
           })()} style={{backgroundColor:C.green,padding:12,borderRadius:11,alignItems:'center',marginTop:8}}>
-            {phoneBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Save optional mobile number</Text>}
+            {phoneBusy?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Save optional mobile number</Text>}
           </Btn>
           {phoneVerifyError?<Text style={{color:C.ink,fontSize:11,lineHeight:16,marginTop:6}}>{phoneVerifyError}</Text>:null}
         </View>
@@ -5368,7 +5462,7 @@ function GuftinApp() {
           <Text style={{color:C.muted,fontSize:10,marginTop:7,textAlign:'right'}}>{statusText.length}/700</Text>
           <View style={{flexDirection:'row',justifyContent:'flex-end',gap:10,marginTop:15}}>
             <Btn onPress={()=>setStatusComposer(false)} style={{padding:13}}><Text style={{color:C.muted,fontWeight:'700'}}>Cancel</Text></Btn>
-            <Btn disabled={publishingStatus||(!statusText.trim()&&!statusAsset)} onPress={publishStatus} style={{backgroundColor:C.green,paddingHorizontal:18,paddingVertical:13,borderRadius:13}}>{publishingStatus?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'800'}}>Share status</Text>}</Btn>
+            <Btn disabled={publishingStatus||(!statusText.trim()&&!statusAsset)} onPress={publishStatus} style={{backgroundColor:C.green,paddingHorizontal:18,paddingVertical:13,borderRadius:13}}>{publishingStatus?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'800'}}>Share status</Text>}</Btn>
           </View>
         </View>
       </View>
@@ -5389,7 +5483,7 @@ function GuftinApp() {
           <View style={{flexDirection:'row',justifyContent:'flex-end',gap:10,marginTop:18}}>
             <Btn disabled={channelEditBusy} onPress={()=>setChannelEditOpen(false)} style={{padding:13}}><Text style={{color:C.muted,fontWeight:'700'}}>Cancel</Text></Btn>
             <Btn disabled={channelEditBusy} onPress={()=>void saveChannelBranding()} style={{backgroundColor:C.green,paddingHorizontal:18,paddingVertical:13,borderRadius:13}}>
-              {channelEditBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Save changes</Text>}
+              {channelEditBusy?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Save changes</Text>}
             </Btn>
           </View>
         </View>
@@ -5409,7 +5503,7 @@ function GuftinApp() {
           </View>
           <View style={{flexDirection:'row',justifyContent:'flex-end',gap:10,marginTop:20}}>
             <Btn onPress={()=>setChannelCreateOpen(false)} style={{padding:13}}><Text style={{color:C.muted,fontWeight:'700'}}>Cancel</Text></Btn>
-            <Btn disabled={channelBusy||channelTitle.trim().length<2} onPress={()=>void createChannel()} style={{backgroundColor:C.green,paddingHorizontal:18,paddingVertical:13,borderRadius:13}}>{channelBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Create channel</Text>}</Btn>
+            <Btn disabled={channelBusy||channelTitle.trim().length<2} onPress={()=>void createChannel()} style={{backgroundColor:C.green,paddingHorizontal:18,paddingVertical:13,borderRadius:13}}>{channelBusy?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Create channel</Text>}</Btn>
           </View>
         </View>
       </View>
@@ -5422,7 +5516,7 @@ function GuftinApp() {
           <TextInput value={channelInviteCode} onChangeText={setChannelInviteCode} autoCapitalize="none" placeholder="Invite code" style={{backgroundColor:C.paper,borderRadius:14,padding:15,color:C.ink}}/>
           <View style={{flexDirection:'row',justifyContent:'flex-end',gap:10,marginTop:18}}>
             <Btn onPress={()=>setChannelJoinOpen(false)} style={{padding:13}}><Text style={{color:C.muted,fontWeight:'700'}}>Cancel</Text></Btn>
-            <Btn disabled={channelBusy||!channelInviteCode.trim()} onPress={()=>void joinChannelByInvite(channelInviteCode)} style={{backgroundColor:C.green,paddingHorizontal:18,paddingVertical:13,borderRadius:13}}>{channelBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Join channel</Text>}</Btn>
+            <Btn disabled={channelBusy||!channelInviteCode.trim()} onPress={()=>void joinChannelByInvite(channelInviteCode)} style={{backgroundColor:C.green,paddingHorizontal:18,paddingVertical:13,borderRadius:13}}>{channelBusy?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Join channel</Text>}</Btn>
           </View>
         </View>
       </View>
@@ -5435,7 +5529,7 @@ function GuftinApp() {
           <TextInput value={contactUsername} onChangeText={setContactUsername} autoCapitalize="none" autoCorrect={false} placeholder="Username, email or mobile number" style={{backgroundColor:C.paper,borderRadius:14,padding:15,color:C.ink}}/>
           <Text style={{color:C.muted,fontSize:11,lineHeight:16,marginTop:8}}>Search by username, verified email address, or an optional mobile number added to the account. Mobile numbers are not verified by Guftin.</Text>
           <Btn disabled={phoneContactsLoading} onPress={()=>void findPhoneContacts()} style={{backgroundColor:C.mint,padding:13,borderRadius:13,marginTop:12,alignItems:'center'}}>
-            {phoneContactsLoading?<ActivityIndicator color={C.green}/>:<Text style={{color:C.green,fontWeight:'900'}}>Find Guftin accounts in phone contacts</Text>}
+            {phoneContactsLoading?<GuftinLoader color={C.green}/>:<Text style={{color:C.green,fontWeight:'900'}}>Find Guftin accounts in phone contacts</Text>}
           </Btn>
           <Text style={{color:C.muted,fontSize:10,lineHeight:15,marginTop:6}}>Guftin checks phone numbers only after you tap this button. It returns matching account details, not other people's phone numbers, and does not upload or save your address-book names.</Text>
           {phoneContactMatches.length>0?<ScrollView style={{maxHeight:230,marginTop:8}} keyboardShouldPersistTaps="handled">
@@ -5452,7 +5546,7 @@ function GuftinApp() {
           <Btn onPress={()=>{setAddOpen(false);void openGroupCreator();}} style={{padding:10,alignSelf:'flex-start',marginTop:8}}><Text style={{color:C.green,fontWeight:'800'}}>👥 Create a group instead</Text></Btn>
           <View style={{flexDirection:'row',justifyContent:'flex-end',gap:10,marginTop:12}}>
             <Btn onPress={()=>setAddOpen(false)} style={{padding:13}}><Text style={{color:C.muted,fontWeight:'700'}}>Cancel</Text></Btn>
-            <Btn disabled={adding} onPress={addContact} style={{backgroundColor:C.green,paddingHorizontal:18,paddingVertical:13,borderRadius:13}}>{adding?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'800'}}>Find and open chat</Text>}</Btn>
+            <Btn disabled={adding} onPress={addContact} style={{backgroundColor:C.green,paddingHorizontal:18,paddingVertical:13,borderRadius:13}}>{adding?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'800'}}>Find and open chat</Text>}</Btn>
           </View>
         </View>
       </View>
