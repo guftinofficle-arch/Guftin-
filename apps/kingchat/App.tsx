@@ -4557,7 +4557,8 @@ function GuftinApp() {
   useEffect(()=>{if(session?.user?.id)void loadChatFolders();else{setChatFolders([]);setActiveFolderId(null);}},[session?.user?.id]);
 
   const visible=useMemo(()=>chats.filter(c=>c.name.toLowerCase().includes(search.toLowerCase())&&(!activeFolderId||chatFolders.some((folder:any)=>folder.id===activeFolderId&&folder.conversation_ids.includes(c.id)))),[chats,search,activeFolderId,chatFolders]);
-  const pageTitle=tab==='Chats'?'Messages':tab==='Updates'?'Updates':tab==='Channels'?'Channels':tab==='Calls'?'Calls':'You';
+  const pageTitle=tab==='Chats'?'Guftin':tab==='Updates'?'Updates':tab==='Channels'?'Channels':tab==='Calls'?'Calls':'You';
+  const totalUnread=chats.reduce((sum:any,item:any)=>sum+(Number(item.unread)||0),0);
 
   if(authRestoring){
     return <SafeAreaView style={{flex:1,backgroundColor:C.paper,alignItems:'center',justifyContent:'center'}}>
@@ -4855,27 +4856,32 @@ function GuftinApp() {
   const ownChannels=searchableChannels.filter(channel=>channel.owner_id===session?.user?.id&&(!channelQuery||[channel.title,channel.handle,channel.description].some(value=>String(value||'').toLowerCase().includes(channelQuery))));
   const discoverChannels=searchableChannels.filter(channel=>channel.owner_id!==session?.user?.id&&(!channelQuery||[channel.title,channel.handle,channel.description].some(value=>String(value||'').toLowerCase().includes(channelQuery))));
 
-  return <SafeAreaView edges={['top','left','right']} style={{flex:1,backgroundColor:C.white}}>
-    <StatusBar barStyle="dark-content"/>
-    <View style={{paddingHorizontal:18,paddingTop:14,paddingBottom:13,flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}>
-      <View style={{flexDirection:'row',alignItems:'center',gap:10}}>
-        <Btn onPress={()=>setTab('You')}><Avatar label={initials(profile?.display_name||'G')} color={C.green} size={40} uri={profileAvatarUrl}/></Btn>
-        <View><Heading>{pageTitle}</Heading><Text style={{color:C.muted,fontSize:12,marginTop:4}}>{tab==='Chats'?'Your real conversations':tab==='You'?'Your Guftin ID':'Guftin'}</Text></View>
-      </View>
-      <View style={{flexDirection:'row',gap:9}}>
-        <Btn onPress={()=>setSettingsOpen(true)} style={{backgroundColor:C.paper,width:42,height:42,borderRadius:15,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:19,color:C.green}}>⚙</Text></Btn>
-        {tab==='Chats'?<Btn onPress={()=>void openGroupCreator()} style={{backgroundColor:C.mint,width:42,height:42,borderRadius:15,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:18,color:C.green}}>👥</Text></Btn>:null}
-        {tab==='Chats'?<Btn onPress={()=>setSearching(!searching)} style={{backgroundColor:C.paper,width:42,height:42,borderRadius:15,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:19}}>⌕</Text></Btn>:null}
-        {tab==='Chats'?<Btn onPress={()=>setAddOpen(true)} style={{backgroundColor:C.green,width:42,height:42,borderRadius:15,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:24,color:'#fff'}}>＋</Text></Btn>:null}
-        {tab==='Channels'?<Btn onPress={()=>setChannelJoinOpen(true)} style={{backgroundColor:C.mint,width:42,height:42,borderRadius:15,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:18,color:C.green}}>↗</Text></Btn>:null}
-        {tab==='Channels'?<Btn onPress={()=>setChannelCreateOpen(true)} style={{backgroundColor:C.green,width:42,height:42,borderRadius:15,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:24,color:'#fff'}}>＋</Text></Btn>:null}
+  return <SafeAreaView edges={['top','left','right']} style={{flex:1,backgroundColor:C.paper}}>
+    <StatusBar barStyle={tab==='Chats'?'light-content':'dark-content'} backgroundColor={tab==='Chats'?'#087e55':C.paper}/>
+    <View style={{backgroundColor:tab==='Chats'?'#078653':C.white,borderBottomLeftRadius:28,borderBottomRightRadius:28,overflow:'hidden',paddingHorizontal:18,paddingTop:13,paddingBottom:17}}>
+      {tab==='Chats'?<View pointerEvents="none" style={{position:'absolute',right:-28,top:-54,width:190,height:190,borderRadius:100,backgroundColor:'#16a765',opacity:.42}}/>:null}
+      <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}>
+        <View style={{flexDirection:'row',alignItems:'center',gap:11,flex:1}}>
+          {tab==='Chats'?<BrandLogo size={62}/>:<Btn onPress={()=>setTab('You')}><Avatar label={initials(profile?.display_name||'G')} color={C.green} size={42} uri={profileAvatarUrl}/></Btn>}
+          <View style={{flex:1}}>
+            <Text style={{fontSize:29,fontWeight:'900',letterSpacing:-.8,color:tab==='Chats'?'#fff':C.ink}}>{pageTitle}</Text>
+            <Text style={{color:tab==='Chats'?'#e4fff1':C.muted,fontSize:12,marginTop:2}}>{tab==='Chats'?'Your real conversations':tab==='You'?'Your Guftin ID':'Guftin'}</Text>
+          </View>
+        </View>
+        <View style={{flexDirection:'row',gap:8}}>
+          <Btn onPress={()=>setSettingsOpen(true)} style={{backgroundColor:tab==='Chats'?'#ffffff20':C.paper,width:43,height:43,borderRadius:22,alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:tab==='Chats'?'#ffffff30':C.line}}><Text style={{fontSize:21,color:tab==='Chats'?'#fff':C.green}}>⚙</Text></Btn>
+          {tab==='Chats'?<Btn onPress={()=>void openGroupCreator()} style={{backgroundColor:'#ffffff20',width:43,height:43,borderRadius:22,alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:'#ffffff30'}}><Text style={{fontSize:19,color:'#fff'}}>👥</Text></Btn>:null}
+          {tab==='Chats'?<Btn onPress={()=>setSearching(!searching)} style={{backgroundColor:'#ffffff20',width:43,height:43,borderRadius:22,alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:'#ffffff30'}}><Text style={{fontSize:22,color:'#fff'}}>⌕</Text></Btn>:null}
+          {tab==='Channels'?<Btn onPress={()=>setChannelJoinOpen(true)} style={{backgroundColor:C.mint,width:42,height:42,borderRadius:15,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:18,color:C.green}}>↗</Text></Btn>:null}
+          {tab==='Channels'?<Btn onPress={()=>setChannelCreateOpen(true)} style={{backgroundColor:C.green,width:42,height:42,borderRadius:15,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:24,color:'#fff'}}>＋</Text></Btn>:null}
+        </View>
       </View>
     </View>
     {!isOnline?<View style={{backgroundColor:'#fff1d6',paddingHorizontal:16,paddingVertical:8}}><Text style={{color:'#815500',fontSize:11,fontWeight:'800',textAlign:'center'}}>Offline mode · Saved Guftin information is available. Messages and live updates need internet.</Text></View>:null}
     {tab==='Chats'?<>
       {searching?<TextInput value={search} onChangeText={setSearch} placeholder="Search your conversations..." autoFocus style={{marginHorizontal:20,marginBottom:12,padding:14,backgroundColor:C.paper,borderRadius:14,color:C.ink}}/>:null}
       {loading&&chats.length===0?<View style={{flex:1,alignItems:'center',justifyContent:'center'}}><ActivityIndicator color={C.green}/><Text style={{color:C.muted,marginTop:10}}>Loading your conversations…</Text></View>:
-        <FlatList data={visible} keyExtractor={x=>x.id} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={C.green}/>} contentContainerStyle={{paddingHorizontal:13,paddingBottom:25,flexGrow:1}}
+        <FlatList data={visible} keyExtractor={x=>x.id} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={C.green}/>} contentContainerStyle={{paddingHorizontal:13,paddingTop:8,paddingBottom:24,flexGrow:1}}
           ListHeaderComponent={<View style={{paddingTop:4,paddingBottom:12}}>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{gap:8,paddingBottom:12}}>
               <Btn onPress={()=>setActiveFolderId(null)} style={{paddingHorizontal:14,paddingVertical:9,borderRadius:20,backgroundColor:activeFolderId===null?C.green:C.paper}}><Text style={{color:activeFolderId===null?'#fff':C.ink,fontWeight:'900',fontSize:11}}>All chats</Text></Btn>
@@ -4892,9 +4898,16 @@ function GuftinApp() {
             </Btn>
           </View>}
           ListEmptyComponent={<View style={{alignItems:'center',padding:35,marginTop:34}}><BrandLogo size={64}/><Text style={{fontSize:17,fontWeight:'900',color:C.ink,marginTop:15}}>No conversations yet</Text><Text style={{color:C.muted,textAlign:'center',marginTop:7,lineHeight:20}}>Add a contact above using their username, verified email address or verified mobile number. Your chat appears when you send the first message or start a call.</Text></View>}
-          renderItem={({item})=><Btn onPress={()=>openChat(item)} onLongPress={()=>Alert.alert('Chat options',item.name,[{text:'Add to folder',onPress:()=>chooseChatFolder(item)},{text:'Delete chat for me',style:'destructive',onPress:()=>void hideChat(item)},{text:'Cancel',style:'cancel'}])} style={{flexDirection:'row',alignItems:'center',padding:10,gap:12,borderRadius:17}}>
+          ListFooterComponent={chats.length>0?<View style={{alignItems:'center',paddingTop:30,paddingBottom:8}}>
+            <View style={{width:116,height:76,alignItems:'center',justifyContent:'center',marginBottom:7}}>
+              <Text style={{fontSize:45,color:'#b9efd0'}}>▰</Text><Text style={{fontSize:25,color:'#a7e8c2',position:'absolute',right:9,bottom:0}}>▰</Text>
+            </View>
+            <Text style={{fontSize:18,color:'#28785b',fontWeight:'800',fontStyle:'italic'}}>Chat Freely · Connect Always</Text>
+            <View style={{width:90,height:3,borderRadius:3,backgroundColor:'#8bd9ad',marginTop:10}}/>
+          </View>:null}
+          renderItem={({item})=><Btn onPress={()=>openChat(item)} onLongPress={()=>Alert.alert('Chat options',item.name,[{text:'Add to folder',onPress:()=>chooseChatFolder(item)},{text:'Delete chat for me',style:'destructive',onPress:()=>void hideChat(item)},{text:'Cancel',style:'cancel'}])} style={{flexDirection:'row',alignItems:'center',paddingHorizontal:12,paddingVertical:13,gap:12,borderRadius:22,backgroundColor:item.unread>0?'#d9f8e3':C.white,marginBottom:9,borderWidth:1,borderColor:item.unread>0?'#c8efd5':C.line}}>
             <Avatar label={item.avatar} color={item.color} online={item.online} uri={item.avatarUrl}/>
-            <View style={{flex:1,borderBottomWidth:1,borderColor:C.line,paddingBottom:14,paddingTop:2}}>
+            <View style={{flex:1,paddingBottom:2,paddingTop:2}}>
               <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center'}}><View style={{flexDirection:'row',alignItems:'center',gap:4,flex:1}}><Text numberOfLines={1} style={{fontWeight:'800',color:C.ink,fontSize:14}}>{item.name}</Text>{<>{item.isOfficial?<Text style={{fontSize:9,color:'#2387e8',fontWeight:'900'}}>OFFICIAL</Text>:null}{item.isVerified?<VerifiedBadge label={item.isOfficial?'Verified Guftin Official account':'Verified channel'}/>:null}</>}</View><Text style={{fontSize:10,color:C.muted}}>{item.time}</Text></View>
               <View style={{flexDirection:'row',alignItems:'center',gap:8,marginTop:6}}>
                 <Text numberOfLines={1} style={{fontSize:12,color:C.muted,flex:1}}>{item.last}</Text>
@@ -5016,8 +5029,12 @@ function GuftinApp() {
         onAdFailedToLoad={error=>console.warn('AdMob banner failed:',error?.message||error)}
       />
     </View>:null}
-    <View style={{height:66+insets.bottom,paddingTop:5,paddingBottom:Math.max(insets.bottom,6),borderTopWidth:1,borderColor:C.line,flexDirection:'row',alignItems:'center',justifyContent:'space-around',backgroundColor:C.white,elevation:8}}>
-      {([['Chats','▤'],['Updates','◉'],['Channels','◈'],['Calls','⌕'],['You','●']] as string[][]).map(([t,icon])=><Btn key={t} onPress={()=>setTab(t)} style={{alignItems:'center',minWidth:58}}><Text style={{fontSize:19,color:tab===t?C.green:C.muted}}>{icon}</Text><Text style={{fontSize:10,fontWeight:tab===t?'900':'600',color:tab===t?C.green:C.muted,marginTop:3}}>{t}</Text></Btn>)}
+    <View style={{marginHorizontal:7,marginBottom:Math.max(insets.bottom,5),height:66,paddingTop:5,paddingBottom:5,borderRadius:27,borderWidth:1,borderColor:C.line,flexDirection:'row',alignItems:'center',justifyContent:'space-around',backgroundColor:C.white,elevation:10,shadowColor:'#123d2d',shadowOpacity:.09,shadowRadius:12,shadowOffset:{width:0,height:4}}}>
+      {([['Chats','▤'],['Updates','◉'],['Channels','◈'],['Calls','☎'],['You','●']] as string[][]).map(([t,icon])=><Btn key={t} onPress={()=>setTab(t)} style={{alignItems:'center',justifyContent:'center',minWidth:58,paddingVertical:4}}>
+        <Text style={{fontSize:20,color:tab===t?C.green:C.muted,fontWeight:'900'}}>{icon}</Text>
+        <Text style={{fontSize:10,fontWeight:tab===t?'900':'600',color:tab===t?C.green:C.muted,marginTop:3}}>{t}</Text>
+        {tab===t?<View style={{height:3,width:24,borderRadius:3,backgroundColor:C.green,marginTop:3}}/>:null}
+      </Btn>)}
     </View>
 
     <Modal visible={groupCreateOpen} transparent animationType="slide" onRequestClose={()=>setGroupCreateOpen(false)}>
