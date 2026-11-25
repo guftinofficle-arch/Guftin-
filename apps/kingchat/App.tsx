@@ -5000,24 +5000,17 @@ function GuftinApp() {
         </Btn>
       </View>
       <Text style={{fontSize:16,fontWeight:'900',color:C.ink,marginBottom:4}}>Recent updates</Text>
-      <Text style={{fontSize:11,color:C.muted,marginBottom:10}}>{new Set(statuses.map((item:any)=>item.user_id)).size} people · {statuses.length} updates shared in the last 24 hours</Text>
-      {statuses.length===0?<Text style={{color:C.muted,textAlign:'center',padding:30}}>No active statuses from your contacts yet.</Text>:statuses.map((status:any)=><View key={status.id} style={{padding:14,borderBottomWidth:1,borderColor:C.line,flexDirection:'row',gap:12}}>
-        <Avatar label={initials(status.display_name)} color={colorFor(status.user_id)} size={46} uri={status.avatar_signed_url}/>
-        <View style={{flex:1}}>
-          <View style={{flexDirection:'row',alignItems:'center',gap:5,flexWrap:'wrap'}}><Text style={{fontWeight:'900',color:C.ink}}>{status.user_id===session.user.id?'You':status.display_name}{status.username?'  @'+status.username:''}</Text>{status.is_verified?<VerifiedBadge label="Verified Guftin Official account"/>:null}</View>
-          <Text style={{color:status.viewed_by_me?C.muted:C.green,fontSize:11,fontWeight:'900',marginTop:8}}>{status.media_url?(status.viewed_by_me?'Viewed · Tap to replay':'New status · Tap to view'):'Text status · Tap to read'}</Text>
-          <Btn onPress={()=>void openStatus(status)} disabled={statusOpening} style={{alignSelf:'flex-start',marginTop:7,paddingHorizontal:11,paddingVertical:6,borderRadius:9,backgroundColor:C.mint}}><Text style={{fontSize:10,color:C.green,fontWeight:'900'}}>View status</Text></Btn>
-          {status.caption?<Text numberOfLines={2} style={{color:C.ink,lineHeight:20,marginTop:5}}>{status.caption}</Text>:null}
-          <Text style={{color:C.muted,fontSize:10,marginTop:5}}>{timeLabel(status.created_at)} · {status.status_count} status update{status.status_count===1?'':'s'} from this person</Text>
-          {status.user_id===session.user.id?<View style={{marginTop:8,padding:10,borderRadius:12,backgroundColor:C.paper}}>
-            <Text style={{fontSize:11,color:C.green,fontWeight:'900'}}>◉ {status.view_count||0} views  ·  ♥ {status.like_count||0} likes</Text>
-            {status.viewer_names?.length?<Text style={{fontSize:10,color:C.muted,marginTop:4}}>Seen by: {status.viewer_names.join(', ')}</Text>:null}
-            {status.liker_names?.length?<Text style={{fontSize:10,color:C.muted,marginTop:4}}>Liked by: {status.liker_names.join(', ')}</Text>:null}
-          </View>:<Btn onPress={()=>void toggleStatusLike(status)} style={{alignSelf:'flex-start',marginTop:9,paddingHorizontal:12,paddingVertical:7,borderRadius:12,backgroundColor:status.liked_by_me?'#ffe8ed':C.mint}}>
-            <Text style={{fontSize:11,fontWeight:'900',color:status.liked_by_me?'#c74768':C.green}}>{status.liked_by_me?'♥ Liked':'♡ Like status'}</Text>
-          </Btn>}
-        </View>
-      </View>)}
+      <Text style={{fontSize:11,color:C.muted,marginBottom:12}}>{new Set(statuses.map((item:any)=>item.user_id)).size} people · {statuses.length} updates shared in the last 24 hours</Text>
+      {statuses.length===0?<Text style={{color:C.muted,textAlign:'center',padding:24}}>No active statuses from your contacts yet.</Text>:<ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{paddingRight:8,paddingBottom:8}}>
+        {statuses.map((status:any)=><Btn key={status.id} onPress={()=>void openStatus(status)} disabled={statusOpening} style={{width:112,marginRight:10,padding:10,borderRadius:17,backgroundColor:C.paper,borderWidth:1,borderColor:status.viewed_by_me?C.line:C.green,alignItems:'center',justifyContent:'flex-start'}}>
+          <View style={{width:68,height:68,borderRadius:34,borderWidth:3,borderColor:status.viewed_by_me?C.line:C.green,alignItems:'center',justifyContent:'center',padding:3}}>
+            <Avatar label={initials(status.display_name)} color={colorFor(status.user_id)} size={56} uri={status.avatar_signed_url}/>
+          </View>
+          <Text numberOfLines={1} style={{fontSize:12,fontWeight:'900',color:C.ink,marginTop:9,width:'100%',textAlign:'center'}}>{status.user_id===session.user.id?'You':status.display_name}</Text>
+          <Text numberOfLines={1} style={{fontSize:10,color:C.muted,marginTop:3,width:'100%',textAlign:'center'}}>{status.media_url?(status.viewed_by_me?'Viewed':'New status'):'Text status'}</Text>
+          {status.user_id===session.user.id?<Text style={{fontSize:9,color:C.green,fontWeight:'900',marginTop:6}}>◉ {status.view_count||0} · ♥ {status.like_count||0}</Text>:<Text style={{fontSize:9,color:C.muted,marginTop:6}}>{timeLabel(status.created_at)}</Text>}
+        </Btn>)}
+      </ScrollView>}
     </ScrollView>:null}
     {tab==='Channels'?<ScrollView contentContainerStyle={{padding:18,paddingBottom:30}}>
       <View style={{backgroundColor:C.paper,borderRadius:20,padding:18,marginBottom:16}}>
