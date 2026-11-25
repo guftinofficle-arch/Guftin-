@@ -14,6 +14,7 @@ import { upgrade20 } from './src/features/upgrade20';
 import { CallControlButton } from './src/features/calls/CallControlButton';
 import { isStatusActive } from './src/features/status/statusUtils';
 import { saveMediaToGallery } from './src/features/media/saveMediaToGallery';
+import { ChatOptionsPopover } from './src/features/chat-menu/ChatOptionsPopover';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 import * as ImagePicker from 'expo-image-picker';
@@ -5305,9 +5306,8 @@ function GuftinApp() {
       </SafeAreaView>
     </Modal>
 
-    <Modal visible={chatOptionsOpen} transparent animationType="fade" onRequestClose={()=>setChatOptionsOpen(false)}>
-      <View style={{flex:1,backgroundColor:'#0005',alignItems:'flex-end',justifyContent:'flex-start',paddingTop:insets.top+62,paddingHorizontal:10}}>
-        <TouchableOpacity activeOpacity={1} onPress={()=>setChatOptionsOpen(false)} style={{position:'absolute',top:0,left:0,right:0,bottom:0}}/>
+    <ChatOptionsPopover visible={chatOptionsOpen} onClose={()=>setChatOptionsOpen(false)} topInset={insets.top}>
+
         <View style={{width:270,maxWidth:'88%',maxHeight:'78%',backgroundColor:'#fffdf8',borderRadius:21,padding:9,borderWidth:1,borderColor:'#e6f2e9',elevation:22,shadowColor:'#064b32',shadowOpacity:.25,shadowRadius:20,shadowOffset:{width:0,height:9}}}>
           <ScrollView showsVerticalScrollIndicator={false}>
             {[
@@ -5322,8 +5322,8 @@ function GuftinApp() {
             </Btn>)}
           </ScrollView>
         </View>
-      </View>
-    </Modal>
+      
+    </ChatOptionsPopover>
 
     <Modal visible={settingsOpen} transparent animationType="fade" onRequestClose={()=>setSettingsOpen(false)}>
       <View style={{flex:1,backgroundColor:'#0005',alignItems:'flex-end',justifyContent:'flex-start',paddingTop:insets.top+8,paddingHorizontal:10}}><TouchableOpacity activeOpacity={1} onPress={()=>setSettingsOpen(false)} style={{position:'absolute',top:0,left:0,right:0,bottom:0}}/><View style={{backgroundColor:'#fffdf8',borderRadius:22,padding:15,width:320,maxWidth:'92%',maxHeight:'78%',borderWidth:1,borderColor:'#e6f2e9',elevation:20,shadowColor:'#064b32',shadowOpacity:.24,shadowRadius:20,shadowOffset:{width:0,height:9}}}><View style={{height:4,width:42,borderRadius:3,backgroundColor:'#08a66a',alignSelf:'flex-end',marginBottom:10}}/><ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
