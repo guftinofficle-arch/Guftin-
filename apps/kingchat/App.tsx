@@ -393,13 +393,14 @@ function Heading({children}:any) { return <Text style={{fontSize:25,fontWeight:'
 
 function CallControlButton({label,onPress,active=false,danger=false,disabled=false}:any) {
   return <Btn disabled={disabled} onPress={onPress} style={{
-    flexGrow:1,flexBasis:'22%',minWidth:70,minHeight:54,paddingHorizontal:8,paddingVertical:9,
-    alignItems:'center',justifyContent:'center',borderRadius:18,
-    backgroundColor:danger?'#c43e48':active?'#e8c75c':'#244b45',
-    borderWidth:1,borderColor:danger?'#f17a82':active?'#f4d782':'#47766c',
+    flexGrow:1,flexBasis:'22%',minWidth:70,minHeight:76,paddingHorizontal:7,paddingVertical:11,
+    alignItems:'center',justifyContent:'center',borderRadius:40,
+    backgroundColor:danger?'#e90055':active?'#30108a':'#111b58',
+    borderWidth:1.5,borderColor:danger?'#ff4c9a':active?'#c52bff':'#278cff',
+    shadowColor:danger?'#ff176f':'#7b36ff',shadowOpacity:0.45,shadowRadius:13,elevation:8,
     opacity:disabled?0.45:1
   }}>
-    <Text numberOfLines={2} style={{color:danger?'#fff':active?'#23362f':'#fff',fontSize:11,fontWeight:'900',textAlign:'center'}}>{label}</Text>
+    <Text numberOfLines={2} style={{color:'#fff',fontSize:11,fontWeight:'900',textAlign:'center'}}>{label}</Text>
   </Btn>;
 }
 
@@ -630,17 +631,17 @@ function CallRoomScreen({callId,callType,onHangUp,callScope,sessionUserId}:any) 
     :recording?.status==='switching_to_recording'?'PREPARING CONSENTED RECORDING':'SAVING RECORDING…';
   const videoTileHeight=Math.max(112,Math.min(220,Math.floor((windowHeight-insets.top-insets.bottom-330-(recordingActive?46:0))/Math.max(1,Math.ceil(tracks.length/2)))));
 
-  return <View style={{flex:1,backgroundColor:'#081d1b'}}>
-    <SafeAreaView edges={['top','left','right']} style={{flex:1,backgroundColor:'#102b27'}}>
-      <StatusBar barStyle="light-content" backgroundColor="#102b27"/>
-      <View style={{height:62,paddingHorizontal:15,flexDirection:'row',alignItems:'center',justifyContent:'space-between',borderBottomWidth:1,borderColor:'#2c5148'}}>
+  return <View style={{flex:1,backgroundColor:'#050a2b'}}>
+    <SafeAreaView edges={['top','left','right']} style={{flex:1,backgroundColor:'#080d39'}}>
+      <StatusBar barStyle="light-content" backgroundColor="#080d39"/>
+      <View style={{height:68,paddingHorizontal:18,flexDirection:'row',alignItems:'center',justifyContent:'space-between',borderBottomWidth:1,borderColor:'#273b91'}}>
         <View style={{flex:1}}>
           <Text style={{fontSize:19,fontWeight:'900',color:'#fff',letterSpacing:-0.3}}>
             {callType==='video'?(callScope==='group'?'Group video call':'Video call'):(callScope==='group'?'Group voice call':'Voice call')}
           </Text>
-          <Text style={{fontSize:11,color:'#b8d2c8',marginTop:3}}>{participants.length} participant{participants.length===1?'':'s'} connected</Text>
+          <Text style={{fontSize:11,color:'#a8c9ff',marginTop:3}}>{participants.length} participant{participants.length===1?'':'s'} connected</Text>
         </View>
-        <Btn onPress={openCallMenu} style={{width:46,height:46,borderRadius:15,backgroundColor:'#1b4038',alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:'#47766c'}}>
+        <Btn onPress={openCallMenu} style={{width:46,height:46,borderRadius:15,backgroundColor:'#171c66',alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:'#436dff'}}>
           <Text style={{fontSize:26,fontWeight:'900',color:'#fff'}}>⋮</Text>
         </Btn>
       </View>
@@ -654,25 +655,25 @@ function CallRoomScreen({callId,callType,onHangUp,callScope,sessionUserId}:any) 
           numColumns={2} columnWrapperStyle={{gap:9}} style={{flex:1}}
           contentContainerStyle={{gap:9,paddingBottom:12,flexGrow:1}}
           renderItem={({item}:any)=>isTrackReference(item)
-            ?<View style={{flex:1,height:videoTileHeight,borderRadius:16,overflow:'hidden',backgroundColor:'#1b3832',borderWidth:1,borderColor:'#47766c'}}>
+            ?<View style={{flex:1,height:videoTileHeight,borderRadius:16,overflow:'hidden',backgroundColor:'#101642',borderWidth:1,borderColor:'#436dff'}}>
               <VideoTrack trackRef={item} style={{width:'100%',height:'100%'}}/>
-              <View style={{position:'absolute',left:8,bottom:8,paddingHorizontal:8,paddingVertical:4,backgroundColor:'#061b18cc',borderRadius:8}}>
+              <View style={{position:'absolute',left:8,bottom:8,paddingHorizontal:8,paddingVertical:4,backgroundColor:'#070a2dcc',borderRadius:8}}>
                 <Text style={{fontSize:10,color:'#fff',fontWeight:'800'}} numberOfLines={1}>{item.participant?.name||item.participant?.identity||'Participant'}</Text>
               </View>
             </View>
-            :<View style={{width:'48%',height:videoTileHeight,alignItems:'center',justifyContent:'center',backgroundColor:'#1b3832',borderRadius:16,borderWidth:1,borderColor:'#47766c'}}><Text style={{color:'#fff'}}>Camera is off</Text></View>}
+            :<View style={{width:'48%',height:videoTileHeight,alignItems:'center',justifyContent:'center',backgroundColor:'#101642',borderRadius:16,borderWidth:1,borderColor:'#436dff'}}><Text style={{color:'#fff'}}>Camera is off</Text></View>}
           ListEmptyComponent={<View style={{flex:1,minHeight:160,alignItems:'center',justifyContent:'center',padding:26}}>
-            <Text style={{fontSize:40,color:'#d4f1e5'}}>▣</Text>
+            <Text style={{fontSize:40,color:'#d7e9ff'}}>▣</Text>
             <Text style={{fontSize:13,fontWeight:'800',color:'#fff',marginTop:12}}>Waiting for video participants…</Text>
           </View>}
         />:<View style={{flex:1,alignItems:'center',justifyContent:'center',padding:24}}>
-          <View style={{width:154,height:154,borderRadius:77,backgroundColor:'#174438',borderWidth:2,borderColor:'#49b58b',alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:66,color:'#fff'}}>☎</Text></View>
-          <Text style={{color:'#f3fff8',marginTop:18,fontSize:20,fontWeight:'900'}}>Secure voice connection</Text>
-          <Text style={{color:'#a9c8ba',marginTop:7,fontSize:12,textAlign:'center',lineHeight:18}}>Your microphone, speaker and recording controls stay available below.</Text>
+          <View style={{width:184,height:184,borderRadius:92,backgroundColor:'#100d50',borderWidth:3,borderColor:'#19bfff',alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:72,color:'#f7f3ff'}}>☎</Text></View>
+          <Text style={{color:'#f4f5ff',marginTop:18,fontSize:20,fontWeight:'900'}}>Secure voice connection</Text>
+          <Text style={{color:'#a9baff',marginTop:7,fontSize:12,textAlign:'center',lineHeight:18}}>Your microphone, speaker and recording controls stay available below.</Text>
         </View>}
       </View>
     </SafeAreaView>
-    <SafeAreaView edges={['bottom']} style={{backgroundColor:'#0c211e',borderTopWidth:1,borderColor:'#2b5348',paddingHorizontal:12,paddingTop:10,paddingBottom:10}}>
+    <SafeAreaView edges={['bottom']} style={{backgroundColor:'#080d36',borderTopWidth:1,borderColor:'#343b9b',paddingHorizontal:12,paddingTop:10,paddingBottom:10}}>
       <View style={{flexDirection:'row',flexWrap:'wrap',gap:8,justifyContent:'space-between'}}>
         <CallControlButton label={isMicrophoneEnabled?'🎙  Mic on':'🎙  Mic muted'} active={!isMicrophoneEnabled} disabled={controlBusy} onPress={()=>void toggleMicrophone()}/>
         <CallControlButton label={speakerOn?'🔊  Speaker on':'🔊  Speaker'} active={speakerOn} disabled={controlBusy} onPress={()=>void toggleSpeaker()}/>
@@ -682,8 +683,8 @@ function CallRoomScreen({callId,callType,onHangUp,callScope,sessionUserId}:any) 
         </>:null}
         <CallControlButton label={recordingBusy?'Recording…':'⋮  Call options'} active={recordingActive} disabled={recordingBusy} onPress={openCallMenu}/>
       </View>
-      <Btn onPress={()=>void handleHangUp()} style={{marginTop:9,minHeight:56,borderRadius:17,backgroundColor:'#d94350',borderWidth:1,borderColor:'#fa7b83',alignItems:'center',justifyContent:'center',elevation:5}}>
-        <Text style={{fontSize:16,color:'#fff',fontWeight:'900'}}>End call</Text>
+      <Btn onPress={()=>void handleHangUp()} style={{marginTop:9,minHeight:64,borderRadius:34,backgroundColor:'#ed075b',borderWidth:1,borderColor:'#ff68b4',alignItems:'center',justifyContent:'center',elevation:5}}>
+        <Text style={{fontSize:18,color:'#fff',fontWeight:'900',letterSpacing:0.4}}>End call</Text>
       </Btn>
     </SafeAreaView>
     <Modal visible={!!consentPrompt} transparent animationType="fade" onRequestClose={()=>{}}>
@@ -724,44 +725,44 @@ function CallLobbyScreen({call,mode,onAccept,onDecline,onCancel,busy}:any) {
   const isGroup=(call?.call_scope||call?.callScope)==='group';
   const displayName=incoming?(call?.caller_name||'Guftin contact'):(call?.contact_name||call?.caller_name||'Guftin contact');
   const statusLabel=busy?'Preparing secure connection…':incoming?(isVideo?'Incoming video call':'Incoming voice call'):(isVideo?'Calling by video…':'Calling…');
-  return <SafeAreaView edges={['top','left','right','bottom']} style={{flex:1,backgroundColor:'#071b18'}}>
-    <StatusBar barStyle="light-content" backgroundColor="#071b18"/>
+  return <SafeAreaView edges={['top','left','right','bottom']} style={{flex:1,backgroundColor:'#05082b'}}>
+    <StatusBar barStyle="light-content" backgroundColor="#05082b"/>
     <View style={{flex:1,paddingHorizontal:22,paddingTop:16,paddingBottom:Math.max(insets.bottom,18)+8}}>
       <View style={{alignItems:'center'}}>
-        <Text style={{fontSize:18,fontWeight:'900',letterSpacing:4,color:'#f4fff9'}}>GUFTIN</Text>
-        <View style={{marginTop:8,paddingHorizontal:13,paddingVertical:6,borderRadius:20,backgroundColor:'#123d32',borderWidth:1,borderColor:'#236451'}}>
-          <Text style={{fontSize:9,fontWeight:'900',letterSpacing:2,color:'#9de5c5'}}>PRIVATE {isVideo?'VIDEO':'VOICE'} CALL</Text>
+        <Text style={{fontSize:18,fontWeight:'900',letterSpacing:4,color:'#f6f4ff'}}>GUFTIN</Text>
+        <View style={{marginTop:8,paddingHorizontal:13,paddingVertical:6,borderRadius:20,backgroundColor:'#17105c',borderWidth:1,borderColor:'#315bce'}}>
+          <Text style={{fontSize:9,fontWeight:'900',letterSpacing:2,color:'#83dcff'}}>PRIVATE {isVideo?'VIDEO':'VOICE'} CALL</Text>
         </View>
       </View>
       <View style={{alignItems:'center',justifyContent:'center',flex:1,paddingVertical:12}}>
-        <View style={{width:190,height:190,alignItems:'center',justifyContent:'center'}}>
-          <Animated.View style={{position:'absolute',width:164,height:164,borderRadius:82,borderWidth:2,borderColor:'#49d7a0',opacity:pulseOpacity,transform:[{scale:pulseScale}]}}/>
-          <View style={{width:148,height:148,borderRadius:74,borderWidth:2,backgroundColor:'#0b2a23',borderColor:'#286a55',alignItems:'center',justifyContent:'center',shadowColor:'#31c48d',shadowOpacity:0.28,shadowRadius:25,elevation:14,overflow:'hidden'}}>
-            {call?.contact_avatar_url||call?.avatar_url?<Image source={{uri:call.contact_avatar_url||call.avatar_url}} style={{width:138,height:138,borderRadius:69}}/>
-              :<View style={{width:138,height:138,borderRadius:69,borderWidth:2,borderColor:'#3a9c79',backgroundColor:'#164638',alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:49,fontWeight:'900',color:'#f5fff9'}}>{initials(displayName)}</Text></View>}
+        <View style={{width:220,height:220,alignItems:'center',justifyContent:'center'}}>
+          <Animated.View style={{position:'absolute',width:164,height:164,borderRadius:82,borderWidth:2,borderColor:'#10cfff',opacity:pulseOpacity,transform:[{scale:pulseScale}]}}/>
+          <View style={{width:164,height:164,borderRadius:82,borderWidth:3,backgroundColor:'#0b1047',borderColor:'#6b38ff',alignItems:'center',justifyContent:'center',shadowColor:'#a32cff',shadowOpacity:0.28,shadowRadius:25,elevation:14,overflow:'hidden'}}>
+            {call?.contact_avatar_url||call?.avatar_url?<Image source={{uri:call.contact_avatar_url||call.avatar_url}} style={{width:154,height:154,borderRadius:77}}/>
+              :<View style={{width:138,height:138,borderRadius:69,borderWidth:2,borderColor:'#287dff',backgroundColor:'#17105c',alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:49,fontWeight:'900',color:'#f5fff9'}}>{initials(displayName)}</Text></View>}
           </View>
         </View>
-        <Text numberOfLines={2} style={{fontSize:28,fontWeight:'900',color:'#fff',textAlign:'center',marginTop:18,letterSpacing:-0.6}}>{displayName}</Text>
-        <Text style={{fontSize:13,color:'#a8cfc0',marginTop:8,fontWeight:'700'}}>{isGroup?'Group conversation':isVideo?'Guftin video call':'Guftin voice call'}</Text>
-        <Text style={{fontSize:10,color:'#78bba0',marginTop:7,letterSpacing:1.2,fontWeight:'800'}}>END-TO-END ENCRYPTED</Text>
-        <View style={{marginTop:18,paddingHorizontal:17,paddingVertical:10,borderRadius:18,backgroundColor:'#10382d',borderWidth:1,borderColor:'#245c49',flexDirection:'row',alignItems:'center',gap:9}}>
+        <Text numberOfLines={2} style={{fontSize:30,fontWeight:'900',color:'#fff',textAlign:'center',marginTop:18,letterSpacing:-0.6}}>{displayName}</Text>
+        <Text style={{fontSize:13,color:'#b6c8ff',marginTop:8,fontWeight:'700'}}>{isGroup?'Group conversation':isVideo?'Guftin video call':'Guftin voice call'}</Text>
+        <Text style={{fontSize:10,color:'#83bfff',marginTop:7,letterSpacing:1.2,fontWeight:'800'}}>END-TO-END ENCRYPTED</Text>
+        <View style={{marginTop:18,paddingHorizontal:17,paddingVertical:10,borderRadius:18,backgroundColor:'#12134e',borderWidth:1,borderColor:'#4c3ab8',flexDirection:'row',alignItems:'center',gap:9}}>
           <View style={{width:7,height:7,borderRadius:4,backgroundColor:busy?'#e8c46a':'#52dda2'}}/>
-          <Text style={{fontSize:12,color:'#d9f3e7',fontWeight:'800'}}>{statusLabel}</Text>
+          <Text style={{fontSize:12,color:'#e4e8ff',fontWeight:'800'}}>{statusLabel}</Text>
         </View>
-        <Text style={{fontSize:11,color:'#789f90',marginTop:13,textAlign:'center',lineHeight:17}}>{incoming?'Answer to connect, or decline this call.':'Waiting for the other person to answer.'}</Text>
+        <Text style={{fontSize:11,color:'#9aa8dc',marginTop:13,textAlign:'center',lineHeight:17}}>{incoming?'Answer to connect, or decline this call.':'Waiting for the other person to answer.'}</Text>
       </View>
       {incoming?<View style={{flexDirection:'row',justifyContent:'space-around',alignItems:'center',paddingTop:10}}>
         <View style={{alignItems:'center',gap:9}}>
-          <Btn disabled={busy} onPress={onDecline} style={{width:72,height:72,borderRadius:36,backgroundColor:'#d94350',alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:'#fa7b83',opacity:busy?0.5:1}}><Text style={{fontSize:34,color:'#fff',fontWeight:'500'}}>×</Text></Btn>
-          <Text style={{fontSize:12,color:'#ffd9dc',fontWeight:'800'}}>Decline</Text>
+          <Btn disabled={busy} onPress={onDecline} style={{width:84,height:84,borderRadius:42,backgroundColor:'#e90055',alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:'#ff64b6',opacity:busy?0.5:1}}><Text style={{fontSize:34,color:'#fff',fontWeight:'500'}}>×</Text></Btn>
+          <Text style={{fontSize:12,color:'#ffd7ee',fontWeight:'800'}}>Decline</Text>
         </View>
         <View style={{alignItems:'center',gap:9}}>
-          <Btn disabled={busy} onPress={onAccept} style={{width:78,height:78,borderRadius:39,backgroundColor:'#18a96f',alignItems:'center',justifyContent:'center',borderWidth:2,borderColor:'#82edbd',elevation:10,opacity:busy?0.5:1}}><Text style={{fontSize:31,color:'#fff'}}>{isVideo?'▣':'☎'}</Text></Btn>
-          <Text style={{fontSize:12,color:'#bff7d9',fontWeight:'900'}}>Answer</Text>
+          <Btn disabled={busy} onPress={onAccept} style={{width:78,height:78,borderRadius:39,backgroundColor:'#1522ad',alignItems:'center',justifyContent:'center',borderWidth:2,borderColor:'#36d5ff',elevation:10,opacity:busy?0.5:1}}><Text style={{fontSize:31,color:'#fff'}}>{isVideo?'▣':'☎'}</Text></Btn>
+          <Text style={{fontSize:12,color:'#cdefff',fontWeight:'900'}}>Answer</Text>
         </View>
       </View>:<View style={{alignItems:'center',paddingTop:10}}>
-        <Btn onPress={onCancel} style={{width:78,height:78,borderRadius:39,backgroundColor:'#d94350',alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:'#fa7b83',elevation:7}}><Text style={{fontSize:34,color:'#fff',fontWeight:'500'}}>×</Text></Btn>
-        <Text style={{fontSize:12,color:'#ffd9dc',fontWeight:'800',marginTop:9}}>Cancel call</Text>
+        <Btn onPress={onCancel} style={{width:78,height:78,borderRadius:39,backgroundColor:'#e90055',alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:'#ff64b6',elevation:7}}><Text style={{fontSize:34,color:'#fff',fontWeight:'500'}}>×</Text></Btn>
+        <Text style={{fontSize:12,color:'#ffd7ee',fontWeight:'800',marginTop:9}}>Cancel call</Text>
       </View>}
     </View>
   </SafeAreaView>;
