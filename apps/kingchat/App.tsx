@@ -3026,6 +3026,7 @@ function GuftinApp() {
     if(!channel?.invite_code)return;
     const link='https://guftin-official.pages.dev/channel/'+encodeURIComponent(channel.invite_code);
     if(session?.user?.id)void recordChannelAnalyticsEvent(supabase,channel.conversation_id,session.user.id,'share').catch(()=>{});
+    if(session?.user?.id)void recordChannelAnalyticsEvent(supabase,channel.conversation_id,session.user.id,'share').catch(()=>{});
     try{await Share.share({message:'Follow '+(channel.title||'this Guftin channel')+' on Guftin:\n'+link});}
     catch(error:any){Alert.alert('Could not share invite',error?.message||'Invite code: '+channel.invite_code);}
   };
