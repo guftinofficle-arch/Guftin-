@@ -251,9 +251,9 @@ const registerIncomingCallBackgroundTask=()=>{
 };
 
 
-let C:any = { ink:'#102b27', muted:'#82938e', green:'#087e6c', mint:'#e5f5ee', paper:'#f5f8f6', white:'#fff', line:'#e9efec', red:'#b94e48' };
+let C:any = { ink:'#17352d', muted:'#81918a', green:'#079b5b', mint:'#e5f7eb', paper:'#fbf5eb', white:'#fff', line:'#eee8df', red:'#b94e48' };
 const THEMES:any = {
-  emerald:{ink:'#102b27',muted:'#82938e',green:'#087e6c',mint:'#e5f5ee',paper:'#f5f8f6',white:'#fff',line:'#e9efec',red:'#b94e48'},
+  emerald:{ink:'#17352d',muted:'#81918a',green:'#079b5b',mint:'#e5f7eb',paper:'#fbf5eb',white:'#fff',line:'#eee8df',red:'#b94e48'},
   ocean:{ink:'#112b46',muted:'#71869e',green:'#2476d2',mint:'#e5f0ff',paper:'#f4f8ff',white:'#fff',line:'#e0e9f5',red:'#c94f68'},
   violet:{ink:'#2d2145',muted:'#8b7c9f',green:'#7950c8',mint:'#efe8ff',paper:'#f8f5ff',white:'#fff',line:'#ece4f7',red:'#c45073'},
   sunset:{ink:'#472b2b',muted:'#987c73',green:'#d45b42',mint:'#ffede4',paper:'#fff7f2',white:'#fff',line:'#f3e4dc',red:'#b63f4b'},
