@@ -2983,6 +2983,7 @@ function GuftinApp() {
     try{
       const {data,error}=await supabase.rpc('kc_join_channel',{p_channel_id:null,p_invite_code:invite});
       if(error)throw error;
+      if(typeof data==='string')void recordChannelAnalyticsEvent(supabase,data,session.user.id,'follow').catch(()=>{});
       await Promise.all([loadChannels(),loadInbox()]);
       const {data:channel,error:channelError}=await supabase.from('kc_channels')
         .select('conversation_id,owner_id,title,description,logo_path,invite_code,is_public,is_official,is_verified')
@@ -3024,6 +3025,7 @@ function GuftinApp() {
   const shareChannelInvite=async(channel:any)=>{
     if(!channel?.invite_code)return;
     const link='https://guftin-official.pages.dev/channel/'+encodeURIComponent(channel.invite_code);
+    if(session?.user?.id)void recordChannelAnalyticsEvent(supabase,channel.conversation_id,session.user.id,'share').catch(()=>{});
     try{await Share.share({message:'Follow '+(channel.title||'this Guftin channel')+' on Guftin:\n'+link});}
     catch(error:any){Alert.alert('Could not share invite',error?.message||'Invite code: '+channel.invite_code);}
   };
