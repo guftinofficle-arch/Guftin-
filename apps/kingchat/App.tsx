@@ -11,6 +11,8 @@ import {
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from './src/lib/supabase';
 import { upgrade20 } from './src/features/upgrade20';
+import { CallControlButton } from './src/features/calls/CallControlButton';
+import { isStatusActive } from './src/features/status/statusUtils';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 import * as ImagePicker from 'expo-image-picker';
@@ -485,18 +487,6 @@ function GuftinLoader({color=C.green,size=22,style}:any){
 
 function Heading({children}:any) { return <Text style={{fontSize:25,fontWeight:'900',color:C.ink,letterSpacing:-.6}}>{children}</Text>; }
 
-function CallControlButton({label,onPress,active=false,danger=false,disabled=false}:any) {
-  return <Btn disabled={disabled} onPress={onPress} style={{
-    flexGrow:1,flexBasis:'22%',minWidth:70,minHeight:76,paddingHorizontal:7,paddingVertical:11,
-    alignItems:'center',justifyContent:'center',borderRadius:40,
-    backgroundColor:danger?'#e90055':active?'#30108a':'#111b58',
-    borderWidth:1.5,borderColor:danger?'#ff4c9a':active?'#c52bff':'#278cff',
-    shadowColor:danger?'#ff176f':'#7b36ff',shadowOpacity:0.45,shadowRadius:13,elevation:8,
-    opacity:disabled?0.45:1
-  }}>
-    <Text numberOfLines={2} style={{color:'#fff',fontSize:11,fontWeight:'900',textAlign:'center'}}>{label}</Text>
-  </Btn>;
-}
 
 function CallRoomScreen({callId,callType,onHangUp,callScope,sessionUserId}:any) {
   const tracks=useTracks([Track.Source.Camera]);
@@ -4552,7 +4542,7 @@ function GuftinApp() {
     const statusCacheKey='guftin-cache-statuses:'+session.user.id;
     try{
       const cachedRaw=await AsyncStorage.getItem(statusCacheKey);
-      if(cachedRaw){const cached=JSON.parse(cachedRaw);if(Array.isArray(cached))setStatuses(cached.filter((item:any)=>!item.expires_at||new Date(item.expires_at).getTime()>Date.now()));}
+      if(cachedRaw){const cached=JSON.parse(cachedRaw);if(Array.isArray(cached))setStatuses(cached.filter((item:any)=>isStatusActive(item)));}
     }catch{}
     if(!onlineRef.current)return;
     const {data,error}=await supabase.from('kc_status_updates').select('id,user_id,caption,media_url,created_at,expires_at')
