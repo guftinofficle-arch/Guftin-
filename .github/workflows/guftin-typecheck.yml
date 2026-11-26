@@ -4,7 +4,9 @@ on:
   push:
     branches:
       - feature/guftin-20-feature-upgrade
-      - feature/guftin-liveverse\n      - feature/guftin-magic-moments
+      - feature/guftin-liveverse
+      - feature/guftin-holospace
+      - feature/guftin-magic-moments
     paths:
       - "apps/kingchat/**"
       - ".github/workflows/guftin-typecheck.yml"
