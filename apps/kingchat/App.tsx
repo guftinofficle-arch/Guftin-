@@ -4921,7 +4921,13 @@ function GuftinApp() {
         await magicMomentsClient.invite(moment.id,id,session.user.id,role as any);
       }
       if(isFuture){
-        await magicMomentsClient.scheduleMessage({senderId:session.user.id,recipientId:recipientId as string,conversationId:active.id,content:magicDraft.trim()||magicDescription||magicTitle,scheduledAt:scheduledAt as string,timezone:Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC'});
+        if(e2eeStatus!=='ready'||!deviceIdentity)throw new Error('Secure messaging is still initializing. Please wait until the security status is ready.');
+        const {data:devices,error:devicesError}=await supabase.from('kc_e2ee_devices').select('id,user_id,public_key').in('user_id',[session.user.id,recipientId as string]).is('revoked_at',null);
+        if(devicesError)throw devicesError;
+        const securedUsers=new Set((devices||[]).map((device:any)=>device.user_id));
+        if(!securedUsers.has(session.user.id)||!securedUsers.has(recipientId as string))throw new Error('Both chat members need a registered secure device before scheduling this message.');
+        const encryptedBody=encryptMessageForDevices(magicDraft.trim()||magicDescription||magicTitle,devices||[],deviceIdentity);
+        await magicMomentsClient.scheduleMessage({senderId:session.user.id,recipientId:recipientId as string,conversationId:active.id,content:encryptedBody,scheduledAt:scheduledAt as string,timezone:Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC'});
       }else if(magicDraft.trim()){
         await magicMomentsClient.addText(moment.id,session.user.id,magicDraft.trim());
       }
