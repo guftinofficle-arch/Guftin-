@@ -252,133 +252,53 @@ drop policy if exists liveverse_storage_read_member on storage.objects;
 create policy liveverse_storage_read_member on storage.objects for select to authenticated
 using (
   bucket_id = 'liveverse-media'
-  and case when (storage.foldername(name))[1] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}
+  and case
+    when (storage.foldername(name))[1] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+    then private.liveverse_is_member(((storage.foldername(name))[1])::uuid)
+    else false
+  end
 );
 drop policy if exists liveverse_storage_insert_member on storage.objects;
 create policy liveverse_storage_insert_member on storage.objects for insert to authenticated
 with check (
   bucket_id = 'liveverse-media'
-  and private.liveverse_is_member(((storage.foldername(name))[1])::uuid)
+  and case
+    when (storage.foldername(name))[1] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+    then private.liveverse_is_member(((storage.foldername(name))[1])::uuid)
+      and (storage.foldername(name))[2] = (select auth.uid())::text
+    else false
+  end
 );
 drop policy if exists liveverse_storage_update_member on storage.objects;
 create policy liveverse_storage_update_member on storage.objects for update to authenticated
 using (
   bucket_id = 'liveverse-media'
-  and private.liveverse_is_member(((storage.foldername(name))[1])::uuid)
+  and case
+    when (storage.foldername(name))[1] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+    then private.liveverse_is_member(((storage.foldername(name))[1])::uuid)
+      and (storage.foldername(name))[2] = (select auth.uid())::text
+    else false
+  end
 )
 with check (
   bucket_id = 'liveverse-media'
-  and private.liveverse_is_member(((storage.foldername(name))[1])::uuid)
+  and case
+    when (storage.foldername(name))[1] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+    then private.liveverse_is_member(((storage.foldername(name))[1])::uuid)
+      and (storage.foldername(name))[2] = (select auth.uid())::text
+    else false
+  end
 );
 drop policy if exists liveverse_storage_delete_manager on storage.objects;
 create policy liveverse_storage_delete_manager on storage.objects for delete to authenticated
 using (
   bucket_id = 'liveverse-media'
-  and case when (storage.foldername(name))[1] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}
-);
-
--- Realtime table publication is idempotent. Presence and pointers use ephemeral
--- Realtime Presence/Broadcast channels and are deliberately not written per frame.
-do $$
-declare t text;
-begin
-  foreach t in array array[
-    'liveverse_spaces','liveverse_members','liveverse_notes',
-    'liveverse_tasks','liveverse_canvas','liveverse_media','liveverse_events'
-  ] loop
-    if not exists (
-      select 1 from pg_publication_tables
-      where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = t
-    ) then
-      execute format('alter publication supabase_realtime add table public.%I', t);
-    end if;
-  end loop;
-end $$;
- then private.liveverse_is_member(((storage.foldername(name))[1])::uuid) else false end
-);
-drop policy if exists liveverse_storage_insert_member on storage.objects;
-create policy liveverse_storage_insert_member on storage.objects for insert to authenticated
-with check (
-  bucket_id = 'liveverse-media'
-  and private.liveverse_is_member(((storage.foldername(name))[1])::uuid)
-);
-drop policy if exists liveverse_storage_update_member on storage.objects;
-create policy liveverse_storage_update_member on storage.objects for update to authenticated
-using (
-  bucket_id = 'liveverse-media'
-  and private.liveverse_is_member(((storage.foldername(name))[1])::uuid)
-)
-with check (
-  bucket_id = 'liveverse-media'
-  and private.liveverse_is_member(((storage.foldername(name))[1])::uuid)
-);
-drop policy if exists liveverse_storage_delete_manager on storage.objects;
-create policy liveverse_storage_delete_manager on storage.objects for delete to authenticated
-using (
-  bucket_id = 'liveverse-media'
-  and private.liveverse_is_manager(((storage.foldername(name))[1])::uuid)
-);
-
--- Realtime table publication is idempotent. Presence and pointers use ephemeral
--- Realtime Presence/Broadcast channels and are deliberately not written per frame.
-do $$
-declare t text;
-begin
-  foreach t in array array[
-    'liveverse_spaces','liveverse_members','liveverse_notes',
-    'liveverse_tasks','liveverse_canvas','liveverse_media','liveverse_events'
-  ] loop
-    if not exists (
-      select 1 from pg_publication_tables
-      where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = t
-    ) then
-      execute format('alter publication supabase_realtime add table public.%I', t);
-    end if;
-  end loop;
-end $$;
- then private.liveverse_is_manager(((storage.foldername(name))[1])::uuid) else false end
-);
-
--- Realtime table publication is idempotent. Presence and pointers use ephemeral
--- Realtime Presence/Broadcast channels and are deliberately not written per frame.
-do $$
-declare t text;
-begin
-  foreach t in array array[
-    'liveverse_spaces','liveverse_members','liveverse_notes',
-    'liveverse_tasks','liveverse_canvas','liveverse_media','liveverse_events'
-  ] loop
-    if not exists (
-      select 1 from pg_publication_tables
-      where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = t
-    ) then
-      execute format('alter publication supabase_realtime add table public.%I', t);
-    end if;
-  end loop;
-end $$;
- then private.liveverse_is_member(((storage.foldername(name))[1])::uuid) else false end
-);
-drop policy if exists liveverse_storage_insert_member on storage.objects;
-create policy liveverse_storage_insert_member on storage.objects for insert to authenticated
-with check (
-  bucket_id = 'liveverse-media'
-  and private.liveverse_is_member(((storage.foldername(name))[1])::uuid)
-);
-drop policy if exists liveverse_storage_update_member on storage.objects;
-create policy liveverse_storage_update_member on storage.objects for update to authenticated
-using (
-  bucket_id = 'liveverse-media'
-  and private.liveverse_is_member(((storage.foldername(name))[1])::uuid)
-)
-with check (
-  bucket_id = 'liveverse-media'
-  and private.liveverse_is_member(((storage.foldername(name))[1])::uuid)
-);
-drop policy if exists liveverse_storage_delete_manager on storage.objects;
-create policy liveverse_storage_delete_manager on storage.objects for delete to authenticated
-using (
-  bucket_id = 'liveverse-media'
-  and private.liveverse_is_manager(((storage.foldername(name))[1])::uuid)
+  and case
+    when (storage.foldername(name))[1] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+    then (storage.foldername(name))[2] = (select auth.uid())::text
+      or private.liveverse_is_manager(((storage.foldername(name))[1])::uuid)
+    else false
+  end
 );
 
 -- Realtime table publication is idempotent. Presence and pointers use ephemeral
