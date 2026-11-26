@@ -7,6 +7,7 @@ on:
       - feature/guftin-liveverse
       - feature/guftin-holospace
       - feature/guftin-magic-moments
+      - feature/guftin-all-three-integration
     paths:
       - "apps/kingchat/**"
       - ".github/workflows/guftin-typecheck.yml"
