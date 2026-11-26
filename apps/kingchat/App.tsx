@@ -4917,6 +4917,24 @@ function GuftinApp() {
     catch(error:any){Alert.alert('Task not created',error?.message||'Please try again.');}
     finally{setLiveverseBusy(false);}
   };
+  const removeLiveverseTask=async(task:any)=>{
+    Alert.alert('Delete task?','This removes the task for all space members.',[
+      {text:'Cancel',style:'cancel'},
+      {text:'Delete',style:'destructive',onPress:async()=>{
+        try{await liveverseClient.deleteTask(task.space_id,task.id);setLiveverseTasks(items=>items.filter(x=>x.id!==task.id));}
+        catch(error:any){Alert.alert('Task not deleted',error?.message||'Please try again.');}
+      }}
+    ]);
+  };
+  const removeLiveverseMedia=async(item:any)=>{
+    Alert.alert('Remove shared media?','This deletes the item from the space gallery.',[
+      {text:'Cancel',style:'cancel'},
+      {text:'Remove',style:'destructive',onPress:async()=>{
+        try{await liveverseClient.deleteMedia(item.id,item.space_id,item.object_path);setLiveverseMedia(items=>items.filter(x=>x.id!==item.id));}
+        catch(error:any){Alert.alert('Media not removed',error?.message||'Please try again.');}
+      }}
+    ]);
+  };
   const toggleLiveverseTask=async(task:any)=>{
     try{const updated=await liveverseClient.updateTask({taskId:task.id,spaceId:task.space_id,userId:session.user.id,patch:{status:task.status==='completed'?'open':'completed'}});setLiveverseTasks(items=>items.map(x=>x.id===updated.id?updated:x));}
     catch(error:any){Alert.alert('Task not updated',error?.message||'Please try again.');}
@@ -5516,11 +5534,14 @@ function GuftinApp() {
         {liveverseRoomTab==='tasks'?<View style={{marginTop:13}}>
           <TextInput value={liveverseTaskDraft} onChangeText={setLiveverseTaskDraft} placeholder="New shared task" maxLength={240} style={{backgroundColor:C.paper,padding:10,borderRadius:9,color:C.ink}}/>
           <Btn disabled={liveverseBusy||!liveverseTaskDraft.trim()} onPress={()=>void createLiveverseTask()} style={{backgroundColor:C.green,padding:10,borderRadius:9,alignItems:'center',marginTop:7}}><Text style={{color:'#fff',fontWeight:'900'}}>＋ Add task</Text></Btn>
-          {liveverseTasks.map(task=><Btn key={task.id} onPress={()=>void toggleLiveverseTask(task)} style={{padding:11,borderBottomWidth:1,borderColor:C.line,alignItems:'stretch',backgroundColor:'transparent'}}><Text style={{color:task.status==='completed'?C.muted:C.ink,textDecorationLine:task.status==='completed'?'line-through':'none',fontWeight:'800'}}>{task.status==='completed'?'✓':'○'} {task.title}</Text><Text style={{fontSize:9,color:C.muted,marginTop:3}}>Tap to {task.status==='completed'?'reopen':'complete'}</Text></Btn>)}
+          {liveverseTasks.map(task=><View key={task.id} style={{padding:10,borderBottomWidth:1,borderColor:C.line,flexDirection:'row',alignItems:'center'}}>
+            <Btn onPress={()=>void toggleLiveverseTask(task)} style={{flex:1,alignItems:'stretch',backgroundColor:'transparent',padding:0}}><Text style={{color:task.status==='completed'?C.muted:C.ink,textDecorationLine:task.status==='completed'?'line-through':'none',fontWeight:'800'}}>{task.status==='completed'?'✓':'○'} {task.title}</Text><Text style={{fontSize:9,color:C.muted,marginTop:3}}>Tap to {task.status==='completed'?'reopen':'complete'}</Text></Btn>
+            <Btn onPress={()=>void removeLiveverseTask(task)} style={{padding:7,backgroundColor:C.paper,borderRadius:8}}><Text style={{fontSize:9,color:C.red,fontWeight:'900'}}>Delete</Text></Btn>
+          </View>)}
         </View>:null}
         {liveverseRoomTab==='media'?<View style={{marginTop:13}}>
           <Btn disabled={liveverseBusy} onPress={()=>void uploadLiveverseMedia()} style={{backgroundColor:C.green,padding:11,borderRadius:10,alignItems:'center'}}><Text style={{color:'#fff',fontWeight:'900'}}>＋ Upload image/video</Text></Btn>
-          {liveverseMedia.map(item=><View key={item.id} style={{marginTop:10}}>{item.media_type==='image'?<Image source={{uri:item.url}} style={{width:'100%',height:170,borderRadius:12}} resizeMode="cover"/>:<VideoBubble uri={item.url}/>}</View>)}
+          {liveverseMedia.map(item=><View key={item.id} style={{marginTop:10,backgroundColor:C.paper,padding:8,borderRadius:12}}>{item.media_type==='image'?<Image source={{uri:item.url}} style={{width:'100%',height:170,borderRadius:12}} resizeMode="cover"/>:<VideoBubble uri={item.url}/>}<Btn onPress={()=>void removeLiveverseMedia(item)} style={{alignSelf:'flex-start',padding:6,backgroundColor:C.paper,marginTop:5}}><Text style={{fontSize:10,color:C.red,fontWeight:'900'}}>Remove media</Text></Btn></View>)}
         </View>:null}
         {liveverseRoomTab==='canvas'?<View style={{marginTop:13}}>
           <Text style={{fontSize:11,color:C.muted}}>Draw together. Strokes are saved after each completed stroke and shared through the room's Realtime channel.</Text>
