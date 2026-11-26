@@ -994,6 +994,9 @@ function GuftinApp() {
   const [scheduleComposerOpen,setScheduleComposerOpen]=useState(false);
   const [scheduleDraft,setScheduleDraft]=useState('');
   const [scheduleAtInput,setScheduleAtInput]=useState('');
+  const [scheduleMode,setScheduleMode]=useState<'at'|'after'>('at');
+  const [scheduleDelayAmount,setScheduleDelayAmount]=useState('10');
+  const [scheduleDelayUnit,setScheduleDelayUnit]=useState<'minutes'|'hours'|'days'>('minutes');
   const [scheduleBusy,setScheduleBusy]=useState(false);
   const [scheduledMessagesOpen,setScheduledMessagesOpen]=useState(false);
   const [scheduledMessages,setScheduledMessages]=useState<any[]>([]);
@@ -1937,18 +1940,37 @@ function GuftinApp() {
     catch(error:any){Alert.alert('Could not cancel message',error?.message||'Please try again.');}
   };
 
+  const openScheduleComposer=()=>{
+    setScheduleDraft(draft);
+    setScheduleMode('at');
+    setScheduleDelayAmount('10');
+    setScheduleDelayUnit('minutes');
+    const local=new Date(Date.now()+10*60*1000);
+    const pad=(value:number)=>String(value).padStart(2,'0');
+    setScheduleAtInput(local.getFullYear()+'-'+pad(local.getMonth()+1)+'-'+pad(local.getDate())+' '+pad(local.getHours())+':'+pad(local.getMinutes()));
+    setScheduleComposerOpen(true);
+  };
+
   const submitScheduledMessage=async()=>{
     if(!active||active.kind==='channel'||!session?.user?.id||scheduleBusy)return;
     const body=scheduleDraft.trim();
-    const scheduledAt=new Date(scheduleAtInput.trim().replace(' ','T'));
-    if(!body){Alert.alert('Message is empty','Enter the text you want to send later.');return;}
-    if(!Number.isFinite(scheduledAt.getTime())||scheduledAt.getTime()<=Date.now()){Alert.alert('Choose a future time','Use local time in YYYY-MM-DD HH:mm format.');return;}
+    let scheduledAt:Date;
+    if(scheduleMode==='after'){
+      const amount=Number(scheduleDelayAmount);
+      const multiplier=scheduleDelayUnit==='minutes'?60_000:scheduleDelayUnit==='hours'?3_600_000:86_400_000;
+      if(!Number.isInteger(amount)||amount<1||amount>365) {Alert.alert('Invalid delay','Enter a whole number between 1 and 365.');return;}
+      scheduledAt=new Date(Date.now()+amount*multiplier);
+    }else{
+      scheduledAt=new Date(scheduleAtInput.trim().replace(' ','T'));
+    }
+    if(!body){Alert.alert('Message is empty','Enter the message you want Guftin to send later.');return;}
+    if(!Number.isFinite(scheduledAt.getTime())||scheduledAt.getTime()<=Date.now()+5000){Alert.alert('Choose a future time','Select a date and time at least a few seconds from now.');return;}
     setScheduleBusy(true);
     try{
       const envelope=await encryptConversationText(active.id,body);
       await upgrade20.createScheduledMessage({conversation_id:active.id,body_envelope:envelope,message_type:'text',scheduled_at:scheduledAt.toISOString()});
-      setScheduleComposerOpen(false);setScheduleDraft('');setScheduleAtInput('');
-      Alert.alert('Message scheduled','Guftin will securely deliver this encrypted message at the selected time.');
+      setScheduleComposerOpen(false);setScheduleDraft('');setScheduleAtInput('');setDraft('');
+      Alert.alert('Message scheduled','Your encrypted message is saved on Guftin servers. It will be sent automatically at the selected time, even if this phone is offline or you sign out.');
       if(scheduledMessagesOpen)void loadScheduledMessages();
     }catch(error:any){Alert.alert('Message not scheduled',error?.message||'Please try again.');}
     finally{setScheduleBusy(false);}
@@ -4977,6 +4999,7 @@ function GuftinApp() {
             <Btn disabled={mediaPreparing} onPress={()=>setAttachmentTrayOpen(v=>!v)} style={{width:44,height:44,borderRadius:23,backgroundColor:'#08a66a',alignItems:'center',justifyContent:'center',elevation:3}}><Text style={{fontSize:27,color:'#fff'}}>＋</Text></Btn>
             {active.kind!=='channel'?<Btn disabled={sending||recordingBusy} onPress={recording?stopVoiceRecording:startVoiceRecording} style={{width:42,height:42,borderRadius:15,backgroundColor:recording?'#fde8e8':C.paper,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:18,color:recording?C.red:C.green}}>{recording?'■':'🎙'}</Text></Btn>:null}
             <TextInput editable={true} value={draft} onChangeText={setDraft} onFocus={()=>requestAnimationFrame(()=>chatMessagesListRef.current?.scrollToEnd({animated:true}))} placeholder={!isOnline?'Offline · message will send when connected':active.kind==='channel'?'Write a channel update…':recording?'Recording… tap ■ to send':'Write a message...'} multiline maxLength={4000} style={{flex:1,minHeight:48,maxHeight:110,backgroundColor:'#f6f6f6',borderRadius:25,paddingHorizontal:15,paddingVertical:12,color:C.ink,textAlignVertical:'center',borderWidth:1,borderColor:'#f0eee9'}}/>
+            {active.kind!=='channel'?<Btn disabled={scheduleBusy||sending} onPress={openScheduleComposer} style={{width:42,height:42,borderRadius:15,backgroundColor:'#f1f8f4',borderWidth:1,borderColor:'#d9eee2',alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:22,color:C.green}}>◷</Text></Btn>:null}
             <Btn disabled={!draft.trim()||sending} onPress={sendMessage} style={{backgroundColor:'#08a96b',width:54,height:54,borderRadius:28,alignItems:'center',justifyContent:'center',elevation:3}}>
               {sending?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontSize:20}}>➤</Text>}
             </Btn>
@@ -5397,13 +5420,35 @@ function GuftinApp() {
     </Modal>
 
     <Modal visible={scheduleComposerOpen} transparent animationType="fade" onRequestClose={()=>{if(!scheduleBusy)setScheduleComposerOpen(false);}}>
-      <View style={{flex:1,backgroundColor:'#0009',justifyContent:'center',padding:22}}><View style={{backgroundColor:C.white,borderRadius:20,padding:18}}>
-        <Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>Schedule encrypted message</Text>
-        <Text style={{fontSize:11,color:C.muted,marginTop:5,marginBottom:12}}>The message is encrypted for the current group/contact devices before it is stored.</Text>
-        <TextInput value={scheduleDraft} onChangeText={setScheduleDraft} placeholder="Write your message…" multiline maxLength={4000} style={{minHeight:100,backgroundColor:C.paper,borderRadius:12,padding:12,color:C.ink,textAlignVertical:'top'}}/>
-        <Text style={{color:C.ink,fontWeight:'800',marginTop:12,marginBottom:6}}>Send at (your local time)</Text>
-        <TextInput value={scheduleAtInput} onChangeText={setScheduleAtInput} placeholder="YYYY-MM-DD HH:mm" autoCapitalize="none" style={{backgroundColor:C.paper,borderRadius:12,padding:12,color:C.ink}}/>
-        <View style={{flexDirection:'row',justifyContent:'flex-end',gap:10,marginTop:14}}><Btn disabled={scheduleBusy} onPress={()=>setScheduleComposerOpen(false)} style={{padding:12}}><Text style={{color:C.muted,fontWeight:'800'}}>Cancel</Text></Btn><Btn disabled={scheduleBusy||!scheduleDraft.trim()||!scheduleAtInput.trim()} onPress={()=>void submitScheduledMessage()} style={{backgroundColor:C.green,paddingHorizontal:16,paddingVertical:12,borderRadius:11}}>{scheduleBusy?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Schedule</Text>}</Btn></View>
+      <View style={{flex:1,backgroundColor:'#0009',justifyContent:'center',padding:18}}><View style={{backgroundColor:C.white,borderRadius:22,padding:18,maxHeight:'88%'}}>
+        <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}>
+          <View><Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>Schedule message</Text><Text style={{fontSize:11,color:C.muted,marginTop:4}}>Encrypted · Sent automatically by Guftin</Text></View>
+          <Btn onPress={()=>{if(!scheduleBusy)setScheduleComposerOpen(false);}} style={{padding:7}}><Text style={{fontSize:24,color:C.muted}}>×</Text></Btn>
+        </View>
+        <TextInput value={scheduleDraft} onChangeText={setScheduleDraft} placeholder="Write your message…" multiline maxLength={4000} style={{minHeight:105,maxHeight:180,backgroundColor:C.paper,borderRadius:13,padding:12,color:C.ink,textAlignVertical:'top',marginTop:14}}/>
+        <Text style={{color:C.ink,fontWeight:'900',marginTop:16,marginBottom:8}}>When should it be sent?</Text>
+        <View style={{flexDirection:'row',gap:8}}>
+          <Btn onPress={()=>setScheduleMode('at')} style={{flex:1,alignItems:'center',padding:11,borderRadius:11,backgroundColor:scheduleMode==='at'?C.mint:C.paper,borderWidth:1,borderColor:scheduleMode==='at'?C.green:C.line}}><Text style={{fontSize:12,fontWeight:'900',color:scheduleMode==='at'?C.green:C.muted}}>Specific date & time</Text></Btn>
+          <Btn onPress={()=>setScheduleMode('after')} style={{flex:1,alignItems:'center',padding:11,borderRadius:11,backgroundColor:scheduleMode==='after'?C.mint:C.paper,borderWidth:1,borderColor:scheduleMode==='after'?C.green:C.line}}><Text style={{fontSize:12,fontWeight:'900',color:scheduleMode==='after'?C.green:C.muted}}>After a duration</Text></Btn>
+        </View>
+        {scheduleMode==='at'?<>
+          <Text style={{fontSize:11,color:C.muted,marginTop:12,marginBottom:6}}>Your device's local time · YYYY-MM-DD HH:mm</Text>
+          <TextInput value={scheduleAtInput} onChangeText={setScheduleAtInput} placeholder="2026-12-01 09:30" autoCapitalize="none" style={{backgroundColor:C.paper,borderRadius:12,padding:13,color:C.ink,borderWidth:1,borderColor:C.line}}/>
+        </>:<>
+          <Text style={{fontSize:11,color:C.muted,marginTop:12,marginBottom:7}}>Send this message after:</Text>
+          <View style={{flexDirection:'row',gap:8,alignItems:'center'}}>
+            <TextInput value={scheduleDelayAmount} onChangeText={setScheduleDelayAmount} keyboardType="number-pad" placeholder="10" style={{flex:1,backgroundColor:C.paper,borderRadius:12,padding:13,color:C.ink,borderWidth:1,borderColor:C.line}}/>
+            {(['minutes','hours','days'] as const).map(unit=><Btn key={unit} onPress={()=>setScheduleDelayUnit(unit)} style={{paddingHorizontal:10,paddingVertical:12,borderRadius:10,backgroundColor:scheduleDelayUnit===unit?C.mint:C.paper,borderWidth:1,borderColor:scheduleDelayUnit===unit?C.green:C.line}}><Text style={{fontSize:11,fontWeight:'900',color:scheduleDelayUnit===unit?C.green:C.muted}}>{unit}</Text></Btn>)}
+          </View>
+          <Text style={{fontSize:10,color:C.muted,marginTop:6}}>The server calculates the delivery time, so your phone does not need to stay online.</Text>
+        </>}
+        <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginTop:16}}>
+          <Btn onPress={()=>{setScheduleComposerOpen(false);setScheduledMessagesOpen(true);void loadScheduledMessages();}} disabled={scheduleBusy} style={{paddingVertical:10,paddingRight:8}}><Text style={{color:C.green,fontSize:11,fontWeight:'900'}}>View scheduled</Text></Btn>
+          <View style={{flexDirection:'row',gap:8,alignItems:'center'}}>
+            <Btn disabled={scheduleBusy} onPress={()=>setScheduleComposerOpen(false)} style={{padding:11}}><Text style={{color:C.muted,fontWeight:'800'}}>Cancel</Text></Btn>
+            <Btn disabled={scheduleBusy||!scheduleDraft.trim()||(scheduleMode==='at'&&!scheduleAtInput.trim())||(scheduleMode==='after'&&!scheduleDelayAmount.trim())} onPress={()=>void submitScheduledMessage()} style={{backgroundColor:C.green,paddingHorizontal:17,paddingVertical:12,borderRadius:12}}>{scheduleBusy?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Schedule message</Text>}</Btn>
+          </View>
+        </View>
       </View></View>
     </Modal>
 
