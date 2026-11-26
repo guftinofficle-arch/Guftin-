@@ -68,6 +68,11 @@ export function createHoloSpaceClient(db:SupabaseClient){
     }).eq('room_id',roomId).eq('invitation_status','invited').select('*').single();
     if(error)throw error;return data;
   }
+  async function removeMember(roomId:string,userId:string){
+    id(roomId,'room');id(userId,'user');
+    const {error}=await db.from('holospace_members').delete().eq('room_id',roomId).eq('user_id',userId).eq('role','member');
+    if(error)throw error;
+  }
   async function leaveRoom(roomId:string,userId:string){
     id(roomId,'room');id(userId,'user');
     const {error}=await db.from('holospace_members').delete().eq('room_id',roomId).eq('user_id',userId).eq('role','member');
@@ -193,7 +198,7 @@ export function createHoloSpaceClient(db:SupabaseClient){
   async function trackPresence(channel:RealtimeChannel,userId:string,displayName:string,avatarKey:string){
     id(userId,'user');return channel.track({user_id:userId,display_name:displayName.slice(0,60),avatar_key:avatarKey,online_at:new Date().toISOString()});
   }
-  return {createRoom,listMyRooms,listInvitations,invite,acceptInvitation,leaveRoom,listMembers,updateRoom,deleteRoom,
+  return {createRoom,listMyRooms,listInvitations,invite,acceptInvitation,leaveRoom,removeMember,listMembers,updateRoom,deleteRoom,
     addMemory,editMemory,deleteMemory,listMemories,uploadGallery,listGallery,gallerySignedUrl,deleteGalleryItem,
     saveAvatar,saveTheme,createEvent,listEvents,subscribeRoom,trackPresence};
 }
