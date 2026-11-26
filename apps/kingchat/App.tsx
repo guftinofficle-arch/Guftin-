@@ -5057,7 +5057,7 @@ function GuftinApp() {
           </>}
       </View>
       {attachmentTrayOpen&&active.kind!=='channel'?<View style={{flexDirection:'row',justifyContent:'space-around',alignItems:'center',paddingVertical:13,paddingHorizontal:5,backgroundColor:'#fff',borderTopWidth:1,borderColor:'#f0eee9',borderBottomLeftRadius:24,borderBottomRightRadius:24}}>{[{label:'Gallery',icon:'▧',color:'#7650d8',action:()=>void sendPhotosVideos()},{label:'Camera',icon:'◉',color:'#1878d8',action:()=>void (async()=>{const p=await ImagePicker.requestCameraPermissionsAsync();if(!p.granted){Alert.alert('Permission needed','Allow camera access to take a photo.');return;}const r=await ImagePicker.launchCameraAsync({mediaTypes:['images'],quality:.85});if(!r.canceled&&r.assets?.[0])await sendPhotosVideos(r.assets[0]);})()},{label:'Video',icon:'▶',color:'#dc4773',action:()=>void (async()=>{const p=await ImagePicker.requestCameraPermissionsAsync();if(!p.granted){Alert.alert('Permission needed','Allow camera access to record video.');return;}const r=await ImagePicker.launchCameraAsync({mediaTypes:['videos'],videoMaxDuration:60});if(!r.canceled&&r.assets?.[0])await sendPhotosVideos(r.assets[0]);})()},{label:'Voice',icon:'♩',color:'#12936b',action:()=>{setAttachmentTrayOpen(false);void (recording?stopVoiceRecording():startVoiceRecording());}},{label:'Stickers',icon:'☻',color:'#e88b16',action:()=>Alert.alert('Stickers','Choose an emoji sticker to send.',[{text:'😊',onPress:()=>{setDraft(v=>v+'😊');setAttachmentTrayOpen(false);}},{text:'❤️',onPress:()=>{setDraft(v=>v+'❤️');setAttachmentTrayOpen(false);}},{text:'😂',onPress:()=>{setDraft(v=>v+'😂');setAttachmentTrayOpen(false);}},{text:'Cancel',style:'cancel'}])}].map(item=><Btn key={item.label} onPress={()=>{setAttachmentTrayOpen(false);item.action();}} style={{alignItems:'center',minWidth:55}}><View style={{width:48,height:48,borderRadius:17,backgroundColor:item.color+'18',alignItems:'center',justifyContent:'center',marginBottom:5}}><Text style={{fontSize:23,color:item.color}}>{item.icon}</Text></View><Text style={{fontSize:11,color:C.ink,fontWeight:'700'}}>{item.label}</Text></Btn>)}</View>:null}
-    {chatDetailsOpen?<View style={{position:'absolute',left:0,right:0,top:0,bottom:0,zIndex:1200,elevation:30,backgroundColor:C.paper}}>setChatDetailsOpen(false)}>
+    {chatDetailsOpen?<View style={{position:'absolute',left:0,right:0,top:0,bottom:0,zIndex:1200,elevation:30,backgroundColor:C.paper}}>
       <SafeAreaView style={{flex:1,backgroundColor:C.paper}}>
         <StatusBar barStyle="dark-content"/>
         <View style={{height:58,backgroundColor:C.white,flexDirection:'row',alignItems:'center',paddingHorizontal:14,borderBottomWidth:1,borderColor:C.line}}>
@@ -5472,7 +5472,7 @@ function GuftinApp() {
       </View>
     </Modal>
 
-    {editModalVisible?<View style={{position:'absolute',left:0,right:0,top:0,bottom:0,zIndex:1201,elevation:30,backgroundColor:C.paper}}>{if(!editBusy)setEditModalVisible(false);}}>
+    {editModalVisible?<View style={{position:'absolute',left:0,right:0,top:0,bottom:0,zIndex:1201,elevation:30,backgroundColor:C.paper}}>
       <View style={{flex:1,backgroundColor:'#0009',justifyContent:'center',padding:22}}>
         <View style={{backgroundColor:C.white,borderRadius:20,padding:18}}>
           <Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>Edit message</Text>
@@ -5486,7 +5486,7 @@ function GuftinApp() {
       </View>
     </View>:null}
 
-    {editHistoryVisible?<View style={{position:'absolute',left:0,right:0,top:0,bottom:0,zIndex:1202,elevation:30,backgroundColor:C.paper}}>setEditHistoryVisible(false)}>
+    {editHistoryVisible?<View style={{position:'absolute',left:0,right:0,top:0,bottom:0,zIndex:1202,elevation:30,backgroundColor:C.paper}}>
       <SafeAreaView style={{flex:1,backgroundColor:C.paper}}>
         <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',padding:18,backgroundColor:C.white,borderBottomWidth:1,borderColor:C.line}}>
           <Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>Message edit history</Text>
@@ -5506,7 +5506,7 @@ function GuftinApp() {
       </SafeAreaView>
     </View>:null}
 
-    {pollCreateVisible?<View style={{position:'absolute',left:0,right:0,top:0,bottom:0,zIndex:1203,elevation:30,backgroundColor:C.paper}}>{if(!pollBusy)setPollCreateVisible(false);}}>
+    {pollCreateVisible?<View style={{position:'absolute',left:0,right:0,top:0,bottom:0,zIndex:1203,elevation:30,backgroundColor:C.paper}}>
       <View style={{flex:1,backgroundColor:'#0009',justifyContent:'center',padding:22}}>
         <View style={{backgroundColor:C.white,borderRadius:20,padding:18}}>
           <Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>Create group poll</Text>
@@ -5519,7 +5519,7 @@ function GuftinApp() {
       </View>
     </View>:null}
 
-    {eventCreateVisible?<View style={{position:'absolute',left:0,right:0,top:0,bottom:0,zIndex:1204,elevation:30,backgroundColor:C.paper}}>{if(!eventBusy)setEventCreateVisible(false);}}>
+    {eventCreateVisible?<View style={{position:'absolute',left:0,right:0,top:0,bottom:0,zIndex:1204,elevation:30,backgroundColor:C.paper}}>
       <View style={{flex:1,backgroundColor:'#0009',justifyContent:'center',padding:22}}>
         <View style={{backgroundColor:C.white,borderRadius:20,padding:18}}>
           <Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>Create group event</Text>
@@ -5534,40 +5534,7 @@ function GuftinApp() {
       </View>
     </View>:null}
 
-    {scheduleComposerOpen?<View style={{position:'absolute',left:0,right:0,top:0,bottom:0,zIndex:1205,elevation:30,backgroundColor:C.paper}}>{if(!scheduleBusy)setScheduleComposerOpen(false);}}>
-      <View style={{flex:1,backgroundColor:'#0009',justifyContent:'center',padding:18}}><View style={{backgroundColor:C.white,borderRadius:22,padding:18,maxHeight:'88%'}}>
-        <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}>
-          <View><Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>Schedule message</Text><Text style={{fontSize:11,color:C.muted,marginTop:4}}>Encrypted · Sent automatically by Guftin</Text></View>
-          <Btn onPress={()=>{if(!scheduleBusy)setScheduleComposerOpen(false);}} style={{padding:7}}><Text style={{fontSize:24,color:C.muted}}>×</Text></Btn>
-        </View>
-        <TextInput value={scheduleDraft} onChangeText={setScheduleDraft} placeholder="Write your message…" multiline maxLength={4000} style={{minHeight:105,maxHeight:180,backgroundColor:C.paper,borderRadius:13,padding:12,color:C.ink,textAlignVertical:'top',marginTop:14}}/>
-        <Text style={{color:C.ink,fontWeight:'900',marginTop:16,marginBottom:8}}>When should it be sent?</Text>
-        <View style={{flexDirection:'row',gap:8}}>
-          <Btn onPress={()=>setScheduleMode('at')} style={{flex:1,alignItems:'center',padding:11,borderRadius:11,backgroundColor:scheduleMode==='at'?C.mint:C.paper,borderWidth:1,borderColor:scheduleMode==='at'?C.green:C.line}}><Text style={{fontSize:12,fontWeight:'900',color:scheduleMode==='at'?C.green:C.muted}}>Specific date & time</Text></Btn>
-          <Btn onPress={()=>setScheduleMode('after')} style={{flex:1,alignItems:'center',padding:11,borderRadius:11,backgroundColor:scheduleMode==='after'?C.mint:C.paper,borderWidth:1,borderColor:scheduleMode==='after'?C.green:C.line}}><Text style={{fontSize:12,fontWeight:'900',color:scheduleMode==='after'?C.green:C.muted}}>After a duration</Text></Btn>
-        </View>
-        {scheduleMode==='at'?<>
-          <Text style={{fontSize:11,color:C.muted,marginTop:12,marginBottom:6}}>Your device's local time · YYYY-MM-DD HH:mm</Text>
-          <TextInput value={scheduleAtInput} onChangeText={setScheduleAtInput} placeholder="2026-12-01 09:30" autoCapitalize="none" style={{backgroundColor:C.paper,borderRadius:12,padding:13,color:C.ink,borderWidth:1,borderColor:C.line}}/>
-        </>:<>
-          <Text style={{fontSize:11,color:C.muted,marginTop:12,marginBottom:7}}>Send this message after:</Text>
-          <View style={{flexDirection:'row',gap:8,alignItems:'center'}}>
-            <TextInput value={scheduleDelayAmount} onChangeText={setScheduleDelayAmount} keyboardType="number-pad" placeholder="10" style={{flex:1,backgroundColor:C.paper,borderRadius:12,padding:13,color:C.ink,borderWidth:1,borderColor:C.line}}/>
-            {(['minutes','hours','days'] as const).map(unit=><Btn key={unit} onPress={()=>setScheduleDelayUnit(unit)} style={{paddingHorizontal:10,paddingVertical:12,borderRadius:10,backgroundColor:scheduleDelayUnit===unit?C.mint:C.paper,borderWidth:1,borderColor:scheduleDelayUnit===unit?C.green:C.line}}><Text style={{fontSize:11,fontWeight:'900',color:scheduleDelayUnit===unit?C.green:C.muted}}>{unit}</Text></Btn>)}
-          </View>
-          <Text style={{fontSize:10,color:C.muted,marginTop:6}}>The server calculates the delivery time, so your phone does not need to stay online.</Text>
-        </>}
-        <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginTop:16}}>
-          <Btn onPress={()=>{setScheduleComposerOpen(false);setScheduledMessagesOpen(true);void loadScheduledMessages();}} disabled={scheduleBusy} style={{paddingVertical:10,paddingRight:8}}><Text style={{color:C.green,fontSize:11,fontWeight:'900'}}>View scheduled</Text></Btn>
-          <View style={{flexDirection:'row',gap:8,alignItems:'center'}}>
-            <Btn disabled={scheduleBusy} onPress={()=>setScheduleComposerOpen(false)} style={{padding:11}}><Text style={{color:C.muted,fontWeight:'800'}}>Cancel</Text></Btn>
-            <Btn disabled={scheduleBusy||!scheduleDraft.trim()||(scheduleMode==='at'&&!scheduleAtInput.trim())||(scheduleMode==='after'&&!scheduleDelayAmount.trim())} onPress={()=>void submitScheduledMessage()} style={{backgroundColor:C.green,paddingHorizontal:17,paddingVertical:12,borderRadius:12}}>{scheduleBusy?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Schedule message</Text>}</Btn>
-          </View>
-        </View>
-      </View></View>
-    </View>:null}
-
-    {scheduledMessagesOpen?<View style={{position:'absolute',left:0,right:0,top:0,bottom:0,zIndex:1206,elevation:30,backgroundColor:C.paper}}>setScheduledMessagesOpen(false)}>
+    {scheduledMessagesOpen?<View style={{position:'absolute',left:0,right:0,top:0,bottom:0,zIndex:1206,elevation:30,backgroundColor:C.paper}}>
       <SafeAreaView style={{flex:1,backgroundColor:C.paper}}>
         <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',padding:18,backgroundColor:C.white,borderBottomWidth:1,borderColor:C.line}}><View><Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>Scheduled messages</Text><Text style={{fontSize:11,color:C.muted,marginTop:3}}>Encrypted messages waiting for delivery</Text></View><Btn onPress={()=>setScheduledMessagesOpen(false)} style={{padding:8}}><Text style={{fontSize:25,color:C.ink}}>×</Text></Btn></View>
         <Btn onPress={()=>void loadScheduledMessages()} disabled={scheduledMessagesLoading} style={{margin:14,backgroundColor:C.green,padding:12,borderRadius:11,alignItems:'center'}}>{scheduledMessagesLoading?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Refresh</Text>}</Btn>
