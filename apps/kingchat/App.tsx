@@ -4,7 +4,7 @@ import * as SecureStore from 'expo-secure-store';
 import * as LocalAuthentication from 'expo-local-authentication';
 import NetInfo from '@react-native-community/netinfo';
 import {
-  Alert, Animated, AppState, BackHandler, FlatList, Image, KeyboardAvoidingView, Modal,
+  Alert, Animated, AppState, BackHandler, FlatList, Image, KeyboardAvoidingView, Modal, PanResponder,
   Platform, RefreshControl, ScrollView, Share, StatusBar, Switch, Text, TextInput, ToastAndroid,
   TouchableOpacity, View, useWindowDimensions
 } from 'react-native';
@@ -17,6 +17,8 @@ import { saveMediaToGallery } from './src/features/media/saveMediaToGallery';
 import { ChatOptionsPopover } from './src/features/chat-menu/ChatOptionsPopover';
 import { getChannelAnalytics, recordChannelAnalyticsEvent } from './src/features/channels/channelAnalytics';
 import { createHoloSpaceClient } from './src/features/holospace/holospaceClient';
+import { createLiveverseClient } from './src/features/liveverse/liveverseClient';
+import { createMagicMomentsClient, MagicMomentKind } from './src/features/magic-moments/magicMomentsClient';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 import * as ImagePicker from 'expo-image-picker';
@@ -37,6 +39,7 @@ import * as ExpoCrypto from 'expo-crypto';
 import { DeviceIdentity, E2EE_MEDIA_PREFIX, E2EE_PREFIX, decryptCallKeyForDevice, decryptMediaForDevice, decryptMessageForDevice, encryptCallKeyForDevices, encryptMediaForDevices, encryptMessageForDevices, loadOrCreateDeviceIdentity } from './src/lib/e2ee';
 import { AudioSession, AndroidAudioTypePresets, LiveKitRoom, VideoTrack, isTrackReference, registerGlobals, useLocalParticipant, useParticipants, useRoomContext, useRNE2EEManager, useTracks } from '@livekit/react-native';
 import { Track } from 'livekit-client';
+import Svg, { Path } from 'react-native-svg';
 
 WebBrowser.maybeCompleteAuthSession();
 registerGlobals();
@@ -278,6 +281,8 @@ const THEMES:any = {
 };
 type Chat = { id:string; name:string; avatar:string; avatarUrl?:string; color:string; last:string; time:string; unread:number; online:boolean; kind:string; lastAt:number; isOfficial?:boolean; isVerified?:boolean; isChannelOwner?:boolean; inviteCode?:string; isPublic?:boolean; ownerId?:string; description?:string; hasConversationActivity?:boolean; hasCallActivity?:boolean; pendingContactId?:string; hasPendingActivity?:boolean };
 const HOLOSPACE_INVITE_PREFIX='GUFTIN_HOLOSPACE_INVITE:';
+const LIVEVERSE_INVITE_PREFIX='GUFTIN_LIVEVERSE_INVITE:';
+const MAGIC_MOMENT_INVITE_PREFIX='GUFTIN_MAGIC_MOMENT_INVITE:';
 type Message = { id:string; conversation_id:string; sender_id:string|null; body:string|null; message_type:string; attachment_url?:string|null; created_at:string; edited_at?:string|null; mine:boolean; deleted_at?:string|null; pending?:boolean };
 const sortInboxChats=(items:Chat[])=>items.slice().sort((a,b)=>(Number(!!b.isOfficial)-Number(!!a.isOfficial))||((Number(b.lastAt)||0)-(Number(a.lastAt)||0)));
 const normalizeGuftinPhone=(value:string):string|null=>{
@@ -968,10 +973,130 @@ function HoloVoiceControls({onLeave,onConnected}:any){
     </View>
   </View>;
 }
+function LiveverseVoiceControls({onLeave,connected}:any){
+  const participants=useParticipants();
+  const {localParticipant,isMicrophoneEnabled}=useLocalParticipant();
+  const room=useRoomContext();
+    const [busy,setBusy]=useState(false);
+  useEffect(()=>{void startGuftinCallAudioSession().catch((error:any)=>Alert.alert('Audio unavailable',error?.message||'Could not start audio.'));return()=>{void stopGuftinCallAudioSession();};},[]);
+  const toggle=async()=>{if(busy)return;setBusy(true);try{await localParticipant.setMicrophoneEnabled(!isMicrophoneEnabled);}catch(error:any){Alert.alert('Microphone unavailable',error?.message||'Check microphone permission.');}finally{setBusy(false);}};
+  const leave=async()=>{try{await room.disconnect();}finally{await stopGuftinCallAudioSession();onLeave?.();}};
+  return <View style={{flex:1,backgroundColor:'#090d24',padding:24,justifyContent:'center',alignItems:'center'}}>
+    <Text style={{fontSize:22,fontWeight:'900',color:'#fff'}}>Liveverse Voice Room</Text>
+    <Text style={{fontSize:12,color:'#aab5d8',marginTop:7}}>{connected?'Connected audio room':'Connecting audio…'} · {participants.length} participant(s)</Text>
+    <View style={{width:'100%',backgroundColor:'#151b3a',borderRadius:18,padding:16,marginTop:24}}>{participants.map((p:any)=><Text key={p.identity} style={{color:'#fff',paddingVertical:7}}>● {p.name||p.identity}{p.isLocal?' (You)':''}</Text>)}</View>
+    <View style={{flexDirection:'row',gap:12,marginTop:25}}>
+      <Btn disabled={busy||!connected} onPress={()=>void toggle()} style={{padding:15,borderRadius:14,backgroundColor:isMicrophoneEnabled?'#2b9a75':'#8b344b'}}><Text style={{color:'#fff',fontWeight:'900'}}>{isMicrophoneEnabled?'Mute microphone':'Unmute microphone'}</Text></Btn>
+      <Btn onPress={()=>void leave()} style={{padding:15,borderRadius:14,backgroundColor:'#bd4055'}}><Text style={{color:'#fff',fontWeight:'900'}}>Leave</Text></Btn>
+    </View>
+  </View>;
+}
+function HoloVoiceControls({onLeave,onConnected}:any){
+  const participants=useParticipants();
+  const {localParticipant,isMicrophoneEnabled}=useLocalParticipant();
+  const room=useRoomContext();
+  const [busy,setBusy]=useState(false);
+  const [connected,setConnected]=useState(false);
+  useEffect(()=>{
+    let active=true;
+    void startGuftinCallAudioSession().then(()=>{if(active)setConnected(true);}).catch((error:any)=>Alert.alert('Audio unavailable',error?.message||'Could not start the microphone audio session.'));
+    return ()=>{active=false;void stopGuftinCallAudioSession();};
+  },[]);
+  const toggleMic=async()=>{
+    if(busy)return;setBusy(true);
+    try{await localParticipant.setMicrophoneEnabled(!isMicrophoneEnabled);}
+    catch(error:any){Alert.alert('Microphone unavailable',error?.message||'Check microphone permission.');}
+    finally{setBusy(false);}
+  };
+  const leave=async()=>{try{await room.disconnect();}finally{await stopGuftinCallAudioSession();onLeave?.();}};
+  return <View style={{flex:1,backgroundColor:'#090d24',padding:24,justifyContent:'center',alignItems:'center'}}>
+    <Text style={{fontSize:22,fontWeight:'900',color:'#fff'}}>HoloSpace Voice Hangout</Text>
+    <Text style={{fontSize:12,color:'#aab5d8',marginTop:7}}>{connected?'Connected audio room':'Connecting audio…'} · {participants.length} participant(s)</Text>
+    <View style={{width:'100%',backgroundColor:'#151b3a',borderRadius:18,padding:16,marginTop:24}}>
+      {participants.map((p:any)=><Text key={p.identity} style={{color:'#fff',paddingVertical:7}}>● {p.name||p.identity}{p.isLocal?' (You)':''}</Text>)}
+    </View>
+    <View style={{flexDirection:'row',gap:12,marginTop:25}}>
+      <Btn disabled={busy||!connected} onPress={()=>void toggleMic()} style={{padding:15,borderRadius:14,backgroundColor:isMicrophoneEnabled?'#2b9a75':'#8b344b'}}><Text style={{color:'#fff',fontWeight:'900'}}>{isMicrophoneEnabled?'Mute microphone':'Unmute microphone'}</Text></Btn>
+      <Btn onPress={()=>void leave()} style={{padding:15,borderRadius:14,backgroundColor:'#bd4055'}}><Text style={{color:'#fff',fontWeight:'900'}}>Leave</Text></Btn>
+    </View>
+  </View>;
+}
+
 function GuftinApp() {
   const insets=useSafeAreaInsets();
   const [tab,setTab]=useState('Chats');
   const holoClient=useMemo(()=>createHoloSpaceClient(supabase),[]);
+  const liveverseClient=useMemo(()=>createLiveverseClient(supabase),[]);
+  const magicMomentsClient=useMemo(()=>createMagicMomentsClient(supabase),[]);
+  const [magicMoments,setMagicMoments]=useState<any[]>([]);
+  const [magicSelected,setMagicSelected]=useState<any>(null);
+  const [magicItems,setMagicItems]=useState<any[]>([]);
+  const [magicComments,setMagicComments]=useState<any[]>([]);
+  const [magicNotifications,setMagicNotifications]=useState<any[]>([]);
+  const [magicBusy,setMagicBusy]=useState(false);
+  const [magicView,setMagicView]=useState<'home'|'create'|'detail'>('home');
+  const [magicKind,setMagicKind]=useState<MagicMomentKind>('birthday');
+  const [magicTitle,setMagicTitle]=useState('A special moment');
+  const [magicDescription,setMagicDescription]=useState('');
+  const [magicDraft,setMagicDraft]=useState('');
+  const [magicScheduleAt,setMagicScheduleAt]=useState('');
+  const [magicCommentDraft,setMagicCommentDraft]=useState('');
+  const [liveverseView,setLiveverseView]=useState<'home'|'create'|'room'>('home');
+  const [liveverseSpaces,setLiveverseSpaces]=useState<any[]>([]);
+  const [liveverseSelected,setLiveverseSelected]=useState<any>(null);
+  const [liveverseSourceChat,setLiveverseSourceChat]=useState<any>(null);
+  const [liveverseNotes,setLiveverseNotes]=useState<any[]>([]);
+  const [liveverseTasks,setLiveverseTasks]=useState<any[]>([]);
+  const [liveverseMedia,setLiveverseMedia]=useState<any[]>([]);
+  const [liveverseMembers,setLiveverseMembers]=useState<any[]>([]);
+  const [liveverseRoomTab,setLiveverseRoomTab]=useState<'notes'|'tasks'|'media'|'canvas'>('notes');
+  const [liveverseName,setLiveverseName]=useState('');
+  const [liveverseDescription,setLiveverseDescription]=useState('');
+  const [liveverseNoteTitle,setLiveverseNoteTitle]=useState('Shared notes');
+  const [liveverseNoteDraft,setLiveverseNoteDraft]=useState('');
+  const [liveverseTaskDraft,setLiveverseTaskDraft]=useState('');
+  const [liveverseCanvasDraft,setLiveverseCanvasDraft]=useState('');
+  const [liveverseCanvasStrokes,setLiveverseCanvasStrokes]=useState<any[]>([]);
+  const [liveverseCanvasColor,setLiveverseCanvasColor]=useState('#19223d');
+  const [liveverseCanvasWidth,setLiveverseCanvasWidth]=useState(300);
+  const liveverseCanvasStrokesRef=useRef<any[]>([]);
+  const liveverseCanvasVersionRef=useRef(0);
+  const liveverseCurrentStrokeRef=useRef('');
+  const [liveverseBusy,setLiveverseBusy]=useState(false);
+  const [liveversePresence,setLiveversePresence]=useState<any[]>([]);
+  const [liveversePointers,setLiveversePointers]=useState<any[]>([]);
+  const liveverseChannelRef=useRef<any>(null);
+  const liveverseLastPointerSentRef=useRef(0);
+  const [liveverseVoiceSession,setLiveverseVoiceSession]=useState<any>(null);
+  const [liveverseVoiceConnected,setLiveverseVoiceConnected]=useState(false);
+  const holoClient=useMemo(()=>createHoloSpaceClient(supabase),[]);
+  const [holoView,setHoloView]=useState<'home'|'mine'|'invited'|'recent'|'create'|'room'>('home');
+  const [holoRooms,setHoloRooms]=useState<any[]>([]);
+  const [holoInvites,setHoloInvites]=useState<any[]>([]);
+  const [holoSelected,setHoloSelected]=useState<any>(null);
+  const [holoVoiceSession,setHoloVoiceSession]=useState<any>(null);
+  const [holoSourceChat,setHoloSourceChat]=useState<any>(null);
+  const [holoMemories,setHoloMemories]=useState<any[]>([]);
+  const [holoGallery,setHoloGallery]=useState<any[]>([]);
+  const [holoEvents,setHoloEvents]=useState<any[]>([]);
+  const [holoMembers,setHoloMembers]=useState<any[]>([]);
+  const [holoMemberProfiles,setHoloMemberProfiles]=useState<Record<string,any>>({});
+  const [holoOnlineMembers,setHoloOnlineMembers]=useState<any[]>([]);
+  const [holoLoading,setHoloLoading]=useState(false);
+  const [holoSaving,setHoloSaving]=useState(false);
+  const [holoName,setHoloName]=useState('');
+  const [holoDescription,setHoloDescription]=useState('');
+  const [holoPrivacy,setHoloPrivacy]=useState<'private'|'public'>('private');
+  const [holoMemoryDraft,setHoloMemoryDraft]=useState('');
+  const [holoMemoryEditingId,setHoloMemoryEditingId]=useState<string|null>(null);
+  const [holoMemoryEditingBody,setHoloMemoryEditingBody]=useState('');
+  const [holoEventEditingId,setHoloEventEditingId]=useState<string|null>(null);
+  const [holoRoomNameDraft,setHoloRoomNameDraft]=useState('');
+  const [holoRoomDescriptionDraft,setHoloRoomDescriptionDraft]=useState('');
+  const [holoRoomPrivacyDraft,setHoloRoomPrivacyDraft]=useState<'private'|'public'>('private');
+  const [holoEventTitle,setHoloEventTitle]=useState('');
+  const [holoEventDate,setHoloEventDate]=useState('');
+  
   const [holoView,setHoloView]=useState<'home'|'mine'|'invited'|'recent'|'create'|'room'>('home');
   const [holoRooms,setHoloRooms]=useState<any[]>([]);
   const [holoInvites,setHoloInvites]=useState<any[]>([]);
@@ -5098,7 +5223,301 @@ function GuftinApp() {
     try{await holoClient.saveAvatar(holoSelected.id,session.user.id,avatarKey,'emerald');Alert.alert('Avatar saved','Your room avatar preference is saved.');}
     catch(error:any){Alert.alert('Avatar not saved',error?.message||'Please try again.');}
   };
-  const pageTitle=tab==='Chats'?'Guftin':tab==='HoloSpace'?'HoloSpace':tab==='AI'?'Karaboz AI':tab==='Updates'?'Updates':tab==='Channels'?'Channels':tab==='Hub'?'Business & Communities':tab==='Calls'?'Calls':'You';
+  const loadMagicMoments=useCallback(async()=>{
+    if(!session?.user?.id)return;
+    setMagicBusy(true);
+    try{
+      const [moments,notifications]=await Promise.all([magicMomentsClient.list(session.user.id),magicMomentsClient.notifications()]);
+      setMagicMoments(moments);setMagicNotifications(notifications);
+    }catch(error:any){Alert.alert('Magic Moments unavailable',error?.message||'Could not load your moments.');}
+    finally{setMagicBusy(false);}
+  },[session?.user?.id,magicMomentsClient]);
+  useEffect(()=>{if(tab==='Magic Moments')void loadMagicMoments();},[tab,loadMagicMoments]);
+  const openMagicMoment=async(moment:any)=>{
+    setMagicBusy(true);
+    try{
+      await magicMomentsClient.acceptInvite(moment.id);
+      const {data,error}=await supabase.from('magic_moments').select('*').eq('id',moment.id).maybeSingle();
+      if(error)throw error;
+      if(!data){Alert.alert('Still a surprise','This moment is sealed. Its private content will appear only after its reveal time.');return;}
+      const [items,comments]=await Promise.all([magicMomentsClient.listItems(moment.id),magicMomentsClient.comments(moment.id)]);
+      setMagicSelected(data);setMagicItems(await Promise.all(items.map(async(item:any)=>item.object_path?{...item,signedUrl:await magicMomentsClient.signedUrl(item.object_path)}:item)));
+      setMagicComments(comments);setMagicView('detail');
+    }catch(error:any){Alert.alert('Could not open moment',error?.message||'Accept the invitation and try again.');}
+    finally{setMagicBusy(false);}
+  };
+  const createMagicMoment=async()=>{
+    if(!session?.user?.id||!active?.id||!['direct','group'].includes(active.kind)){Alert.alert('Open a chat first','Open the direct or group chat where you want to create and share this moment.');return;}
+    if(!magicTitle.trim()){Alert.alert('Add a title','Enter a title for this moment.');return;}
+    setMagicBusy(true);
+    try{
+      const {data:memberRows,error:memberError}=await supabase.from('kc_conversation_members').select('user_id').eq('conversation_id',active.id);
+      if(memberError)throw memberError;
+      const otherIds=[...new Set((memberRows||[]).map((x:any)=>x.user_id).filter((id:string)=>id&&id!==session.user.id))];
+      if(!otherIds.length)throw new Error('No other chat members were found.');
+      const isFuture=magicKind==='future_message';
+      if((isFuture||magicKind==='birthday'||magicKind==='secret_surprise'||magicKind==='anniversary')&&!magicScheduleAt.trim())throw new Error('Enter the reveal or delivery date and time.');
+      const scheduledAt=isFuture?new Date(magicScheduleAt).toISOString():null;
+      if((isFuture||magicKind==='birthday'||magicKind==='secret_surprise'||magicKind==='anniversary')&&new Date(magicScheduleAt).getTime()<=Date.now())throw new Error('Choose a future date and time.');
+      const recipientId=['birthday','future_message','secret_surprise'].includes(magicKind)?otherIds[0]:null;
+      const revealAt=['birthday','secret_surprise','anniversary'].includes(magicKind)?new Date(magicScheduleAt).toISOString():null;
+      const moment=await magicMomentsClient.create({creatorId:session.user.id,kind:magicKind,title:magicTitle.trim(),description:magicDescription,conversationId:active.id,recipientId,revealAt,scheduledAt,timezone:Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC'});
+      for(const id of otherIds){
+        const role=id===recipientId?'recipient':'contributor';
+        await magicMomentsClient.invite(moment.id,id,session.user.id,role as any);
+      }
+      if(isFuture){
+        if(e2eeStatus!=='ready'||!deviceIdentity)throw new Error('Secure messaging is still initializing. Please wait until the security status is ready.');
+        const {data:devices,error:devicesError}=await supabase.from('kc_e2ee_devices').select('id,user_id,public_key').in('user_id',[session.user.id,...otherIds]).is('revoked_at',null);
+        if(devicesError)throw devicesError;
+        const securedUsers=new Set((devices||[]).map((device:any)=>device.user_id));
+        if(!securedUsers.has(session.user.id)||!securedUsers.has(recipientId as string))throw new Error('Both chat members need a registered secure device before scheduling this message.');
+        const encryptedBody=encryptMessageForDevices(magicDraft.trim()||magicDescription||magicTitle,devices||[],deviceIdentity);
+        await magicMomentsClient.scheduleMessage({momentId:moment.id,senderId:session.user.id,recipientId:recipientId as string,conversationId:active.id,content:encryptedBody,scheduledAt:scheduledAt as string,timezone:Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC'});
+      }else if(magicDraft.trim()){
+        await magicMomentsClient.addText(moment.id,session.user.id,magicDraft.trim());
+      }
+      await sendMessage(MAGIC_MOMENT_INVITE_PREFIX+JSON.stringify({moment_id:moment.id,kind:magicKind}));
+      setMagicTitle('A special moment');setMagicDescription('');setMagicDraft('');setMagicScheduleAt('');setMagicView('home');
+      await loadMagicMoments();
+      Alert.alert('Moment created','The moment is saved and its invitation card was posted in this chat.');
+    }catch(error:any){Alert.alert('Moment not created',error?.message||'Please check the details and try again.');}
+    finally{setMagicBusy(false);}
+  };
+  const addMagicText=async()=>{
+    if(!magicSelected||!session?.user?.id||!magicDraft.trim())return;
+    setMagicBusy(true);
+    try{const item=await magicMomentsClient.addText(magicSelected.id,session.user.id,magicDraft.trim());setMagicItems(items=>[...items,item]);setMagicDraft('');}
+    catch(error:any){Alert.alert('Memory not saved',error?.message||'Try again.');}
+    finally{setMagicBusy(false);}
+  };
+  const uploadMagicMedia=async()=>{
+    if(!magicSelected||!session?.user?.id)return;
+    const permission=await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if(!permission.granted){Alert.alert('Permission needed','Allow photo library access to choose media.');return;}
+    const result=await ImagePicker.launchImageLibraryAsync({mediaTypes:['images','videos'],allowsEditing:false,quality:0.85,videoMaxDuration:120});
+    if(result.canceled||!result.assets?.[0])return;
+    const asset=result.assets[0],file=new File(asset.uri),mime=asset.mimeType||(asset.type==='video'?'video/mp4':'image/jpeg');
+    setMagicBusy(true);
+    try{
+      const item=await magicMomentsClient.upload({momentId:magicSelected.id,authorId:session.user.id,fileName:asset.fileName||'moment-media',mimeType:mime,body:new Blob([await file.arrayBuffer()],{type:mime}),bytes:file.size||0,itemType:asset.type==='video'?'video':'image'});
+      setMagicItems(items=>[...items,item]);
+    }catch(error:any){Alert.alert('Upload failed',error?.message||'The selected media could not be uploaded.');}
+    finally{setMagicBusy(false);}
+  };
+  const addMagicComment=async()=>{
+    if(!magicSelected||!session?.user?.id||!magicCommentDraft.trim())return;
+    try{const comment=await magicMomentsClient.comment(magicSelected.id,session.user.id,magicCommentDraft.trim());setMagicComments(items=>[...items,comment]);setMagicCommentDraft('');}
+    catch(error:any){Alert.alert('Comment not sent',error?.message||'Try again.');}
+  };
+  const revealMagicMoment=async()=>{
+    if(!magicSelected)return;
+    setMagicBusy(true);
+    try{
+      const {data,error}=await supabase.functions.invoke('reveal-secret-surprise',{body:{moment_id:magicSelected.id}});
+      if(error)throw error;if(!data?.revealed)throw new Error(data?.error||'The reveal time has not arrived.');
+      await openMagicMoment(magicSelected);
+    }catch(error:any){Alert.alert('Not revealed yet',error?.message||'The server could not reveal this moment.');}
+    finally{setMagicBusy(false);}
+  };
+  const loadLiveverseSpaces=useCallback(async()=>{
+    if(!session?.user?.id)return;
+    setLiveverseBusy(true);
+    try{setLiveverseSpaces(await liveverseClient.listSpaces());}
+    catch(error:any){Alert.alert('Liveverse unavailable',error?.message||'Could not load shared spaces.');}
+    finally{setLiveverseBusy(false);}
+  },[session?.user?.id,liveverseClient]);
+  useEffect(()=>{if(tab==='Liveverse')void loadLiveverseSpaces();},[tab,loadLiveverseSpaces]);
+  const createLiveverseSpace=async()=>{
+    if(!session?.user?.id||!liveverseName.trim())return;
+    setLiveverseBusy(true);
+    try{
+      const space=await liveverseClient.createSpace({name:liveverseName.trim(),description:liveverseDescription,scope:liveverseSourceChat?.kind==='group'?'group':'chat',ownerId:session.user.id,sourceChatId:liveverseSourceChat?.id||null});
+      setLiveverseName('');setLiveverseDescription('');setLiveverseSourceChat(null);setLiveverseSpaces(items=>[space,...items]);setLiveverseSelected(space);setLiveverseView('room');
+      setLiveverseNotes([]);setLiveverseTasks([]);setLiveverseMedia([]);setLiveverseMembers(await liveverseClient.listMembers(space.id));setLiveverseRoomTab('notes');
+    }catch(error:any){Alert.alert('Space not created',error?.message||'Please try again.');}
+    finally{setLiveverseBusy(false);}
+  };
+  const openLiveverseSpace=async(space:any)=>{
+    setLiveverseSelected(space);setLiveverseView('room');setLiveverseBusy(true);
+    try{
+      const [notes,tasks,media,canvas,members]=await Promise.all([liveverseClient.listNotes(space.id),liveverseClient.listTasks(space.id),liveverseClient.listMedia(space.id),liveverseClient.loadCanvas(space.id),liveverseClient.listMembers(space.id)]);
+      setLiveverseNotes(notes);setLiveverseTasks(tasks);setLiveverseMedia(media);setLiveverseMembers(members);setLiveverseCanvasDraft(canvas?.document?JSON.stringify(canvas.document,null,2):'{}');liveverseCanvasStrokesRef.current=Array.isArray(canvas?.document?.strokes)?canvas.document.strokes:[];setLiveverseCanvasStrokes(liveverseCanvasStrokesRef.current);liveverseCanvasVersionRef.current=canvas?.version||0;
+      setLiveverseNoteDraft(notes[0]?.content||'');setLiveverseNoteTitle(notes[0]?.title||'Shared notes');
+    }catch(error:any){Alert.alert('Space could not open',error?.message||'Check your membership and try again.');}
+    finally{setLiveverseBusy(false);}
+  };
+  const saveLiveverseNote=async()=>{
+    if(!liveverseSelected||!session?.user?.id||!liveverseNoteDraft.trim())return;
+    setLiveverseBusy(true);
+    try{
+      let note=liveverseNotes[0];
+      if(!note)note=await liveverseClient.createNote(liveverseSelected.id,session.user.id,liveverseNoteTitle||'Untitled note');
+      const saved=await liveverseClient.saveNote({id:note.id,spaceId:liveverseSelected.id,userId:session.user.id,title:liveverseNoteTitle||note.title,content:liveverseNoteDraft,expectedVersion:note.version});
+      setLiveverseNotes([saved,...liveverseNotes.filter(x=>x.id!==saved.id)]);
+      Alert.alert('Notes saved','Your shared note is saved to this space.');
+    }catch(error:any){Alert.alert('Note not saved',error?.message||'Reload the latest note and try again.');}
+    finally{setLiveverseBusy(false);}
+  };
+  const createLiveverseTask=async()=>{
+    if(!liveverseSelected||!session?.user?.id||!liveverseTaskDraft.trim())return;
+    setLiveverseBusy(true);
+    try{const task=await liveverseClient.createTask({spaceId:liveverseSelected.id,userId:session.user.id,title:liveverseTaskDraft});setLiveverseTasks([task,...liveverseTasks]);setLiveverseTaskDraft('');}
+    catch(error:any){Alert.alert('Task not created',error?.message||'Please try again.');}
+    finally{setLiveverseBusy(false);}
+  };
+  const removeLiveverseTask=async(task:any)=>{
+    Alert.alert('Delete task?','This removes the task for all space members.',[
+      {text:'Cancel',style:'cancel'},
+      {text:'Delete',style:'destructive',onPress:async()=>{
+        try{await liveverseClient.deleteTask(task.space_id,task.id);setLiveverseTasks(items=>items.filter(x=>x.id!==task.id));}
+        catch(error:any){Alert.alert('Task not deleted',error?.message||'Please try again.');}
+      }}
+    ]);
+  };
+  const removeLiveverseMedia=async(item:any)=>{
+    Alert.alert('Remove shared media?','This deletes the item from the space gallery.',[
+      {text:'Cancel',style:'cancel'},
+      {text:'Remove',style:'destructive',onPress:async()=>{
+        try{await liveverseClient.deleteMedia(item.id,item.space_id,item.object_path);setLiveverseMedia(items=>items.filter(x=>x.id!==item.id));}
+        catch(error:any){Alert.alert('Media not removed',error?.message||'Please try again.');}
+      }}
+    ]);
+  };
+  const toggleLiveverseTask=async(task:any)=>{
+    try{const updated=await liveverseClient.updateTask({taskId:task.id,spaceId:task.space_id,userId:session.user.id,patch:{status:task.status==='completed'?'open':'completed'}});setLiveverseTasks(items=>items.map(x=>x.id===updated.id?updated:x));}
+    catch(error:any){Alert.alert('Task not updated',error?.message||'Please try again.');}
+  };
+  const uploadLiveverseMedia=async()=>{
+    if(!liveverseSelected||!session?.user?.id)return;
+    const permission=await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if(!permission.granted){Alert.alert('Permission needed','Allow media access to share with this space.');return;}
+    const result=await ImagePicker.launchImageLibraryAsync({mediaTypes:['images','videos'],allowsEditing:false,quality:0.85,videoMaxDuration:90});
+    if(result.canceled||!result.assets?.[0])return;
+    const asset=result.assets[0];setLiveverseBusy(true);
+    try{
+      const file=new File(asset.uri),mime=asset.mimeType||(asset.type==='video'?'video/mp4':'image/jpeg');
+      const media=await liveverseClient.uploadMedia({spaceId:liveverseSelected.id,userId:session.user.id,uri:asset.uri,fileName:asset.fileName||'shared-media',mimeType:mime,bytes:file.size||0,mediaType:asset.type==='video'?'video':'image',body:new Blob([await file.arrayBuffer()],{type:mime})});
+      const {data,error}=await supabase.storage.from('liveverse-media').createSignedUrl(media.object_path,300);if(error)throw error;
+      setLiveverseMedia(items=>[{...media,url:data.signedUrl},...items]);
+    }catch(error:any){Alert.alert('Media upload failed',error?.message||'Please try again.');}
+    finally{setLiveverseBusy(false);}
+  };
+  const removeLiveverseMember=(member:any)=>{
+    if(!liveverseSelected||liveverseSelected.owner_id!==session?.user?.id||member.user_id===session.user.id)return;
+    Alert.alert('Remove member?','This person will lose access to this Liveverse space.',[
+      {text:'Cancel',style:'cancel'},
+      {text:'Remove',style:'destructive',onPress:async()=>{
+        try{await liveverseClient.removeMember(liveverseSelected.id,member.user_id);setLiveverseMembers(items=>items.filter(x=>x.user_id!==member.user_id));}
+        catch(error:any){Alert.alert('Member not removed',error?.message||'Check owner permissions and try again.');}
+      }}
+    ]);
+  };
+  const joinLiveverseVoiceRoom=async()=>{
+    if(!liveverseSelected)return;
+    setLiveverseBusy(true);setLiveverseVoiceConnected(false);
+    try{
+      if(Platform.OS!=='web'){
+        const permission=await Audio.requestPermissionsAsync();
+        if(!permission.granted)throw new Error('Microphone permission is required to join the voice room.');
+      }
+      const {data,error}=await supabase.functions.invoke('liveverse-livekit-token',{body:{space_id:liveverseSelected.id}});
+      if(error)throw error;
+      if(!data?.server_url||!data?.participant_token)throw new Error(data?.error||'The Liveverse voice service is not configured.');
+      await startGuftinCallAudioSession();
+      setLiveverseVoiceSession({serverUrl:data.server_url,token:data.participant_token});
+    }catch(error:any){await stopGuftinCallAudioSession();Alert.alert('Voice room unavailable',error?.message||'Check microphone permission, Liveverse deployment and LiveKit settings.');}
+    finally{setLiveverseBusy(false);}
+  };
+  const inviteLiveverseChatMembers=async()=>{
+    if(!liveverseSelected||liveverseSelected.owner_id!==session?.user?.id){Alert.alert('Owner access required','Only the space owner can invite members.');return;}
+    if(!liveverseSelected.source_chat_id){Alert.alert('No linked chat','This space was not created from a chat.');return;}
+    try{
+      const {data,error}=await supabase.from('kc_conversation_members').select('user_id').eq('conversation_id',liveverseSelected.source_chat_id);
+      if(error)throw error;
+      const ids=[...new Set((data||[]).map((x:any)=>x.user_id).filter((id:string)=>id&&id!==session.user.id))];
+      for(const id of ids)await liveverseClient.inviteMember(liveverseSelected.id,id);
+      setLiveverseMembers(await liveverseClient.listMembers(liveverseSelected.id));
+      if(active?.id===liveverseSelected.source_chat_id){
+        await sendMessage(LIVEVERSE_INVITE_PREFIX+JSON.stringify({space_id:liveverseSelected.id,name:liveverseSelected.name,creator:profile?.display_name||profile?.username||'A Guftin friend'}));
+      }
+      Alert.alert('Invitations sent',ids.length+' linked chat member(s) have been added and the invitation card was posted in the chat.');
+    }catch(error:any){Alert.alert('Could not invite members',error?.message||'Please try again.');}
+  };
+  useEffect(()=>{
+    if(tab!=='Liveverse'||liveverseView!=='room'||!liveverseSelected?.id||!session?.user?.id)return;
+    let active=true;let channel:any=null;
+    const refresh=async()=>{
+      try{
+        const [notes,tasks,media,canvas,members]=await Promise.all([liveverseClient.listNotes(liveverseSelected.id),liveverseClient.listTasks(liveverseSelected.id),liveverseClient.listMedia(liveverseSelected.id),liveverseClient.loadCanvas(liveverseSelected.id),liveverseClient.listMembers(liveverseSelected.id)]);
+        if(!active)return;setLiveverseNotes(notes);setLiveverseTasks(tasks);setLiveverseMedia(media);setLiveverseMembers(members);if(canvas?.document){setLiveverseCanvasDraft(JSON.stringify(canvas.document,null,2));if(Array.isArray(canvas.document.strokes)){liveverseCanvasStrokesRef.current=canvas.document.strokes;setLiveverseCanvasStrokes(canvas.document.strokes);}}
+      }catch(error:any){if(active)console.warn('Liveverse refresh failed:',error?.message||error);}
+    };
+    void liveverseClient.createSpaceChannel(liveverseSelected.id,session.user.id,()=>{void refresh();},state=>{if(active)setLiveversePresence(Object.values(state).flat() as any[]);},pointer=>{
+      if(!active||pointer?.user_id===session.user.id||!Number.isFinite(pointer?.x)||!Number.isFinite(pointer?.y))return;
+      const point={user_id:String(pointer.user_id),display_name:String(pointer.display_name||'Guftin member').slice(0,60),x:Math.max(0,Math.min(1,pointer.x)),y:Math.max(0,Math.min(1,pointer.y)),sent_at:Number(pointer.sent_at)||Date.now()};
+      setLiveversePointers(items=>[...items.filter(item=>item.user_id!==point.user_id),point]);
+      setTimeout(()=>{if(active)setLiveversePointers(items=>items.filter(item=>item.user_id!==point.user_id||Date.now()-item.sent_at<2500));},2600);
+    })
+      .then(async joined=>{if(!active){await supabase.removeChannel(joined);return;}channel=joined;liveverseChannelRef.current=joined;await liveverseClient.trackPresence(joined,session.user.id,profile?.display_name||profile?.username||'Guftin member');})
+      .catch((error:any)=>{if(active)console.warn('Liveverse realtime unavailable:',error?.message||error);});
+    return ()=>{active=false;liveverseChannelRef.current=null;setLiveversePresence([]);setLiveversePointers([]);if(channel)void supabase.removeChannel(channel);};
+  },[tab,liveverseView,liveverseSelected?.id,session?.user?.id,liveverseClient,profile?.display_name,profile?.username]);
+  const persistLiveverseCanvas=async(strokes:any[]=liveverseCanvasStrokesRef.current)=>{
+    if(!liveverseSelected||!session?.user?.id)return;
+    try{
+      const current=await liveverseClient.loadCanvas(liveverseSelected.id);
+      const saved=await liveverseClient.saveCanvas(liveverseSelected.id,session.user.id,{kind:'liveverse-canvas',strokes:strokes.slice(-500)},current?.version||0);
+      liveverseCanvasVersionRef.current=saved.version;
+    }catch(error:any){Alert.alert('Canvas sync conflict',error?.message||'Reload the shared canvas before drawing again.');}
+  };
+  const clearLiveverseCanvas=async()=>{
+    liveverseCanvasStrokesRef.current=[];setLiveverseCanvasStrokes([]);
+    await persistLiveverseCanvas([]);
+  };
+  const broadcastLiveversePointer=(x:number,y:number)=>{
+    const channel=liveverseChannelRef.current;
+    if(!channel||!session?.user?.id)return;
+    const now=Date.now();if(now-liveverseLastPointerSentRef.current<120)return;
+    liveverseLastPointerSentRef.current=now;
+    void liveverseClient.broadcastPointer(channel,{userId:session.user.id,displayName:profile?.display_name||profile?.username||'Guftin member',x:Math.max(0,Math.min(1,x/300)),y:Math.max(0,Math.min(1,y/200))}).catch((error:any)=>console.warn('Liveverse pointer broadcast failed:',error?.message||error));
+  };
+  const liveverseCanvasPanResponder=useMemo(()=>PanResponder.create({
+    onStartShouldSetPanResponder:()=>true,
+    onMoveShouldSetPanResponder:()=>true,
+    onPanResponderGrant:(event:any)=>{
+      const x=Math.max(0,Math.min(300,event.nativeEvent.locationX*300/liveverseCanvasWidth));
+      const y=Math.max(0,Math.min(200,event.nativeEvent.locationY));
+      broadcastLiveversePointer(x,y);
+      const d='M '+x.toFixed(1)+' '+y.toFixed(1);
+      liveverseCurrentStrokeRef.current=d;
+      const next=[...liveverseCanvasStrokesRef.current,{d,color:liveverseCanvasColor}];
+      liveverseCanvasStrokesRef.current=next;setLiveverseCanvasStrokes(next);
+    },
+    onPanResponderMove:(event:any)=>{
+      if(!liveverseCurrentStrokeRef.current)return;
+      const x=Math.max(0,Math.min(300,event.nativeEvent.locationX*300/liveverseCanvasWidth));
+      const y=Math.max(0,Math.min(200,event.nativeEvent.locationY));
+      broadcastLiveversePointer(x,y);
+      liveverseCurrentStrokeRef.current+=' L '+x.toFixed(1)+' '+y.toFixed(1);
+      const next=liveverseCanvasStrokesRef.current.slice();
+      if(next.length)next[next.length-1]={...next[next.length-1],d:liveverseCurrentStrokeRef.current};
+      liveverseCanvasStrokesRef.current=next;setLiveverseCanvasStrokes(next);
+    },
+    onPanResponderRelease:()=>{liveverseCurrentStrokeRef.current='';void persistLiveverseCanvas();},
+    onPanResponderTerminate:()=>{liveverseCurrentStrokeRef.current='';void persistLiveverseCanvas();}
+  }),[liveverseCanvasWidth,liveverseCanvasColor,liveverseSelected?.id,session?.user?.id,liveverseClient,profile?.display_name,profile?.username]);
+  const saveLiveverseCanvas=async()=>{
+    if(!liveverseSelected||!session?.user?.id)return;
+    try{
+      const current=await liveverseClient.loadCanvas(liveverseSelected.id);
+      const document={kind:'liveverse-canvas-draft',content:liveverseCanvasDraft.slice(0,20000)};
+      await liveverseClient.saveCanvas(liveverseSelected.id,session.user.id,document,current?.version||0);
+      Alert.alert('Canvas state saved','The current canvas document was saved. A drawing surface is still pending.');
+    }catch(error:any){Alert.alert('Canvas not saved',error?.message||'Please reload the current version.');}
+  };
+
+  const pageTitle=tab==='Chats'?'Guftin':tab==='HoloSpace'?'HoloSpace':tab==='Liveverse'?'Liveverse':tab==='Magic Moments'?'Magic Moments':tab==='AI'?'Karaboz AI':tab==='Updates'?'Updates':tab==='Channels'?'Channels':tab==='Hub'?'Business & Communities':tab==='Calls'?'Calls':'You';
   const totalUnread=chats.reduce((sum:any,item:any)=>sum+(Number(item.unread)||0),0);
 
   if(authRestoring){
@@ -5286,6 +5705,8 @@ function GuftinApp() {
           <View style={{flexDirection:'row',alignItems:'center',gap:5}}><Text numberOfLines={1} style={{fontWeight:'900',fontSize:16,color:'#fff'}}>{active.name}</Text>{active.isVerified?<VerifiedBadge label={active.isOfficial?'Verified Guftin Official account':'Verified channel'}/>:null}</View>
           <Text style={{fontSize:11,color:'#e4fff1',marginTop:2}}>{active.kind==='channel'?(active.isOfficial?'Official Guftin announcements':active.isChannelOwner?'Your channel · publish updates':'Channel · read-only'):active.kind==='group'?'Tap for group info':outgoingCall?'Calling…':active.online?'● online':'Tap for contact info'}</Text>
         </Btn>
+        {active.kind!=='channel'?<Btn onPress={()=>{setLiveverseSourceChat({id:active.id,kind:active.kind,name:active.name});setLiveverseName(active.name+' Liveverse');setLiveverseView('create');setTab('Liveverse');}} style={{backgroundColor:'#ffffff20',borderRadius:22,width:43,height:48,alignItems:'center',justifyContent:'center',marginRight:3}}><Text style={{fontSize:18,color:'#fff',fontWeight:'900'}}>◉</Text><Text style={{fontSize:8,color:'#fff',fontWeight:'900'}}>LIVE</Text></Btn>:null}
+        {active.kind!=='channel'?<Btn onPress={()=>{setMagicView('create');setMagicKind('birthday');setTab('Magic Moments');}} style={{backgroundColor:'#ffffff20',borderRadius:22,width:43,height:48,alignItems:'center',justifyContent:'center',marginRight:3}}><Text style={{fontSize:18,color:'#fff',fontWeight:'900'}}>✧</Text><Text style={{fontSize:8,color:'#fff',fontWeight:'900'}}>MAGIC</Text></Btn>:null}
         {active.kind!=='channel'?<Btn onPress={()=>{setHoloSourceChat({id:active.id,kind:active.kind,name:active.name});setHoloName(active.name+' Space');setHoloView('create');setTab('HoloSpace');}} style={{backgroundColor:'#ffffff20',borderRadius:22,width:43,height:48,alignItems:'center',justifyContent:'center',marginRight:3}}><Text style={{fontSize:20,color:'#fff',fontWeight:'900'}}>◎</Text><Text style={{fontSize:8,color:'#fff',fontWeight:'900'}}>SPACE</Text></Btn>:null}
         {active.kind!=='channel'?(outgoingCall?<Btn onPress={()=>void endCall(outgoingCall.id)} style={{backgroundColor:'#fde8e8',borderRadius:15,width:62,height:58,alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:'#f3c6c6'}}><Text style={{fontSize:11,fontWeight:'900',color:C.red}}>Cancel</Text><Text style={{fontSize:9,color:C.red}}>call</Text></Btn>:<>
           <Btn disabled={callBusy} onPress={()=>void startCall('voice')} style={{backgroundColor:'#087b4c',borderRadius:28,width:48,height:48,alignItems:'center',justifyContent:'center',opacity:callBusy?0.5:1,borderWidth:1,borderColor:'#42bf83'}}><Text style={{fontSize:20,color:C.green}}>☎</Text><Text style={{fontSize:10,fontWeight:'900',color:C.green}}>{active.kind==='group'?'Group call':'Call'}</Text></Btn>
@@ -5302,7 +5723,17 @@ function GuftinApp() {
         ListHeaderComponent={active.kind==='group'&&(groupPolls.length>0||groupEvents.length>0||groupCollabLoading)?<View style={{gap:10,marginBottom:10}}>{groupCollabLoading?<GuftinLoader color={C.green}/>:null}{groupPolls.map(poll=><View key={poll.id} style={{backgroundColor:C.white,borderWidth:1,borderColor:C.line,borderRadius:15,padding:13}}><Text style={{fontSize:13,fontWeight:'900',color:C.ink}}>{poll.question}</Text><Text style={{fontSize:10,color:C.muted,marginTop:3}}>{poll.allows_multiple?'Multiple choices allowed':'Choose one option'} · {poll.kc_poll_votes?.length||0} votes</Text>{poll.options.map((option:any)=><Btn key={option.id} disabled={!!poll.closed_at||poll.myVoteOptionIds.includes(option.id)||!!poll.myVoteOptionIds.length&&!poll.allows_multiple} onPress={()=>void voteInGroupPoll(poll.id,option.id)} style={{backgroundColor:poll.myVoteOptionIds.includes(option.id)?C.mint:C.paper,borderRadius:10,padding:10,marginTop:7,alignItems:'flex-start'}}><Text style={{color:C.ink,fontSize:12,fontWeight:'800'}}>{option.label}　·　{option.voteCount}</Text></Btn>)}{poll.closed_at?<Text style={{fontSize:10,color:C.muted,marginTop:7}}>Poll closed</Text>:poll.creator_id===session?.user?.id?<Btn onPress={()=>Alert.alert('Close this poll?','Members will no longer be able to vote.',[{text:'Keep open',style:'cancel'},{text:'Close poll',style:'destructive',onPress:()=>void (async()=>{try{await upgrade20.closePoll(poll.id);await loadGroupPolls(active.id);}catch(error:any){Alert.alert('Poll not closed',error?.message||'Please try again.');}})()}])} style={{alignSelf:'flex-end',padding:7,marginTop:7}}><Text style={{fontSize:10,color:C.red,fontWeight:'900'}}>Close poll</Text></Btn>:null}</View>)}{groupEvents.map(event=><View key={event.id} style={{backgroundColor:C.white,borderWidth:1,borderColor:C.line,borderRadius:15,padding:13}}><Text style={{fontSize:13,fontWeight:'900',color:C.ink}}>{event.title}</Text><Text style={{fontSize:10,color:C.muted,marginTop:4}}>{new Date(event.starts_at).toLocaleString()} · Reminder {event.reminder_minutes} min before</Text>{event.details?<Text style={{fontSize:12,color:C.ink,marginTop:7}}>{event.details}</Text>:null}<Text style={{fontSize:10,color:C.muted,marginTop:7}}>{(event.kc_group_event_rsvps||[]).filter((r:any)=>r.response==='going').length} going · {(event.kc_group_event_rsvps||[]).filter((r:any)=>r.response==='maybe').length} maybe</Text><View style={{flexDirection:'row',gap:6,marginTop:9}}>{(['going','maybe','not_going'] as const).map(response=><Btn key={response} onPress={()=>void respondToGroupEvent(event.id,response)} style={{flex:1,padding:8,borderRadius:9,backgroundColor:(event.kc_group_event_rsvps||[]).some((r:any)=>r.user_id===session?.user?.id&&r.response===response)?C.mint:C.paper,alignItems:'center'}}><Text style={{fontSize:10,color:C.green,fontWeight:'900'}}>{response==='going'?'Going':response==='maybe'?'Maybe':'No'}</Text></Btn>)}</View>{event.creator_id===session?.user?.id?<Btn onPress={()=>cancelGroupEvent(event.id)} style={{marginTop:7,padding:7,alignSelf:'flex-end'}}><Text style={{fontSize:10,color:C.red,fontWeight:'900'}}>Cancel event</Text></Btn>:null}</View>)}</View>:null}
         ListEmptyComponent={<Text style={{textAlign:'center',color:C.muted}}>No messages yet. Send the first message.</Text>}
         renderItem={({item})=><TouchableOpacity activeOpacity={1} onLongPress={active.kind==='channel'&&!active.isChannelOwner?undefined:()=>deleteMessage(item)} delayLongPress={420} style={{alignSelf:item.mine?'flex-end':'flex-start',maxWidth:'86%',backgroundColor:item.mine?'#d2f8bd':'#fff',paddingHorizontal:16,paddingVertical:13,borderRadius:23,borderBottomRightRadius:item.mine?6:23,borderTopLeftRadius:item.mine?23:6,borderWidth:1,borderColor:item.mine?'#b7e9a2':'#eeeae3',elevation:2,shadowColor:'#8c806c',shadowOpacity:.10,shadowRadius:4,shadowOffset:{width:0,height:2}}}>
-          {item.deleted_at?<Text style={{fontSize:12,color:C.muted,fontStyle:'italic'}}>This message was deleted</Text>:item.body?.startsWith(HOLOSPACE_INVITE_PREFIX)?<View style={{minWidth:220,maxWidth:260,backgroundColor:C.paper,borderRadius:13,padding:12}}>
+          {item.deleted_at?<Text style={{fontSize:12,color:C.muted,fontStyle:'italic'}}>This message was deleted</Text>:item.body?.startsWith(MAGIC_MOMENT_INVITE_PREFIX)?<View style={{minWidth:220,maxWidth:260,backgroundColor:'#251548',borderRadius:13,padding:12}}><Text style={{fontSize:10,color:'#e2c98a',fontWeight:'900',letterSpacing:1}}>GUFTIN MAGIC MOMENTS</Text><Text style={{fontSize:16,color:'#fff',fontWeight:'900',marginTop:5}}>A special moment is waiting</Text><Text style={{fontSize:10,color:'#ded4f4',marginTop:4}}>Open the invitation to view or contribute. Private surprises stay sealed until reveal.</Text><Btn onPress={()=>void (async()=>{try{const data=JSON.parse((item.body||'').slice(MAGIC_MOMENT_INVITE_PREFIX.length));await openMagicMoment({id:data.moment_id});setTab('Magic Moments');}catch(error:any){Alert.alert('Could not open moment',error?.message||'Please try again.');}})()} style={{backgroundColor:'#9471d8',padding:10,borderRadius:9,alignItems:'center',marginTop:9}}><Text style={{color:'#fff',fontWeight:'900'}}>Open Magic Moment</Text></Btn></View>:item.body?.startsWith(LIVEVERSE_INVITE_PREFIX)?<View style={{minWidth:220,maxWidth:260,backgroundColor:'#17163d',borderRadius:13,padding:12}}>
+            <Text style={{fontSize:10,color:'#c2b8ff',fontWeight:'900',letterSpacing:1}}>GUFTIN LIVEVERSE</Text>
+            <Text style={{fontSize:16,color:'#fff',fontWeight:'900',marginTop:5}}>{(()=>{try{return JSON.parse((item.body||'').slice(LIVEVERSE_INVITE_PREFIX.length)).name||'Shared space';}catch{return 'Shared space';}})()}</Text>
+            <Text style={{fontSize:10,color:'#d1cdef',marginTop:4}}>Collaborate with your Guftin chat members</Text>
+            <Btn onPress={()=>void (async()=>{try{const data=JSON.parse((item.body||'').slice(LIVEVERSE_INVITE_PREFIX.length));const spaces=await liveverseClient.listSpaces();const room=spaces.find((x:any)=>x.id===data.space_id);if(!room)throw new Error('You do not have access to this space yet.');setLiveverseSpaces(spaces);setLiveverseSelected(room);await openLiveverseSpace(room);setTab('Liveverse');}catch(error:any){Alert.alert('Could not open Liveverse',error?.message||'Please try again.');}})()} style={{backgroundColor:'#7764e8',padding:10,borderRadius:9,alignItems:'center',marginTop:9}}><Text style={{color:'#fff',fontWeight:'900'}}>Open Liveverse</Text></Btn>
+          </View>:item.body?.startsWith(HOLOSPACE_INVITE_PREFIX)?<View style={{minWidth:220,maxWidth:260,backgroundColor:C.paper,borderRadius:13,padding:12}}>
+            <Text style={{fontSize:10,color:C.green,fontWeight:'900',letterSpacing:1}}>GUFTIN HOLOSPACE</Text>
+            <Text style={{fontSize:16,color:C.ink,fontWeight:'900',marginTop:5}}>{(()=>{try{return JSON.parse((item.body||'').slice(HOLOSPACE_INVITE_PREFIX.length)).name||'Shared room';}catch{return 'Shared room';}})()}</Text>
+            <Text style={{fontSize:10,color:C.muted,marginTop:4}}>A private room invitation from a Guftin chat</Text>
+            <Btn onPress={()=>void (async()=>{try{const data=JSON.parse((item.body||'').slice(HOLOSPACE_INVITE_PREFIX.length));await holoClient.acceptInvitation(data.room_id);await loadHoloSpaces();setTab('HoloSpace');setHoloView('mine');Alert.alert('Joined HoloSpace','The room is now in your spaces.');}catch(error:any){Alert.alert('Could not join room',error?.message||'This invitation may already be used or expired.');}})()} style={{backgroundColor:C.green,padding:10,borderRadius:9,alignItems:'center',marginTop:9}}><Text style={{color:'#fff',fontWeight:'900'}}>Join HoloSpace</Text></Btn>
+          </View>:item.body?.startsWith(HOLOSPACE_INVITE_PREFIX)?<View style={{minWidth:220,maxWidth:260,backgroundColor:C.paper,borderRadius:13,padding:12}}>
             <Text style={{fontSize:10,color:C.green,fontWeight:'900',letterSpacing:1}}>GUFTIN HOLOSPACE</Text>
             <Text style={{fontSize:16,color:C.ink,fontWeight:'900',marginTop:5}}>{(()=>{try{return JSON.parse((item.body||'').slice(HOLOSPACE_INVITE_PREFIX.length)).name||'Shared room';}catch{return 'Shared room';}})()}</Text>
             <Text style={{fontSize:10,color:C.muted,marginTop:4}}>A private room invitation from a Guftin chat</Text>
@@ -5704,6 +6135,177 @@ function GuftinApp() {
       </View>
       <Text style={{fontSize:9,color:C.muted,textAlign:'center',marginTop:6}}>AI can make mistakes. Review suggested messages before sending.</Text>
     </View>:null}
+    {tab==='Liveverse'?<ScrollView contentContainerStyle={{padding:16,paddingBottom:30}}>
+      <View style={{backgroundColor:'#14163d',borderRadius:20,padding:18,marginBottom:14}}>
+        <Text style={{fontSize:10,color:'#b7a9ff',fontWeight:'900',letterSpacing:2}}>GUFTIN COLLABORATION</Text>
+        <Text style={{fontSize:23,color:'#fff',fontWeight:'900',marginTop:6}}>Liveverse</Text>
+        <Text style={{fontSize:12,color:'#d7d5f0',marginTop:5}}>One Chat. One Space. Infinite Possibilities.</Text>
+        <Btn onPress={()=>setLiveverseView('create')} style={{backgroundColor:'#7764e8',padding:12,borderRadius:12,alignItems:'center',marginTop:14}}><Text style={{color:'#fff',fontWeight:'900'}}>＋ Create shared space</Text></Btn>
+      </View>
+      {liveverseView==='create'?<View style={{backgroundColor:C.white,borderRadius:16,padding:14,borderWidth:1,borderColor:C.line,marginBottom:12}}>
+        <Text style={{fontSize:16,color:C.ink,fontWeight:'900'}}>Create Liveverse space</Text>
+        {liveverseSourceChat?<Text style={{fontSize:10,color:C.green,fontWeight:'800',marginTop:6}}>Linked to {liveverseSourceChat.name}</Text>:null}
+        <TextInput value={liveverseName} onChangeText={setLiveverseName} placeholder="Space name" maxLength={80} style={{backgroundColor:C.paper,padding:11,borderRadius:10,color:C.ink,marginTop:9}}/>
+        <TextInput value={liveverseDescription} onChangeText={setLiveverseDescription} placeholder="Description (optional)" maxLength={500} style={{backgroundColor:C.paper,padding:11,borderRadius:10,color:C.ink,marginTop:7}}/>
+        <Btn disabled={liveverseBusy||!liveverseName.trim()} onPress={()=>void createLiveverseSpace()} style={{backgroundColor:C.green,padding:11,borderRadius:10,alignItems:'center',marginTop:9}}><Text style={{color:'#fff',fontWeight:'900'}}>Create space</Text></Btn>
+      </View>:null}
+      {liveverseView==='room'&&liveverseSelected?<View style={{backgroundColor:C.white,borderRadius:16,padding:14,borderWidth:1,borderColor:C.line}}>
+        <Btn onPress={()=>setLiveverseView('home')} style={{alignSelf:'flex-start',padding:7,backgroundColor:C.paper,borderRadius:8}}><Text style={{color:C.green,fontWeight:'900'}}>‹ All spaces</Text></Btn>
+        <Text style={{fontSize:19,fontWeight:'900',color:C.ink,marginTop:10}}>{liveverseSelected.name}</Text>
+        <Text style={{fontSize:11,color:C.muted,marginTop:4}}>{liveverseSelected.scope} · Shared workspace</Text>
+        <Btn disabled={liveverseBusy} onPress={()=>void joinLiveverseVoiceRoom()} style={{backgroundColor:'#17105c',padding:11,borderRadius:10,alignItems:'center',marginTop:9}}><Text style={{color:'#fff',fontWeight:'900'}}>Join real-time voice room</Text></Btn>
+        <Text style={{fontSize:10,color:C.muted,marginTop:5}}>{liveversePresence.length} participant(s) currently online</Text>
+        {liveverseSelected.owner_id===session?.user?.id?<Btn onPress={()=>void inviteLiveverseChatMembers()} style={{backgroundColor:C.green,padding:9,borderRadius:9,alignSelf:'flex-start',marginTop:7}}><Text style={{color:'#fff',fontSize:10,fontWeight:'900'}}>Invite linked chat members</Text></Btn>:null}
+        <View style={{marginTop:12,padding:11,backgroundColor:C.paper,borderRadius:12}}>
+          <Text style={{fontSize:12,color:C.ink,fontWeight:'900'}}>Members · {liveverseMembers.length}</Text>
+          {liveverseMembers.map((member:any)=><View key={member.user_id} style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingVertical:6,borderBottomWidth:1,borderColor:C.line}}>
+            <View style={{flex:1}}><Text style={{fontSize:10,color:C.ink,fontWeight:'800'}}>{member.user_id===session?.user?.id?'You':member.user_id.slice(0,8)+'…'} · {member.role}</Text><Text style={{fontSize:9,color:C.muted}}>{timeLabel(member.joined_at)}</Text></View>
+            {liveverseSelected.owner_id===session?.user?.id&&member.user_id!==session.user.id?<Btn onPress={()=>removeLiveverseMember(member)} style={{padding:6,borderRadius:7,backgroundColor:C.white}}><Text style={{fontSize:9,color:C.red,fontWeight:'900'}}>Remove</Text></Btn>:null}
+          </View>)}
+        </View>
+        <View style={{flexDirection:'row',flexWrap:'wrap',gap:6,marginTop:12}}>
+          {(['notes','tasks','media','canvas'] as const).map(key=><Btn key={key} onPress={()=>setLiveverseRoomTab(key)} style={{padding:9,borderRadius:9,backgroundColor:liveverseRoomTab===key?'#7764e8':C.paper}}><Text style={{fontSize:10,fontWeight:'900',color:liveverseRoomTab===key?'#fff':C.ink}}>{key.toUpperCase()}</Text></Btn>)}
+        </View>
+        {liveverseRoomTab==='notes'?<View style={{marginTop:13}}>
+          <TextInput value={liveverseNoteTitle} onChangeText={setLiveverseNoteTitle} placeholder="Note title" maxLength={120} style={{backgroundColor:C.paper,padding:10,borderRadius:9,color:C.ink}}/>
+          <TextInput value={liveverseNoteDraft} onChangeText={setLiveverseNoteDraft} placeholder="Write shared notes…" multiline style={{backgroundColor:C.paper,padding:12,borderRadius:10,color:C.ink,minHeight:150,textAlignVertical:'top',marginTop:8}}/>
+          <Btn disabled={liveverseBusy||!liveverseNoteDraft.trim()} onPress={()=>void saveLiveverseNote()} style={{backgroundColor:C.green,padding:11,borderRadius:10,alignItems:'center',marginTop:8}}><Text style={{color:'#fff',fontWeight:'900'}}>Save shared notes</Text></Btn>
+          <Text style={{fontSize:10,color:C.muted,marginTop:8}}>Versioned saves prevent stale edits from silently overwriting newer notes.</Text>
+        </View>:null}
+        {liveverseRoomTab==='tasks'?<View style={{marginTop:13}}>
+          <TextInput value={liveverseTaskDraft} onChangeText={setLiveverseTaskDraft} placeholder="New shared task" maxLength={240} style={{backgroundColor:C.paper,padding:10,borderRadius:9,color:C.ink}}/>
+          <Btn disabled={liveverseBusy||!liveverseTaskDraft.trim()} onPress={()=>void createLiveverseTask()} style={{backgroundColor:C.green,padding:10,borderRadius:9,alignItems:'center',marginTop:7}}><Text style={{color:'#fff',fontWeight:'900'}}>＋ Add task</Text></Btn>
+          {liveverseTasks.map(task=><View key={task.id} style={{padding:10,borderBottomWidth:1,borderColor:C.line,flexDirection:'row',alignItems:'center'}}>
+            <Btn onPress={()=>void toggleLiveverseTask(task)} style={{flex:1,alignItems:'stretch',backgroundColor:'transparent',padding:0}}><Text style={{color:task.status==='completed'?C.muted:C.ink,textDecorationLine:task.status==='completed'?'line-through':'none',fontWeight:'800'}}>{task.status==='completed'?'✓':'○'} {task.title}</Text><Text style={{fontSize:9,color:C.muted,marginTop:3}}>Tap to {task.status==='completed'?'reopen':'complete'}</Text></Btn>
+            <Btn onPress={()=>void removeLiveverseTask(task)} style={{padding:7,backgroundColor:C.paper,borderRadius:8}}><Text style={{fontSize:9,color:C.red,fontWeight:'900'}}>Delete</Text></Btn>
+          </View>)}
+        </View>:null}
+        {liveverseRoomTab==='media'?<View style={{marginTop:13}}>
+          <Btn disabled={liveverseBusy} onPress={()=>void uploadLiveverseMedia()} style={{backgroundColor:C.green,padding:11,borderRadius:10,alignItems:'center'}}><Text style={{color:'#fff',fontWeight:'900'}}>＋ Upload image/video</Text></Btn>
+          {liveverseMedia.map(item=><View key={item.id} style={{marginTop:10,backgroundColor:C.paper,padding:8,borderRadius:12}}>{item.media_type==='image'?<Image source={{uri:item.url}} style={{width:'100%',height:170,borderRadius:12}} resizeMode="cover"/>:<VideoBubble uri={item.url}/>}<Btn onPress={()=>void removeLiveverseMedia(item)} style={{alignSelf:'flex-start',padding:6,backgroundColor:C.paper,marginTop:5}}><Text style={{fontSize:10,color:C.red,fontWeight:'900'}}>Remove media</Text></Btn></View>)}
+        </View>:null}
+        {liveverseRoomTab==='canvas'?<View style={{marginTop:13}}>
+          <Text style={{fontSize:11,color:C.muted}}>Draw together. Strokes are saved after each completed stroke and shared through the room's Realtime channel.</Text>
+          <View onLayout={event=>setLiveverseCanvasWidth(Math.max(1,event.nativeEvent.layout.width))} style={{height:200,backgroundColor:'#fff',borderRadius:12,overflow:'hidden',marginTop:9,borderWidth:1,borderColor:C.line}} {...liveverseCanvasPanResponder.panHandlers}>
+            <Svg width="100%" height="200" viewBox="0 0 300 200">
+              {liveverseCanvasStrokes.map((stroke:any,index:number)=><Path key={index} d={stroke.d} stroke={stroke.color||'#19223d'} strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" fill="none"/>)}
+            </Svg>
+            {liveversePointers.map((pointer:any)=><View key={pointer.user_id} pointerEvents="none" style={{position:'absolute',left:pointer.x*liveverseCanvasWidth,top:pointer.y*200,transform:[{translateX:-3},{translateY:-3}],zIndex:5}}>
+              <View style={{width:9,height:9,borderRadius:5,backgroundColor:'#e14d5a',borderWidth:1,borderColor:'#fff'}}/>
+              <Text numberOfLines={1} style={{maxWidth:110,backgroundColor:'#17105c',color:'#fff',fontSize:9,fontWeight:'800',paddingHorizontal:5,paddingVertical:2,borderRadius:5,marginTop:2}}>{pointer.display_name}</Text>
+            </View>)}
+          </View>
+          <View style={{flexDirection:'row',flexWrap:'wrap',gap:7,marginTop:9,alignItems:'center'}}>
+            {['#19223d','#e14d5a','#2476d2','#16845d','#d99b24','#ffffff'].map(color=><Btn key={color} onPress={()=>setLiveverseCanvasColor(color)} style={{width:30,height:30,borderRadius:15,backgroundColor:color,borderWidth:2,borderColor:liveverseCanvasColor===color?C.green:C.line}}/>)}
+            <Btn onPress={()=>void clearLiveverseCanvas()} style={{padding:9,borderRadius:9,backgroundColor:C.paper}}><Text style={{fontSize:10,color:C.red,fontWeight:'900'}}>Clear</Text></Btn>
+          </View>
+        </View>:null}
+      </View>:null}
+      {liveverseView==='home'?<View>
+        <Text style={{fontSize:16,fontWeight:'900',color:C.ink,marginBottom:9}}>Your shared spaces</Text>
+        {liveverseBusy&&liveverseSpaces.length===0?<GuftinLoader color={C.green}/>:liveverseSpaces.length===0?<Text style={{textAlign:'center',color:C.muted,padding:24}}>No Liveverse spaces yet. Create one to begin collaborating.</Text>:liveverseSpaces.map(space=><Btn key={space.id} onPress={()=>void openLiveverseSpace(space)} style={{backgroundColor:C.white,borderRadius:14,padding:13,marginBottom:8,alignItems:'stretch',borderWidth:1,borderColor:C.line}}><Text style={{color:C.ink,fontWeight:'900'}}>{space.name}</Text><Text style={{fontSize:11,color:C.muted,marginTop:4}}>{space.description||'Shared collaboration space'}</Text><Text style={{fontSize:10,color:C.green,fontWeight:'900',marginTop:7}}>Open workspace ›</Text></Btn>)}
+      </View>:null}
+      {liveverseBusy&&liveverseView==='room'?<GuftinLoader color={C.green}/>:null}
+    </ScrollView>:null}
+    <Modal visible={!!liveverseVoiceSession} animationType="slide" presentationStyle="fullScreen" onRequestClose={()=>setLiveverseVoiceSession(null)}>
+      {liveverseVoiceSession?<LiveKitRoom serverUrl={liveverseVoiceSession.serverUrl} token={liveverseVoiceSession.token} connect={true} audio={true} video={false}
+        onConnected={()=>{setLiveverseVoiceConnected(true);console.info('Liveverse voice connected');}}
+        onDisconnected={()=>{setLiveverseVoiceConnected(false);void stopGuftinCallAudioSession();setLiveverseVoiceSession(null);}}
+        onError={(error:any)=>{setLiveverseVoiceConnected(false);void stopGuftinCallAudioSession();Alert.alert('Voice connection failed',error?.message||'Could not connect to the room.');setLiveverseVoiceSession(null);}}>
+        <LiveverseVoiceControls connected={liveverseVoiceConnected} onLeave={()=>{setLiveverseVoiceConnected(false);setLiveverseVoiceSession(null);}}/>
+      </LiveKitRoom>:null}
+    </Modal>
+    {tab==='Magic Moments'?<ScrollView contentContainerStyle={{padding:16,paddingBottom:32}}>
+      <View style={{backgroundColor:'#17153f',borderRadius:22,padding:19,marginBottom:15}}>
+        <Text style={{fontSize:10,color:'#e6c98c',fontWeight:'900',letterSpacing:2}}>GUFTIN · CREATE TOGETHER</Text>
+        <Text style={{fontSize:26,color:'#fff',fontWeight:'900',marginTop:6}}>Magic Moments ✨</Text>
+        <Text style={{fontSize:12,color:'#ded8f4',marginTop:5}}>Make memories today. Send a surprise into tomorrow.</Text>
+        <Btn onPress={()=>{setMagicView('create');setMagicKind('birthday');}} style={{backgroundColor:'#9471d8',padding:13,borderRadius:12,alignItems:'center',marginTop:14}}><Text style={{color:'#fff',fontWeight:'900'}}>＋ Create a Magic Moment</Text></Btn>
+      </View>
+      {magicView==='create'?<View style={{backgroundColor:C.white,borderRadius:17,padding:14,borderWidth:1,borderColor:C.line,marginBottom:14}}>
+        <Text style={{fontSize:17,color:C.ink,fontWeight:'900'}}>Choose your moment</Text>
+        <View style={{flexDirection:'row',flexWrap:'wrap',gap:7,marginTop:10}}>
+          {([['birthday','Birthday Surprise'],['capsule','Memory Capsule'],['future_message','Future Message'],['secret_surprise','Secret Surprise'],['together','Together Moments'],['anniversary','Friendship Anniversary']] as [MagicMomentKind,string][]).map(([kind,label])=><Btn key={kind} onPress={()=>setMagicKind(kind)} style={{padding:9,borderRadius:10,backgroundColor:magicKind===kind?'#6f4db4':C.paper}}><Text style={{fontSize:10,fontWeight:'900',color:magicKind===kind?'#fff':C.ink}}>{label}</Text></Btn>)}
+        </View>
+        <TextInput value={magicTitle} onChangeText={setMagicTitle} placeholder="Moment title" maxLength={140} style={{backgroundColor:C.paper,padding:11,borderRadius:10,color:C.ink,marginTop:12}}/>
+        <TextInput value={magicDescription} onChangeText={setMagicDescription} placeholder="Add a short description (optional)" multiline maxLength={8000} style={{backgroundColor:C.paper,padding:11,borderRadius:10,color:C.ink,minHeight:70,textAlignVertical:'top',marginTop:8}}/>
+        <TextInput value={magicDraft} onChangeText={setMagicDraft} placeholder={magicKind==='future_message'?'Write the message to deliver later…':'Write a memory or personal message…'} multiline maxLength={20000} style={{backgroundColor:C.paper,padding:11,borderRadius:10,color:C.ink,minHeight:95,textAlignVertical:'top',marginTop:8}}/>
+        {['birthday','secret_surprise','future_message','anniversary'].includes(magicKind)?<><Text style={{fontSize:10,color:C.muted,marginTop:10,fontWeight:'800'}}>{magicKind==='future_message'?'Delivery date & time':magicKind==='anniversary'?'Anniversary reminder date & time':'Reveal date & time'} (local time)</Text><TextInput value={magicScheduleAt} onChangeText={setMagicScheduleAt} placeholder="YYYY-MM-DDTHH:mm" autoCapitalize="none" style={{backgroundColor:C.paper,padding:11,borderRadius:10,color:C.ink,marginTop:6}}/></>:null}
+        <Text style={{fontSize:10,color:C.muted,marginTop:8}}>Share with the currently open direct or group chat. No chat history is imported automatically.</Text>
+        <Btn disabled={magicBusy||!magicTitle.trim()} onPress={()=>void createMagicMoment()} style={{backgroundColor:'#6f4db4',padding:12,borderRadius:11,alignItems:'center',marginTop:11}}><Text style={{color:'#fff',fontWeight:'900'}}>{magicBusy?'Saving…':'Save moment & send invitation card'}</Text></Btn>
+        <Btn onPress={()=>setMagicView('home')} style={{padding:9,alignSelf:'center',marginTop:5}}><Text style={{color:C.muted,fontWeight:'800'}}>Cancel</Text></Btn>
+      </View>:null}
+      {magicView==='detail'&&magicSelected?<View style={{backgroundColor:C.white,borderRadius:17,padding:14,borderWidth:1,borderColor:C.line,marginBottom:14}}>
+        <Btn onPress={()=>{setMagicView('home');setMagicSelected(null);}} style={{alignSelf:'flex-start',padding:7,backgroundColor:C.paper,borderRadius:8}}><Text style={{color:'#6f4db4',fontWeight:'900'}}>‹ All moments</Text></Btn>
+        <Text style={{fontSize:20,color:C.ink,fontWeight:'900',marginTop:10}}>{magicSelected.title}</Text>
+        <Text style={{fontSize:10,color:C.muted,marginTop:4}}>{String(magicSelected.kind).replace('_',' ').toUpperCase()} · {magicSelected.status}</Text>
+        {magicSelected.description?<Text style={{fontSize:12,color:C.ink,marginTop:8}}>{magicSelected.description}</Text>:null}
+        {magicSelected.kind==='secret_surprise'&&magicSelected.creator_id===session?.user?.id?<Btn disabled={magicBusy} onPress={()=>void revealMagicMoment()} style={{backgroundColor:'#6f4db4',padding:10,borderRadius:10,marginTop:10}}><Text style={{color:'#fff',fontWeight:'900'}}>Reveal surprise (server checks reveal time)</Text></Btn>:null}
+        <View style={{flexDirection:'row',gap:7,marginTop:13}}>
+          <Btn onPress={()=>void uploadMagicMedia()} disabled={magicBusy} style={{backgroundColor:'#6f4db4',padding:10,borderRadius:9,flex:1}}><Text style={{color:'#fff',fontWeight:'900',textAlign:'center'}}>＋ Add photo/video</Text></Btn>
+        </View>
+        <TextInput value={magicDraft} onChangeText={setMagicDraft} placeholder="Add a memory or contribution…" multiline style={{backgroundColor:C.paper,padding:10,borderRadius:10,color:C.ink,minHeight:75,marginTop:10,textAlignVertical:'top'}}/>
+        <Btn disabled={magicBusy||!magicDraft.trim()} onPress={()=>void addMagicText()} style={{backgroundColor:C.green,padding:10,borderRadius:9,marginTop:7}}><Text style={{color:'#fff',fontWeight:'900',textAlign:'center'}}>Save contribution</Text></Btn>
+        {magicItems.map((item:any)=><View key={item.id} style={{padding:10,backgroundColor:C.paper,borderRadius:11,marginTop:9}}>
+          {item.item_type==='text'?<Text style={{color:C.ink,fontSize:13}}>{item.body}</Text>:item.item_type==='image'&&item.signedUrl?<Image source={{uri:item.signedUrl}} style={{width:'100%',height:190,borderRadius:10}} resizeMode="cover"/>:item.item_type==='video'&&item.signedUrl?<VideoBubble uri={item.signedUrl}/>:<Text style={{color:C.muted}}>Shared {item.item_type}</Text>}
+          <Text style={{fontSize:9,color:C.muted,marginTop:5}}>{timeLabel(item.created_at)}</Text>
+          <Btn onPress={()=>void magicMomentsClient.react(magicSelected.id,item.id,session.user.id,'❤️').then(()=>Alert.alert('Reaction saved','Your reaction was added.')).catch((e:any)=>Alert.alert('Reaction failed',e.message))} style={{alignSelf:'flex-start',padding:6,marginTop:4}}><Text style={{color:'#6f4db4',fontWeight:'900'}}>♡ React</Text></Btn>
+        </View>)}
+        <Text style={{fontSize:14,fontWeight:'900',color:C.ink,marginTop:15}}>Comments</Text>
+        {magicComments.map((comment:any)=><Text key={comment.id} style={{fontSize:11,color:C.ink,paddingVertical:6,borderBottomWidth:1,borderColor:C.line}}>{comment.body}</Text>)}
+        <TextInput value={magicCommentDraft} onChangeText={setMagicCommentDraft} placeholder="Write a comment…" style={{backgroundColor:C.paper,padding:10,borderRadius:9,color:C.ink,marginTop:8}}/>
+        <Btn onPress={()=>void addMagicComment()} disabled={!magicCommentDraft.trim()} style={{backgroundColor:C.green,padding:10,borderRadius:9,marginTop:7}}><Text style={{color:'#fff',fontWeight:'900',textAlign:'center'}}>Post comment</Text></Btn>
+      </View>:null}
+      {magicView==='home'?<View>
+        <Text style={{fontSize:16,color:C.ink,fontWeight:'900',marginBottom:9}}>Your memories & invitations</Text>
+        {magicBusy&&magicMoments.length===0?<GuftinLoader color="#6f4db4"/>:magicMoments.length===0?<Text style={{fontSize:12,color:C.muted,textAlign:'center',padding:22}}>Your created moments and accepted invitations will appear here.</Text>:magicMoments.map((moment:any)=><Btn key={moment.id} onPress={()=>void openMagicMoment(moment)} style={{backgroundColor:C.white,borderWidth:1,borderColor:C.line,borderRadius:13,padding:13,marginBottom:8,alignItems:'stretch'}}>
+          <Text style={{fontSize:10,color:'#8a6bc0',fontWeight:'900'}}>{String(moment.kind).replace('_',' ').toUpperCase()}</Text>
+          <Text style={{fontSize:14,color:C.ink,fontWeight:'900',marginTop:4}}>{moment.title}</Text>
+          <Text style={{fontSize:10,color:C.muted,marginTop:4}}>{moment.status} · {timeLabel(moment.updated_at)}</Text>
+        </Btn>)}
+        {magicNotifications.length?<><Text style={{fontSize:14,color:C.ink,fontWeight:'900',marginTop:12,marginBottom:7}}>Moments Shared With Me</Text>{magicNotifications.map((n:any)=><View key={n.id} style={{backgroundColor:C.paper,padding:10,borderRadius:10,marginBottom:6}}><Text style={{fontSize:11,color:C.ink,fontWeight:'800'}}>{n.title}</Text><Text style={{fontSize:10,color:C.muted,marginTop:3}}>{n.body}</Text></View>)}</>:null}
+      </View>:null}
+    </ScrollView>:null}
+    {tab==='AI'?<View style={{flex:1,paddingHorizontal:14,paddingTop:14,paddingBottom:10}}>
+      <View style={{backgroundColor:C.mint,borderRadius:18,padding:15,marginBottom:10}}>
+        <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}>
+          <View style={{flex:1}}>
+            <Text style={{fontSize:18,fontWeight:'900',color:C.green}}>✦ Karaboz AI</Text>
+            <Text style={{fontSize:11,color:C.ink,marginTop:4}}>Your Guftin assistant · Urdu, Hindi and English</Text>
+          </View>
+          <Btn onPress={startNewAIChat} style={{backgroundColor:C.white,paddingHorizontal:12,paddingVertical:9,borderRadius:12}}><Text style={{color:C.green,fontWeight:'900'}}>＋ New</Text></Btn>
+          <Btn onPress={()=>void loadAIChats()} style={{backgroundColor:C.white,paddingHorizontal:12,paddingVertical:9,borderRadius:12,marginLeft:6}}><Text style={{color:C.green,fontWeight:'900'}}>History</Text></Btn>
+        </View>
+      </View>
+      <View style={{flexDirection:'row',flexWrap:'wrap',gap:7,marginBottom:10}}>
+        {([['chat','Ask AI'],['write','Write'],['translate','Translate'],['summarize','Summarize'],['reply','Suggest reply']] as Array<[typeof aiMode,string]>).map(([mode,label])=><Btn key={mode} onPress={()=>setAiMode(mode)} style={{paddingHorizontal:12,paddingVertical:8,borderRadius:18,backgroundColor:aiMode===mode?C.green:C.white,borderWidth:1,borderColor:aiMode===mode?C.green:C.line}}><Text style={{fontSize:11,fontWeight:'900',color:aiMode===mode?'#fff':C.ink}}>{label}</Text></Btn>)}
+      </View>
+      {aiHistoryOpen?<View style={{backgroundColor:C.white,borderRadius:15,padding:10,marginBottom:10,maxHeight:160}}>
+        <Text style={{fontWeight:'900',color:C.ink,marginBottom:7}}>Recent AI chats</Text>
+        <ScrollView>
+          {aiChats.length?aiChats.map((chat:any)=><Btn key={chat.id} onPress={()=>void openAIChat(chat.id)} style={{paddingVertical:9,borderBottomWidth:1,borderColor:C.line,alignItems:'flex-start'}}><Text numberOfLines={1} style={{color:C.ink,fontWeight:'700'}}>{chat.title||'New chat'}</Text><Text style={{fontSize:10,color:C.muted}}>{chat.message_count||0} messages</Text></Btn>):<Text style={{color:C.muted,fontSize:11,padding:8}}>No saved AI chats yet.</Text>}
+        </ScrollView>
+      </View>:null}
+      <ScrollView style={{flex:1}} contentContainerStyle={{paddingBottom:12,gap:10}}>
+        {aiMessages.length===0?<View style={{alignItems:'center',paddingHorizontal:18,paddingVertical:34}}>
+          <View style={{width:66,height:66,borderRadius:23,backgroundColor:C.mint,alignItems:'center',justifyContent:'center',marginBottom:14}}><Text style={{fontSize:32,color:C.green}}>✦</Text></View>
+          <Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>How can I help?</Text>
+          <Text style={{fontSize:12,color:C.muted,textAlign:'center',lineHeight:18,marginTop:7}}>Ask a question, write a message, translate text or get help replying to someone.</Text>
+          <View style={{flexDirection:'row',flexWrap:'wrap',justifyContent:'center',gap:8,marginTop:18}}>
+            {['Explain something simply','Write a polite message','Translate into Urdu','Suggest a friendly reply'].map((hint,i)=><Btn key={hint} onPress={()=>{setAiMode((['chat','write','translate','reply'] as any)[i]);setAiDraft(hint+': ');}} style={{backgroundColor:C.white,borderWidth:1,borderColor:C.line,borderRadius:13,padding:11}}><Text style={{fontSize:11,color:C.green,fontWeight:'800'}}>{hint}</Text></Btn>)}
+          </View>
+        </View>:aiMessages.map((item,index)=><View key={index} style={{alignSelf:item.role==='user'?'flex-end':'flex-start',maxWidth:'90%',backgroundColor:item.role==='user'?C.mint:C.white,borderRadius:16,padding:13,borderWidth:1,borderColor:C.line}}>
+          <Text style={{fontSize:10,fontWeight:'900',color:C.green,marginBottom:5}}>{item.role==='user'?'You':'Karaboz AI'}</Text>
+          <Text selectable style={{fontSize:13,color:C.ink,lineHeight:20}}>{item.content}</Text>
+        </View>)}
+        {aiBusy?<View style={{alignSelf:'flex-start',backgroundColor:C.white,borderRadius:14,padding:12}}><Text style={{fontSize:12,color:C.muted}}>Karaboz AI is thinking…</Text></View>:null}
+      </ScrollView>
+      <View style={{backgroundColor:C.white,borderRadius:18,padding:9,borderWidth:1,borderColor:C.line,flexDirection:'row',alignItems:'flex-end',gap:8}}>
+        <TextInput value={aiDraft} onChangeText={setAiDraft} placeholder={aiMode==='translate'?'Text to translate…':aiMode==='write'?'What message should I write?':aiMode==='reply'?'Paste a message to get reply ideas…':'Message Karaboz AI…'} multiline maxLength={4000} style={{flex:1,minHeight:44,maxHeight:120,paddingHorizontal:9,paddingVertical:8,color:C.ink,textAlignVertical:'center'}}/>
+        <Btn disabled={aiBusy||!aiDraft.trim()} onPress={()=>void sendAIMessage()} style={{width:43,height:43,borderRadius:14,backgroundColor:aiBusy||!aiDraft.trim()?C.line:C.green,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:18,color:'#fff',fontWeight:'900'}}>➤</Text></Btn>
+      </View>
+      <Text style={{fontSize:9,color:C.muted,textAlign:'center',marginTop:6}}>AI can make mistakes. Review suggested messages before sending.</Text>
+    </View>:null}
     {tab==='Calls'?<ScrollView contentContainerStyle={{padding:18,paddingBottom:30}}>
       <View style={{backgroundColor:C.paper,borderRadius:18,padding:16,marginBottom:16}}>
         <Text style={{fontSize:18,fontWeight:'900',color:C.ink}}>Call history</Text>
@@ -5762,9 +6364,9 @@ function GuftinApp() {
       />
     </View>:null}
     <View style={{marginHorizontal:7,marginBottom:Math.max(insets.bottom,5),height:66,paddingTop:5,paddingBottom:5,borderRadius:27,borderWidth:1,borderColor:C.line,flexDirection:'row',alignItems:'center',justifyContent:'space-around',backgroundColor:C.white,elevation:10,shadowColor:'#123d2d',shadowOpacity:.09,shadowRadius:12,shadowOffset:{width:0,height:4}}}>
-      {([['Chats','▤'],['HoloSpace','◎'],['AI','✦'],['Updates','◉'],['Hub','⌂'],['Calls','☎'],['You','●']] as string[][]).map(([t,icon])=><Btn key={t} onPress={()=>setTab(t)} style={{alignItems:'center',justifyContent:'center',minWidth:48,paddingHorizontal:2,paddingVertical:4}}>
+      {([['Chats','▤'],['Liveverse','◉'],['HoloSpace','◎'],['Magic Moments','✧'],['AI','✦'],['Updates','◉'],['Hub','⌂'],['Calls','☎'],['You','●']] as string[][]).map(([t,icon])=><Btn key={t} onPress={()=>setTab(t)} style={{alignItems:'center',justifyContent:'center',minWidth:48,paddingHorizontal:2,paddingVertical:4}}>
         <Text style={{fontSize:20,color:tab===t?C.green:C.muted,fontWeight:'900'}}>{icon}</Text>
-        <Text style={{fontSize:10,fontWeight:tab===t?'900':'600',color:tab===t?C.green:C.muted,marginTop:3}}>{t==='Hub'?'Business':t}</Text>
+        <Text style={{fontSize:10,fontWeight:tab===t?'900':'600',color:tab===t?C.green:C.muted,marginTop:3}}>{t==='Hub'?'Business':t==='Magic Moments'?'Magic':t}</Text>
         {tab===t?<View style={{height:3,width:24,borderRadius:3,backgroundColor:C.green,marginTop:3}}/>:null}
       </Btn>)}
     </View>
