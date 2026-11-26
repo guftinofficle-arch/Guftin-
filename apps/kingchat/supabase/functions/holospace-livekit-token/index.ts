@@ -8,7 +8,10 @@ Deno.serve(async(req:Request)=>{
   if(req.method==="OPTIONS")return new Response("ok",{headers:cors});
   if(req.method!=="POST")return json({error:"Method not allowed"},405);
   const url=Deno.env.get("SUPABASE_URL")||"";
-  const key=Deno.env.get("SUPABASE_ANON_KEY")||Deno.env.get("SUPABASE_PUBLISHABLE_KEY")||"";
+  let key=Deno.env.get("SUPABASE_ANON_KEY")||Deno.env.get("SUPABASE_PUBLISHABLE_KEY")||"";
+ if(!key){
+   try{const keys=JSON.parse(Deno.env.get("SUPABASE_PUBLISHABLE_KEYS")||"{}");key=typeof keys.default==="string"?keys.default:"";}catch{/* Missing optional publishable key map. */}
+ }
   const jwt=(req.headers.get("Authorization")||"").replace(/^Bearer\s+/i,"").trim();
   if(!url||!key||!jwt)return json({error:"Authentication service is not configured."},503);
   const db=createClient(url,key,{auth:{persistSession:false,autoRefreshToken:false},global:{headers:{Authorization:"Bearer "+jwt}}});
