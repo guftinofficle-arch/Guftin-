@@ -279,7 +279,8 @@ const THEMES:any = {
   night:{ink:'#edf3ff',muted:'#9baac0',green:'#77b9ff',mint:'#223d5d',paper:'#101a2b',white:'#1a2940',line:'#2a3b54',red:'#ff8894'}
 };
 type Chat = { id:string; name:string; avatar:string; avatarUrl?:string; color:string; last:string; time:string; unread:number; online:boolean; kind:string; lastAt:number; isOfficial?:boolean; isVerified?:boolean; isChannelOwner?:boolean; inviteCode?:string; isPublic?:boolean; ownerId?:string; description?:string; hasConversationActivity?:boolean; hasCallActivity?:boolean; pendingContactId?:string; hasPendingActivity?:boolean };
-const LIVEVERSE_INVITE_PREFIX='GUFTIN_LIVEVERSE_INVITE:';\nconst MAGIC_MOMENT_INVITE_PREFIX='GUFTIN_MAGIC_MOMENT_INVITE:';
+const LIVEVERSE_INVITE_PREFIX='GUFTIN_LIVEVERSE_INVITE:';
+const MAGIC_MOMENT_INVITE_PREFIX='GUFTIN_MAGIC_MOMENT_INVITE:';
 type Message = { id:string; conversation_id:string; sender_id:string|null; body:string|null; message_type:string; attachment_url?:string|null; created_at:string; edited_at?:string|null; mine:boolean; deleted_at?:string|null; pending?:boolean };
 const sortInboxChats=(items:Chat[])=>items.slice().sort((a,b)=>(Number(!!b.isOfficial)-Number(!!a.isOfficial))||((Number(b.lastAt)||0)-(Number(a.lastAt)||0)));
 const normalizeGuftinPhone=(value:string):string|null=>{
@@ -961,7 +962,21 @@ function LiveverseVoiceControls({onLeave,connected}:any){
 function GuftinApp() {
   const insets=useSafeAreaInsets();
   const [tab,setTab]=useState('Chats');
-  const liveverseClient=useMemo(()=>createLiveverseClient(supabase),[]);\n  const magicMomentsClient=useMemo(()=>createMagicMomentsClient(supabase),[]);\n  const [magicMoments,setMagicMoments]=useState<any[]>([]);\n  const [magicSelected,setMagicSelected]=useState<any>(null);\n  const [magicItems,setMagicItems]=useState<any[]>([]);\n  const [magicComments,setMagicComments]=useState<any[]>([]);\n  const [magicNotifications,setMagicNotifications]=useState<any[]>([]);\n  const [magicBusy,setMagicBusy]=useState(false);\n  const [magicView,setMagicView]=useState<'home'|'create'|'detail'>('home');\n  const [magicKind,setMagicKind]=useState<MagicMomentKind>('birthday');\n  const [magicTitle,setMagicTitle]=useState('A special moment');\n  const [magicDescription,setMagicDescription]=useState('');\n  const [magicDraft,setMagicDraft]=useState('');\n  const [magicScheduleAt,setMagicScheduleAt]=useState('');\n  const [magicCommentDraft,setMagicCommentDraft]=useState('');
+  const liveverseClient=useMemo(()=>createLiveverseClient(supabase),[]);
+  const magicMomentsClient=useMemo(()=>createMagicMomentsClient(supabase),[]);
+  const [magicMoments,setMagicMoments]=useState<any[]>([]);
+  const [magicSelected,setMagicSelected]=useState<any>(null);
+  const [magicItems,setMagicItems]=useState<any[]>([]);
+  const [magicComments,setMagicComments]=useState<any[]>([]);
+  const [magicNotifications,setMagicNotifications]=useState<any[]>([]);
+  const [magicBusy,setMagicBusy]=useState(false);
+  const [magicView,setMagicView]=useState<'home'|'create'|'detail'>('home');
+  const [magicKind,setMagicKind]=useState<MagicMomentKind>('birthday');
+  const [magicTitle,setMagicTitle]=useState('A special moment');
+  const [magicDescription,setMagicDescription]=useState('');
+  const [magicDraft,setMagicDraft]=useState('');
+  const [magicScheduleAt,setMagicScheduleAt]=useState('');
+  const [magicCommentDraft,setMagicCommentDraft]=useState('');
   const [liveverseView,setLiveverseView]=useState<'home'|'create'|'room'>('home');
   const [liveverseSpaces,setLiveverseSpaces]=useState<any[]>([]);
   const [liveverseSelected,setLiveverseSelected]=useState<any>(null);
@@ -5651,7 +5666,8 @@ function GuftinApp() {
         <Btn onPress={()=>setLiveverseView('create')} style={{backgroundColor:'#7764e8',padding:12,borderRadius:12,alignItems:'center',marginTop:14}}><Text style={{color:'#fff',fontWeight:'900'}}>＋ Create shared space</Text></Btn>
       </View>
       {liveverseView==='create'?<View style={{backgroundColor:C.white,borderRadius:16,padding:14,borderWidth:1,borderColor:C.line,marginBottom:12}}>
-        <Text style={{fontSize:16,color:C.ink,fontWeight:'900'}}>Create Liveverse space</Text>\n        {liveverseSourceChat?<Text style={{fontSize:10,color:C.green,fontWeight:'800',marginTop:6}}>Linked to {liveverseSourceChat.name}</Text>:null}
+        <Text style={{fontSize:16,color:C.ink,fontWeight:'900'}}>Create Liveverse space</Text>
+        {liveverseSourceChat?<Text style={{fontSize:10,color:C.green,fontWeight:'800',marginTop:6}}>Linked to {liveverseSourceChat.name}</Text>:null}
         <TextInput value={liveverseName} onChangeText={setLiveverseName} placeholder="Space name" maxLength={80} style={{backgroundColor:C.paper,padding:11,borderRadius:10,color:C.ink,marginTop:9}}/>
         <TextInput value={liveverseDescription} onChangeText={setLiveverseDescription} placeholder="Description (optional)" maxLength={500} style={{backgroundColor:C.paper,padding:11,borderRadius:10,color:C.ink,marginTop:7}}/>
         <Btn disabled={liveverseBusy||!liveverseName.trim()} onPress={()=>void createLiveverseSpace()} style={{backgroundColor:C.green,padding:11,borderRadius:10,alignItems:'center',marginTop:9}}><Text style={{color:'#fff',fontWeight:'900'}}>Create space</Text></Btn>
