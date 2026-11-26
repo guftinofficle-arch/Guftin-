@@ -152,6 +152,12 @@ using(private.holospace_is_owner(id));
 drop policy if exists holospace_members_read on public.holospace_members;
 create policy holospace_members_read on public.holospace_members for select to authenticated
 using(private.holospace_is_member(room_id) or user_id=(select auth.uid()) or private.holospace_is_owner(room_id));
+drop policy if exists holospace_members_public_join on public.holospace_members;
+create policy holospace_members_public_join on public.holospace_members for insert to authenticated
+with check (
+ user_id=(select auth.uid()) and role='member' and invitation_status='active'
+ and exists(select 1 from public.holospace_rooms r where r.id=room_id and r.privacy='public' and r.archived_at is null)
+);
 drop policy if exists holospace_members_invite on public.holospace_members;
 create policy holospace_members_invite on public.holospace_members for insert to authenticated
 with check (
@@ -167,9 +173,19 @@ create policy holospace_members_leave on public.holospace_members for delete to 
 using(user_id=(select auth.uid()) and role='member' or private.holospace_is_owner(room_id) and user_id<>(select owner_id from public.holospace_rooms r where r.id=room_id));
 
 drop policy if exists holospace_memories_access on public.holospace_memories;
-create policy holospace_memories_access on public.holospace_memories for all to authenticated
-using(private.holospace_is_member(room_id))
+drop policy if exists holospace_memories_read on public.holospace_memories;
+create policy holospace_memories_read on public.holospace_memories for select to authenticated
+using(private.holospace_is_member(room_id));
+drop policy if exists holospace_memories_insert on public.holospace_memories;
+create policy holospace_memories_insert on public.holospace_memories for insert to authenticated
 with check(private.holospace_is_member(room_id) and author_id=(select auth.uid()));
+drop policy if exists holospace_memories_update on public.holospace_memories;
+create policy holospace_memories_update on public.holospace_memories for update to authenticated
+using(author_id=(select auth.uid()) or private.holospace_is_owner(room_id))
+with check(private.holospace_is_member(room_id) and (author_id=(select auth.uid()) or private.holospace_is_owner(room_id)));
+drop policy if exists holospace_memories_delete on public.holospace_memories;
+create policy holospace_memories_delete on public.holospace_memories for delete to authenticated
+using(author_id=(select auth.uid()) or private.holospace_is_owner(room_id));
 drop policy if exists holospace_gallery_read on public.holospace_gallery;
 create policy holospace_gallery_read on public.holospace_gallery for select to authenticated
 using(private.holospace_is_member(room_id));
@@ -192,9 +208,19 @@ create policy holospace_themes_write on public.holospace_themes for all to authe
 using(private.holospace_is_owner(room_id))
 with check(private.holospace_is_owner(room_id) and updated_by=(select auth.uid()));
 drop policy if exists holospace_events_access on public.holospace_events;
-create policy holospace_events_access on public.holospace_events for all to authenticated
-using(private.holospace_is_member(room_id))
+drop policy if exists holospace_events_read on public.holospace_events;
+create policy holospace_events_read on public.holospace_events for select to authenticated
+using(private.holospace_is_member(room_id));
+drop policy if exists holospace_events_insert on public.holospace_events;
+create policy holospace_events_insert on public.holospace_events for insert to authenticated
 with check(private.holospace_is_member(room_id) and created_by=(select auth.uid()));
+drop policy if exists holospace_events_update on public.holospace_events;
+create policy holospace_events_update on public.holospace_events for update to authenticated
+using(created_by=(select auth.uid()) or private.holospace_is_owner(room_id))
+with check(private.holospace_is_member(room_id) and (created_by=(select auth.uid()) or private.holospace_is_owner(room_id)));
+drop policy if exists holospace_events_delete on public.holospace_events;
+create policy holospace_events_delete on public.holospace_events for delete to authenticated
+using(created_by=(select auth.uid()) or private.holospace_is_owner(room_id));
 drop policy if exists holospace_activity_read on public.holospace_activity;
 create policy holospace_activity_read on public.holospace_activity for select to authenticated
 using(private.holospace_is_member(room_id));
@@ -226,7 +252,99 @@ create policy holospace_gallery_storage_write on storage.objects for insert to a
 with check(bucket_id='holospace-gallery' and case when (storage.foldername(name))[1] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' then private.holospace_is_member(((storage.foldername(name))[1])::uuid) else false end);
 drop policy if exists holospace_gallery_storage_delete on storage.objects;
 create policy holospace_gallery_storage_delete on storage.objects for delete to authenticated
-using(bucket_id='holospace-gallery' and case when (storage.foldername(name))[1] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' then private.holospace_is_member(((storage.foldername(name))[1])::uuid) else false end);
+using(bucket_id='holospace-gallery' and case when (storage.foldername(name))[1] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12} on storage.objects;
+create policy holospace_avatar_storage_access on storage.objects for all to authenticated
+using(bucket_id='holospace-avatars' and case when (storage.foldername(name))[1] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' then private.holospace_is_member(((storage.foldername(name))[1])::uuid) and (storage.foldername(name))[2]=(select auth.uid())::text else false end)
+with check(bucket_id='holospace-avatars' and case when (storage.foldername(name))[1] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' then private.holospace_is_member(((storage.foldername(name))[1])::uuid) and (storage.foldername(name))[2]=(select auth.uid())::text else false end);
+
+drop policy if exists holospace_background_storage_read on storage.objects;
+create policy holospace_background_storage_read on storage.objects for select to authenticated
+using(bucket_id='holospace-backgrounds' and case when (storage.foldername(name))[1] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' then private.holospace_is_member(((storage.foldername(name))[1])::uuid) else false end);
+drop policy if exists holospace_background_storage_write on storage.objects;
+create policy holospace_background_storage_write on storage.objects for all to authenticated
+using(bucket_id='holospace-backgrounds' and case when (storage.foldername(name))[1] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}
+
+do $$
+declare t text;
+begin
+ foreach t in array array['holospace_rooms','holospace_members','holospace_memories','holospace_gallery','holospace_avatars','holospace_themes','holospace_events','holospace_activity'] loop
+  if not exists(select 1 from pg_publication_tables where pubname='supabase_realtime' and schemaname='public' and tablename=t) then
+   execute format('alter publication supabase_realtime add table public.%I',t);
+  end if;
+ end loop;
+end $$;
+ then private.holospace_is_member(((storage.foldername(name))[1])::uuid) and ((storage.foldername(name))[2]=(select auth.uid())::text or private.holospace_is_owner(((storage.foldername(name))[1])::uuid)) else false end);
+
+drop policy if exists holospace_avatar_storage_access on storage.objects;
+create policy holospace_avatar_storage_access on storage.objects for all to authenticated
+using(bucket_id='holospace-avatars' and case when (storage.foldername(name))[1] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' then private.holospace_is_member(((storage.foldername(name))[1])::uuid) and (storage.foldername(name))[2]=(select auth.uid())::text else false end)
+with check(bucket_id='holospace-avatars' and case when (storage.foldername(name))[1] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' then private.holospace_is_member(((storage.foldername(name))[1])::uuid) and (storage.foldername(name))[2]=(select auth.uid())::text else false end);
+
+drop policy if exists holospace_background_storage_read on storage.objects;
+create policy holospace_background_storage_read on storage.objects for select to authenticated
+using(bucket_id='holospace-backgrounds' and case when (storage.foldername(name))[1] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' then private.holospace_is_member(((storage.foldername(name))[1])::uuid) else false end);
+drop policy if exists holospace_background_storage_write on storage.objects;
+create policy holospace_background_storage_write on storage.objects for all to authenticated
+using(bucket_id='holospace-backgrounds' and private.holospace_is_owner(((storage.foldername(name))[1])::uuid))
+with check(bucket_id='holospace-backgrounds' and private.holospace_is_owner(((storage.foldername(name))[1])::uuid));
+
+do $$
+declare t text;
+begin
+ foreach t in array array['holospace_rooms','holospace_members','holospace_memories','holospace_gallery','holospace_avatars','holospace_themes','holospace_events','holospace_activity'] loop
+  if not exists(select 1 from pg_publication_tables where pubname='supabase_realtime' and schemaname='public' and tablename=t) then
+   execute format('alter publication supabase_realtime add table public.%I',t);
+  end if;
+ end loop;
+end $$;
+ then private.holospace_is_owner(((storage.foldername(name))[1])::uuid) else false end)
+with check(bucket_id='holospace-backgrounds' and case when (storage.foldername(name))[1] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}
+
+do $$
+declare t text;
+begin
+ foreach t in array array['holospace_rooms','holospace_members','holospace_memories','holospace_gallery','holospace_avatars','holospace_themes','holospace_events','holospace_activity'] loop
+  if not exists(select 1 from pg_publication_tables where pubname='supabase_realtime' and schemaname='public' and tablename=t) then
+   execute format('alter publication supabase_realtime add table public.%I',t);
+  end if;
+ end loop;
+end $$;
+ then private.holospace_is_member(((storage.foldername(name))[1])::uuid) and ((storage.foldername(name))[2]=(select auth.uid())::text or private.holospace_is_owner(((storage.foldername(name))[1])::uuid)) else false end);
+
+drop policy if exists holospace_avatar_storage_access on storage.objects;
+create policy holospace_avatar_storage_access on storage.objects for all to authenticated
+using(bucket_id='holospace-avatars' and case when (storage.foldername(name))[1] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' then private.holospace_is_member(((storage.foldername(name))[1])::uuid) and (storage.foldername(name))[2]=(select auth.uid())::text else false end)
+with check(bucket_id='holospace-avatars' and case when (storage.foldername(name))[1] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' then private.holospace_is_member(((storage.foldername(name))[1])::uuid) and (storage.foldername(name))[2]=(select auth.uid())::text else false end);
+
+drop policy if exists holospace_background_storage_read on storage.objects;
+create policy holospace_background_storage_read on storage.objects for select to authenticated
+using(bucket_id='holospace-backgrounds' and case when (storage.foldername(name))[1] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' then private.holospace_is_member(((storage.foldername(name))[1])::uuid) else false end);
+drop policy if exists holospace_background_storage_write on storage.objects;
+create policy holospace_background_storage_write on storage.objects for all to authenticated
+using(bucket_id='holospace-backgrounds' and private.holospace_is_owner(((storage.foldername(name))[1])::uuid))
+with check(bucket_id='holospace-backgrounds' and private.holospace_is_owner(((storage.foldername(name))[1])::uuid));
+
+do $$
+declare t text;
+begin
+ foreach t in array array['holospace_rooms','holospace_members','holospace_memories','holospace_gallery','holospace_avatars','holospace_themes','holospace_events','holospace_activity'] loop
+  if not exists(select 1 from pg_publication_tables where pubname='supabase_realtime' and schemaname='public' and tablename=t) then
+   execute format('alter publication supabase_realtime add table public.%I',t);
+  end if;
+ end loop;
+end $$;
+ then private.holospace_is_owner(((storage.foldername(name))[1])::uuid) else false end);
+
+do $$
+declare t text;
+begin
+ foreach t in array array['holospace_rooms','holospace_members','holospace_memories','holospace_gallery','holospace_avatars','holospace_themes','holospace_events','holospace_activity'] loop
+  if not exists(select 1 from pg_publication_tables where pubname='supabase_realtime' and schemaname='public' and tablename=t) then
+   execute format('alter publication supabase_realtime add table public.%I',t);
+  end if;
+ end loop;
+end $$;
+ then private.holospace_is_member(((storage.foldername(name))[1])::uuid) and ((storage.foldername(name))[2]=(select auth.uid())::text or private.holospace_is_owner(((storage.foldername(name))[1])::uuid)) else false end);
 
 drop policy if exists holospace_avatar_storage_access on storage.objects;
 create policy holospace_avatar_storage_access on storage.objects for all to authenticated
