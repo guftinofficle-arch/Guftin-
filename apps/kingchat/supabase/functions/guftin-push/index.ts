@@ -51,10 +51,13 @@ async function loadAllRecipientDevices(admin: any, recipientIds: string[]) {
 }
 
 type PushBody = {
-  kind?: "test" | "message" | "official_broadcast" | "call" | "status" | "status_like" | "status_view";
+  kind?: "test" | "message" | "official_broadcast" | "call" | "status" | "status_like" | "status_view" | "magic_moment";
   message_id?: string;
   call_id?: string;
   status_id?: string;
+  moment_id?: string;
+  notification_type?: string;
+  recipient_id?: string;
 };
 
 Deno.serve(async (req: Request) => {
@@ -233,6 +236,25 @@ Deno.serve(async (req: Request) => {
 
     recipientIds = [row.user_id];
     title = actorName;
+  } else if (body.kind === "magic_moment" && body.moment_id) {
+    const { data: moment, error: momentError } = await admin.from("magic_moments")
+      .select("id,creator_id,title,kind").eq("id", body.moment_id).maybeSingle();
+    if (momentError || !moment || moment.creator_id !== actor.id) {
+      return json({ error: "Magic Moment not found or not owned by this account." }, 404);
+    }
+    let query = admin.from("magic_moment_notifications")
+      .select("recipient_id,title,body,notification_type")
+      .eq("moment_id", moment.id);
+    if (body.notification_type) query = query.eq("notification_type", body.notification_type);
+    if (body.recipient_id) query = query.eq("recipient_id", body.recipient_id);
+    const { data: rows, error: notificationError } = await query.order("created_at", { ascending: false }).limit(100);
+    if (notificationError) return json({ error: "Could not load Magic Moment recipients." }, 500);
+    recipientIds = [...new Set((rows || []).map((row: any) => row.recipient_id).filter(Boolean))];
+    title = rows?.[0]?.title || "A Magic Moment is waiting";
+    message = rows?.[0]?.body || "Open Guftin to view your shared moment.";
+    data = { type: "magic_moment", moment_id: moment.id, notification_type: body.notification_type || rows?.[0]?.notification_type || "invite" };
+    channelId = "messages";
+    ttl = 60 * 60 * 24;
   } else {
     return json({ error: "kind and a valid message_id, call_id, or status_id are required." }, 400);
   }
