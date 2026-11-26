@@ -33,8 +33,14 @@ export function createMagicMomentsClient(supabase:SupabaseClient){
    return data as MagicMoment;
   },
   async invite(momentId:string,userId:string,inviterId:string,role:'contributor'|'recipient'|'viewer'='contributor'){
-   const {data,error}=await supabase.from('magic_moment_members').upsert({moment_id:momentId,user_id:userId,role,invited_by:inviterId},{onConflict:'moment_id,user_id'}).select('*').single();
-   if(error)throw error; return data;
+   const {data:existing,error:lookupError}=await supabase.from('magic_moment_members').select('id,accepted_at,role').eq('moment_id',momentId).eq('user_id',userId).maybeSingle();
+   if(lookupError)throw lookupError;
+   if(existing)return existing;
+   const {data,error}=await supabase.from('magic_moment_members').insert({moment_id:momentId,user_id:userId,role,invited_by:inviterId}).select('*').single();
+   if(error)throw error;
+   const {error:notifyError}=await supabase.functions.invoke('invite-magic-moment-member',{body:{moment_id:momentId,user_id:userId}});
+   if(notifyError)throw notifyError;
+   return data;
   },
   async acceptInvite(momentId:string){
    const {data,error}=await supabase.from('magic_moment_members').update({accepted_at:new Date().toISOString()}).eq('moment_id',momentId).select('*').single();
@@ -82,15 +88,19 @@ export function createMagicMomentsClient(supabase:SupabaseClient){
    if(error)throw error;return data;
   },
   async scheduleMessage(input:{senderId:string;recipientId:string;conversationId:string;content:string;scheduledAt:string;timezone:string;attachments?:unknown[]}){
-   const {data,error}=await supabase.from('scheduled_messages').insert({sender_id:input.senderId,recipient_id:input.recipientId,conversation_id:input.conversationId,content:input.content,scheduled_at:input.scheduledAt,timezone:input.timezone,attachments:input.attachments||[]}).select('*').single();
+   if(!input.content.startsWith('KC-E2EE1:'))throw new Error('Future messages must be end-to-end encrypted before scheduling.');
+   const {data,error}=await supabase.from('kc_scheduled_messages').insert({
+    sender_id:input.senderId,conversation_id:input.conversationId,body_envelope:input.content,
+    message_type:'text',scheduled_at:input.scheduledAt,delivery_status:'queued'
+   }).select('*').single();
    if(error)throw error;return data;
   },
   async scheduledMessages(){
-   const {data,error}=await supabase.from('scheduled_messages').select('id,recipient_id,conversation_id,content,attachments,scheduled_at,timezone,status,attempts,created_at').order('scheduled_at');
+   const {data,error}=await supabase.from('kc_scheduled_messages').select('id,conversation_id,sender_id,body_envelope,message_type,scheduled_at,delivery_status,sent_message_id,last_error,created_at,updated_at').order('scheduled_at');
    if(error)throw error;return data||[];
   },
-  async updateScheduled(id:string,patch:{content?:string;scheduled_at?:string;timezone?:string;status?:'pending'|'cancelled'}){
-   const {data,error}=await supabase.from('scheduled_messages').update(patch).eq('id',id).eq('status','pending').select('*').single();
+  async updateScheduled(id:string,patch:{scheduled_at?:string;delivery_status?:'queued'|'cancelled'}){
+   const {data,error}=await supabase.from('kc_scheduled_messages').update(patch).eq('id',id).eq('delivery_status','queued').select('*').single();
    if(error)throw error;return data;
   },
   async notifications(){
