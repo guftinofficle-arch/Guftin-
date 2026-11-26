@@ -1041,6 +1041,8 @@ function GuftinApp() {
   const [magicDraft,setMagicDraft]=useState('');
   const [magicScheduleAt,setMagicScheduleAt]=useState('');
   const [magicCommentDraft,setMagicCommentDraft]=useState('');
+  const [magicRecording,setMagicRecording]=useState<Audio.Recording|null>(null);
+  const [magicRecordingBusy,setMagicRecordingBusy]=useState(false);
   const [liveverseView,setLiveverseView]=useState<'home'|'create'|'room'>('home');
   const [liveverseSpaces,setLiveverseSpaces]=useState<any[]>([]);
   const [liveverseSelected,setLiveverseSelected]=useState<any>(null);
@@ -5305,6 +5307,33 @@ function GuftinApp() {
     }catch(error:any){Alert.alert('Upload failed',error?.message||'The selected media could not be uploaded.');}
     finally{setMagicBusy(false);}
   };
+  const toggleMagicVoiceNote=async()=>{
+    if(!magicSelected||!session?.user?.id||magicRecordingBusy)return;
+    if(magicRecording){
+      setMagicRecordingBusy(true);
+      try{
+        await magicRecording.stopAndUnloadAsync();
+        const uri=magicRecording.getURI();
+        setMagicRecording(null);
+        await Audio.setAudioModeAsync({allowsRecordingIOS:false,playsInSilentModeIOS:true,shouldDuckAndroid:true});
+        if(!uri)throw new Error('The voice note file was not created.');
+        const file=new File(uri),mime='audio/mp4';
+        const item=await magicMomentsClient.upload({momentId:magicSelected.id,authorId:session.user.id,fileName:'magic-voice-note.m4a',mimeType:mime,body:new Blob([await file.arrayBuffer()],{type:mime}),bytes:file.size||0,itemType:'voice_note'});
+        setMagicItems(items=>[...items,item]);
+      }catch(error:any){setMagicRecording(null);Alert.alert('Voice note not saved',error?.message||'Please record again.');}
+      finally{setMagicRecordingBusy(false);}
+      return;
+    }
+    try{
+      const permission=await Audio.requestPermissionsAsync();
+      if(!permission.granted)throw new Error('Microphone permission is required to record a voice note.');
+      await Audio.setAudioModeAsync({allowsRecordingIOS:true,playsInSilentModeIOS:true,shouldDuckAndroid:true});
+      const recording=new Audio.Recording();
+      await recording.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+      await recording.startAsync();
+      setMagicRecording(recording);
+    }catch(error:any){Alert.alert('Recording unavailable',error?.message||'Check microphone permission and try again.');}
+  };
   const addMagicComment=async()=>{
     if(!magicSelected||!session?.user?.id||!magicCommentDraft.trim())return;
     try{const comment=await magicMomentsClient.comment(magicSelected.id,session.user.id,magicCommentDraft.trim());setMagicComments(items=>[...items,comment]);setMagicCommentDraft('');}
@@ -6242,12 +6271,13 @@ function GuftinApp() {
         {magicSelected.description?<Text style={{fontSize:12,color:C.ink,marginTop:8}}>{magicSelected.description}</Text>:null}
         {magicSelected.kind==='secret_surprise'&&magicSelected.creator_id===session?.user?.id?<Btn disabled={magicBusy} onPress={()=>void revealMagicMoment()} style={{backgroundColor:'#6f4db4',padding:10,borderRadius:10,marginTop:10}}><Text style={{color:'#fff',fontWeight:'900'}}>Reveal surprise (server checks reveal time)</Text></Btn>:null}
         <View style={{flexDirection:'row',gap:7,marginTop:13}}>
-          <Btn onPress={()=>void uploadMagicMedia()} disabled={magicBusy} style={{backgroundColor:'#6f4db4',padding:10,borderRadius:9,flex:1}}><Text style={{color:'#fff',fontWeight:'900',textAlign:'center'}}>＋ Add photo/video</Text></Btn>
+          <Btn onPress={()=>void uploadMagicMedia()} disabled={magicBusy||magicRecordingBusy} style={{backgroundColor:'#6f4db4',padding:10,borderRadius:9,flex:1}}><Text style={{color:'#fff',fontWeight:'900',textAlign:'center'}}>＋ Add photo/video</Text></Btn>
+          <Btn onPress={()=>void toggleMagicVoiceNote()} disabled={magicBusy||magicRecordingBusy} style={{backgroundColor:magicRecording?'#b33d56':'#2b6f60',padding:10,borderRadius:9,flex:1}}><Text style={{color:'#fff',fontWeight:'900',textAlign:'center'}}>{magicRecordingBusy?'Saving…':magicRecording?'■ Stop voice note':'🎙 Voice note'}</Text></Btn>
         </View>
         <TextInput value={magicDraft} onChangeText={setMagicDraft} placeholder="Add a memory or contribution…" multiline style={{backgroundColor:C.paper,padding:10,borderRadius:10,color:C.ink,minHeight:75,marginTop:10,textAlignVertical:'top'}}/>
         <Btn disabled={magicBusy||!magicDraft.trim()} onPress={()=>void addMagicText()} style={{backgroundColor:C.green,padding:10,borderRadius:9,marginTop:7}}><Text style={{color:'#fff',fontWeight:'900',textAlign:'center'}}>Save contribution</Text></Btn>
         {magicItems.map((item:any)=><View key={item.id} style={{padding:10,backgroundColor:C.paper,borderRadius:11,marginTop:9}}>
-          {item.item_type==='text'?<Text style={{color:C.ink,fontSize:13}}>{item.body}</Text>:item.item_type==='image'&&item.signedUrl?<Image source={{uri:item.signedUrl}} style={{width:'100%',height:190,borderRadius:10}} resizeMode="cover"/>:item.item_type==='video'&&item.signedUrl?<VideoBubble uri={item.signedUrl}/>:<Text style={{color:C.muted}}>Shared {item.item_type}</Text>}
+          {item.item_type==='text'?<Text style={{color:C.ink,fontSize:13}}>{item.body}</Text>:item.item_type==='image'&&item.signedUrl?<Image source={{uri:item.signedUrl}} style={{width:'100%',height:190,borderRadius:10}} resizeMode="cover"/>:item.item_type==='video'&&item.signedUrl?<VideoBubble uri={item.signedUrl}/>:['audio','voice_note'].includes(item.item_type)&&item.signedUrl?<AudioBubble uri={item.signedUrl}/>:<Text style={{color:C.muted}}>Shared {item.item_type}</Text>}
           <Text style={{fontSize:9,color:C.muted,marginTop:5}}>{timeLabel(item.created_at)}</Text>
           <Btn onPress={()=>void magicMomentsClient.react(magicSelected.id,item.id,session.user.id,'❤️').then(()=>Alert.alert('Reaction saved','Your reaction was added.')).catch((e:any)=>Alert.alert('Reaction failed',e.message))} style={{alignSelf:'flex-start',padding:6,marginTop:4}}><Text style={{color:'#6f4db4',fontWeight:'900'}}>♡ React</Text></Btn>
         </View>)}
