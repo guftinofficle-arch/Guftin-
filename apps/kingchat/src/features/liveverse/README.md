@@ -13,10 +13,11 @@ This directory is the isolated implementation area for Liveverse. It is delibera
 - [x] Liveverse main navigation tab plus direct/group chat header entry points.
 - [x] Cross-platform SVG drawing surface; strokes persist with optimistic version checks and refresh through Realtime. Concurrent stroke merge is not yet implemented.
 - [x] Shared Notes editor with optimistic version checks; stale saves show a conflict and require reload.
-- [x] Presence and pointer broadcast primitives; live pointer cursor rendering remains incomplete.
+- [x] Presence and pointer broadcast primitives with visible remote pointer cursors on the shared canvas.
 - [x] Shared image/video picker, private upload, signed-URL viewer and authorized deletion. Synchronized playback remains incomplete.
 - [x] Shared Tasks UI for create, complete/reopen and delete with persistent Supabase state.
-- [x] LiveKit membership-authorized token endpoint and actual audio-room join/mute/leave UI added; deployment and two-device audio validation remain pending.
+- [x] LiveKit membership-authorized token endpoint source, real audio-room join/mute/leave UI, participant list, microphone permission prompt and native communication audio-session setup added; production deployment and two-device audio validation remain pending.
+- [x] Liveverse member list and owner-only member removal UI.
 - [ ] Two-account authorization and collaboration tests.
 - [ ] Android and web production builds plus regression tests.
 
@@ -54,9 +55,13 @@ Voice Room will require microphone permission declarations and platform permissi
 The SQL foundation is not proof that the six user-facing modules are complete. Each unchecked item requires implementation and real-device/two-account verification.
 
 
-## Current client-library limits
+## Current client-library and runtime status
 
-The client library is an initial backend integration layer, not a finished user-facing feature. The app does not yet expose Liveverse entry points, canvas drawing, notes editor, task board, media picker/viewer, or voice room UI. The SQL migration and client operations have not yet been applied/tested against two real accounts. The database migration remains a source file until explicitly applied to a Supabase test project.
+The native app now exposes Liveverse entry points, shared canvas drawing with remote pointer cursors, shared notes, tasks, private media upload/view/delete, presence, linked-chat invitations and a LiveKit audio-room screen. The member list and owner-only member removal controls are also wired to the client.
+
+The repository contains the Liveverse SQL migration and the liveverse-livekit-token Edge Function source. Neither is currently deployed to the connected production Supabase project: its migration history has no Liveverse migration, its public schema has no Liveverse tables, and its deployed Edge Function list has no Liveverse token endpoint. Therefore the LiveKit screen is implemented in the app but cannot connect to a real room until the migration and Edge Function are deployed and the existing server-side LiveKit secrets are confirmed. Do not call the voice room production-ready until two real devices have joined successfully.
+
+The SQL migration has previously passed a syntax-only transaction that was rolled back. This does not prove the RLS rules work across two real accounts. No production schema changes have been made for Liveverse.
 
 
 ## App integration added
