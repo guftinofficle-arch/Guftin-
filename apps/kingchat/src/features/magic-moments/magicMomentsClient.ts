@@ -5,7 +5,7 @@ export type MagicMoment = {
   id:string; creator_id:string; kind:MagicMomentKind; title:string; description:string;
   conversation_id:string|null; recipient_id:string|null; reveal_at:string|null; scheduled_at:string|null;
   timezone:string; status:string; cover_object_path:string|null; settings:Record<string,unknown>;
-  created_at:string; updated_at:string; revealed_at:string|null;
+  created_at:string; updated_at:string; revealed_at:string|null; scheduled_message_id?:string|null;
 };
 export type MagicMomentItem = {
   id:string; moment_id:string; author_id:string; item_type:'text'|'image'|'video'|'audio'|'voice_note'|'card';
@@ -43,7 +43,11 @@ export function createMagicMomentsClient(supabase:SupabaseClient){
    return data;
   },
   async acceptInvite(momentId:string){
-   const {data,error}=await supabase.from('magic_moment_members').update({accepted_at:new Date().toISOString()}).eq('moment_id',momentId).select('*').single();
+   const {data:member,error:lookupError}=await supabase.from('magic_moment_members').select('id,role,accepted_at').eq('moment_id',momentId).eq('user_id',(await supabase.auth.getUser()).data.user?.id||'').maybeSingle();
+   if(lookupError)throw lookupError;
+   if(!member)throw new Error('You are not invited to this Magic Moment.');
+   if(member.role==='owner'||member.accepted_at)return member;
+   const {data,error}=await supabase.from('magic_moment_members').update({accepted_at:new Date().toISOString()}).eq('id',member.id).select('*').single();
    if(error)throw error; return data;
   },
   async members(momentId:string){
@@ -87,13 +91,13 @@ export function createMagicMomentsClient(supabase:SupabaseClient){
    const {data,error}=await supabase.from('magic_moment_reactions').upsert({moment_id:momentId,item_id:itemId,user_id:userId,reaction},{onConflict:'moment_id,item_id,user_id'}).select('*').single();
    if(error)throw error;return data;
   },
-  async scheduleMessage(input:{senderId:string;recipientId:string;conversationId:string;content:string;scheduledAt:string;timezone:string;attachments?:unknown[]}){
+  async scheduleMessage(input:{momentId:string;senderId:string;recipientId:string;conversationId:string;content:string;scheduledAt:string;timezone:string;attachments?:unknown[]}){
    if(!input.content.startsWith('KC-E2EE1:'))throw new Error('Future messages must be end-to-end encrypted before scheduling.');
-   const {data,error}=await supabase.from('kc_scheduled_messages').insert({
-    sender_id:input.senderId,conversation_id:input.conversationId,body_envelope:input.content,
-    message_type:'text',scheduled_at:input.scheduledAt,delivery_status:'queued'
-   }).select('*').single();
-   if(error)throw error;return data;
+   const {data,error}=await supabase.rpc('kc_schedule_magic_moment_message',{
+    p_moment_id:input.momentId,p_conversation_id:input.conversationId,
+    p_body_envelope:input.content,p_scheduled_at:input.scheduledAt
+   });
+   if(error)throw error;return {id:data,delivery_status:'queued',scheduled_at:input.scheduledAt};
   },
   async scheduledMessages(){
    const {data,error}=await supabase.from('kc_scheduled_messages').select('id,conversation_id,sender_id,body_envelope,message_type,scheduled_at,delivery_status,sent_message_id,last_error,created_at,updated_at').order('scheduled_at');
