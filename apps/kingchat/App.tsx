@@ -982,6 +982,7 @@ function GuftinApp() {
   const [holoGallery,setHoloGallery]=useState<any[]>([]);
   const [holoEvents,setHoloEvents]=useState<any[]>([]);
   const [holoMembers,setHoloMembers]=useState<any[]>([]);
+  const [holoMemberProfiles,setHoloMemberProfiles]=useState<Record<string,any>>({});
   const [holoOnlineMembers,setHoloOnlineMembers]=useState<any[]>([]);
   const [holoLoading,setHoloLoading]=useState(false);
   const [holoSaving,setHoloSaving]=useState(false);
@@ -4901,7 +4902,7 @@ function GuftinApp() {
         if(!active)return;
         setHoloMemories(memories);
         setHoloGallery(await Promise.all(gallery.map(async(item:any)=>({...item,url:await holoClient.gallerySignedUrl(item.object_path)}))));
-        setHoloEvents(events);setHoloMembers(members);
+        setHoloEvents(events);setHoloMembers(members);await refreshHoloMemberProfiles(members);
       }catch(error:any){if(active)console.warn('HoloSpace realtime refresh failed:',error?.message||error);}
     };
     void holoClient.subscribeRoom(roomId,userId,()=>{void refresh();},state=>{
@@ -4914,6 +4915,14 @@ function GuftinApp() {
     return ()=>{active=false;setHoloOnlineMembers([]);if(channel)void supabase.removeChannel(channel);};
   },[holoSelected?.id,holoView,session?.user?.id,holoClient,profile?.display_name,profile?.username]);
 
+  const refreshHoloMemberProfiles=async(members:any[])=>{
+    const ids=[...new Set(members.map((member:any)=>member.user_id).filter(Boolean))];
+    if(!ids.length){setHoloMemberProfiles({});return;}
+    const {data,error}=await supabase.from('kc_profiles').select('id,display_name,username,avatar_url').in('id',ids);
+    if(error){console.warn('HoloSpace member profile lookup:',error.message);return;}
+    const mapped:Record<string,any>={};(data||[]).forEach((profile:any)=>{mapped[profile.id]=profile;});
+    setHoloMemberProfiles(mapped);
+  };
   const openHoloRoom=async(room:any)=>{
     setHoloSelected(room);setHoloRoomNameDraft(room.name||'');setHoloRoomDescriptionDraft(room.description||'');setHoloRoomPrivacyDraft(room.privacy||'private');setHoloView('room');setHoloLoading(true);
     try{
@@ -5006,7 +5015,7 @@ function GuftinApp() {
     Alert.alert('Remove member?','This person will lose access to this private room.',[
       {text:'Cancel',style:'cancel'},
       {text:'Remove',style:'destructive',onPress:async()=>{
-        try{await holoClient.removeMember(holoSelected.id,userId);setHoloMembers(await holoClient.listMembers(holoSelected.id));}
+        try{await holoClient.removeMember(holoSelected.id,userId);const refreshedMembers=await holoClient.listMembers(holoSelected.id);setHoloMembers(refreshedMembers);await refreshHoloMemberProfiles(refreshedMembers);}
         catch(error:any){Alert.alert('Could not remove member',error?.message||'Please try again.');}
       }}
     ]);
@@ -5498,7 +5507,7 @@ function GuftinApp() {
         <Text style={{fontSize:10,color:C.muted,marginTop:4}}>Active: {holoMembers.filter((x:any)=>x.invitation_status==='active').length} · Pending: {holoMembers.filter((x:any)=>x.invitation_status==='invited').length}</Text>
         {holoSelected.owner_id===session?.user?.id?<Btn disabled={holoSaving} onPress={()=>void inviteHoloChatParticipants()} style={{backgroundColor:C.green,padding:10,borderRadius:10,alignItems:'center',marginTop:8}}><Text style={{color:'#fff',fontWeight:'900'}}>Invite linked chat participants</Text></Btn>:null}
         {holoMembers.map((member:any)=><View key={member.user_id} style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingVertical:7,borderBottomWidth:1,borderColor:C.line}}>
-          <View style={{flex:1}}><Text style={{fontSize:11,color:C.ink,fontWeight:'800'}}>{member.user_id===session?.user?.id?'You':member.user_id.slice(0,8)+'…'} · {member.role}</Text><Text style={{fontSize:9,color:C.muted}}>{member.invitation_status==='invited'?'Invitation pending':'Joined member'}</Text></View>
+          <View style={{flex:1}}><Text style={{fontSize:11,color:C.ink,fontWeight:'800'}}>{member.user_id===session?.user?.id?'You':(holoMemberProfiles[member.user_id]?.display_name||holoMemberProfiles[member.user_id]?.username||member.user_id.slice(0,8)+'…')} · {member.role}</Text><Text style={{fontSize:9,color:C.muted}}>{member.invitation_status==='invited'?'Invitation pending':'Joined member'}</Text></View>
           {holoSelected.owner_id===session?.user?.id&&member.role!=='owner'?<Btn onPress={()=>void removeHoloMember(member.user_id)} style={{padding:7,backgroundColor:C.paper,borderRadius:8}}><Text style={{fontSize:10,color:C.red,fontWeight:'800'}}>Remove</Text></Btn>:null}
         </View>)}
         <Text style={{fontSize:15,fontWeight:'900',color:C.ink,marginTop:16}}>Room settings</Text>
