@@ -185,8 +185,8 @@ using (private.liveverse_is_member(space_id) or user_id = (select auth.uid()));
 drop policy if exists liveverse_members_add_manager_or_owner on public.liveverse_members;
 create policy liveverse_members_add_manager_or_owner on public.liveverse_members for insert to authenticated
 with check (
-  (role = 'owner' and private.liveverse_is_owner(space_id))
-  or (role <> 'owner' and (
+  (role = 'owner' and private.liveverse_is_owner(space_id) and user_id=(select auth.uid()))
+  or (role = 'member' and (
     exists (select 1 from public.liveverse_spaces s where s.id = space_id and s.owner_id = (select auth.uid()))
     or private.liveverse_is_manager(space_id)
   ))
@@ -231,7 +231,7 @@ create policy liveverse_events_member_insert on public.liveverse_events for inse
 with check (private.liveverse_is_member(space_id) and actor_id = (select auth.uid()));
 
 grant select, insert, update, delete on public.liveverse_spaces to authenticated;
-grant select, insert, update, delete on public.liveverse_members to authenticated;
+grant select, insert, delete on public.liveverse_members to authenticated;
 grant select, insert, update, delete on public.liveverse_notes to authenticated;
 grant select, insert, update, delete on public.liveverse_tasks to authenticated;
 grant select, insert, update, delete on public.liveverse_canvas to authenticated;
