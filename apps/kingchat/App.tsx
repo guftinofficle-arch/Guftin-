@@ -6266,46 +6266,6 @@ function GuftinApp() {
         {magicNotifications.length?<><Text style={{fontSize:14,color:C.ink,fontWeight:'900',marginTop:12,marginBottom:7}}>Moments Shared With Me</Text>{magicNotifications.map((n:any)=><View key={n.id} style={{backgroundColor:C.paper,padding:10,borderRadius:10,marginBottom:6}}><Text style={{fontSize:11,color:C.ink,fontWeight:'800'}}>{n.title}</Text><Text style={{fontSize:10,color:C.muted,marginTop:3}}>{n.body}</Text></View>)}</>:null}
       </View>:null}
     </ScrollView>:null}
-    {tab==='AI'?<View style={{flex:1,paddingHorizontal:14,paddingTop:14,paddingBottom:10}}>
-      <View style={{backgroundColor:C.mint,borderRadius:18,padding:15,marginBottom:10}}>
-        <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}>
-          <View style={{flex:1}}>
-            <Text style={{fontSize:18,fontWeight:'900',color:C.green}}>✦ Karaboz AI</Text>
-            <Text style={{fontSize:11,color:C.ink,marginTop:4}}>Your Guftin assistant · Urdu, Hindi and English</Text>
-          </View>
-          <Btn onPress={startNewAIChat} style={{backgroundColor:C.white,paddingHorizontal:12,paddingVertical:9,borderRadius:12}}><Text style={{color:C.green,fontWeight:'900'}}>＋ New</Text></Btn>
-          <Btn onPress={()=>void loadAIChats()} style={{backgroundColor:C.white,paddingHorizontal:12,paddingVertical:9,borderRadius:12,marginLeft:6}}><Text style={{color:C.green,fontWeight:'900'}}>History</Text></Btn>
-        </View>
-      </View>
-      <View style={{flexDirection:'row',flexWrap:'wrap',gap:7,marginBottom:10}}>
-        {([['chat','Ask AI'],['write','Write'],['translate','Translate'],['summarize','Summarize'],['reply','Suggest reply']] as Array<[typeof aiMode,string]>).map(([mode,label])=><Btn key={mode} onPress={()=>setAiMode(mode)} style={{paddingHorizontal:12,paddingVertical:8,borderRadius:18,backgroundColor:aiMode===mode?C.green:C.white,borderWidth:1,borderColor:aiMode===mode?C.green:C.line}}><Text style={{fontSize:11,fontWeight:'900',color:aiMode===mode?'#fff':C.ink}}>{label}</Text></Btn>)}
-      </View>
-      {aiHistoryOpen?<View style={{backgroundColor:C.white,borderRadius:15,padding:10,marginBottom:10,maxHeight:160}}>
-        <Text style={{fontWeight:'900',color:C.ink,marginBottom:7}}>Recent AI chats</Text>
-        <ScrollView>
-          {aiChats.length?aiChats.map((chat:any)=><Btn key={chat.id} onPress={()=>void openAIChat(chat.id)} style={{paddingVertical:9,borderBottomWidth:1,borderColor:C.line,alignItems:'flex-start'}}><Text numberOfLines={1} style={{color:C.ink,fontWeight:'700'}}>{chat.title||'New chat'}</Text><Text style={{fontSize:10,color:C.muted}}>{chat.message_count||0} messages</Text></Btn>):<Text style={{color:C.muted,fontSize:11,padding:8}}>No saved AI chats yet.</Text>}
-        </ScrollView>
-      </View>:null}
-      <ScrollView style={{flex:1}} contentContainerStyle={{paddingBottom:12,gap:10}}>
-        {aiMessages.length===0?<View style={{alignItems:'center',paddingHorizontal:18,paddingVertical:34}}>
-          <View style={{width:66,height:66,borderRadius:23,backgroundColor:C.mint,alignItems:'center',justifyContent:'center',marginBottom:14}}><Text style={{fontSize:32,color:C.green}}>✦</Text></View>
-          <Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>How can I help?</Text>
-          <Text style={{fontSize:12,color:C.muted,textAlign:'center',lineHeight:18,marginTop:7}}>Ask a question, write a message, translate text or get help replying to someone.</Text>
-          <View style={{flexDirection:'row',flexWrap:'wrap',justifyContent:'center',gap:8,marginTop:18}}>
-            {['Explain something simply','Write a polite message','Translate into Urdu','Suggest a friendly reply'].map((hint,i)=><Btn key={hint} onPress={()=>{setAiMode((['chat','write','translate','reply'] as any)[i]);setAiDraft(hint+': ');}} style={{backgroundColor:C.white,borderWidth:1,borderColor:C.line,borderRadius:13,padding:11}}><Text style={{fontSize:11,color:C.green,fontWeight:'800'}}>{hint}</Text></Btn>)}
-          </View>
-        </View>:aiMessages.map((item,index)=><View key={index} style={{alignSelf:item.role==='user'?'flex-end':'flex-start',maxWidth:'90%',backgroundColor:item.role==='user'?C.mint:C.white,borderRadius:16,padding:13,borderWidth:1,borderColor:C.line}}>
-          <Text style={{fontSize:10,fontWeight:'900',color:C.green,marginBottom:5}}>{item.role==='user'?'You':'Karaboz AI'}</Text>
-          <Text selectable style={{fontSize:13,color:C.ink,lineHeight:20}}>{item.content}</Text>
-        </View>)}
-        {aiBusy?<View style={{alignSelf:'flex-start',backgroundColor:C.white,borderRadius:14,padding:12}}><Text style={{fontSize:12,color:C.muted}}>Karaboz AI is thinking…</Text></View>:null}
-      </ScrollView>
-      <View style={{backgroundColor:C.white,borderRadius:18,padding:9,borderWidth:1,borderColor:C.line,flexDirection:'row',alignItems:'flex-end',gap:8}}>
-        <TextInput value={aiDraft} onChangeText={setAiDraft} placeholder={aiMode==='translate'?'Text to translate…':aiMode==='write'?'What message should I write?':aiMode==='reply'?'Paste a message to get reply ideas…':'Message Karaboz AI…'} multiline maxLength={4000} style={{flex:1,minHeight:44,maxHeight:120,paddingHorizontal:9,paddingVertical:8,color:C.ink,textAlignVertical:'center'}}/>
-        <Btn disabled={aiBusy||!aiDraft.trim()} onPress={()=>void sendAIMessage()} style={{width:43,height:43,borderRadius:14,backgroundColor:aiBusy||!aiDraft.trim()?C.line:C.green,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:18,color:'#fff',fontWeight:'900'}}>➤</Text></Btn>
-      </View>
-      <Text style={{fontSize:9,color:C.muted,textAlign:'center',marginTop:6}}>AI can make mistakes. Review suggested messages before sending.</Text>
-    </View>:null}
     {tab==='Calls'?<ScrollView contentContainerStyle={{padding:18,paddingBottom:30}}>
       <View style={{backgroundColor:C.paper,borderRadius:18,padding:16,marginBottom:16}}>
         <Text style={{fontSize:18,fontWeight:'900',color:C.ink}}>Call history</Text>
