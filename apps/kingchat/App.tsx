@@ -981,6 +981,7 @@ function GuftinApp() {
   const [holoGallery,setHoloGallery]=useState<any[]>([]);
   const [holoEvents,setHoloEvents]=useState<any[]>([]);
   const [holoMembers,setHoloMembers]=useState<any[]>([]);
+  const [holoOnlineMembers,setHoloOnlineMembers]=useState<any[]>([]);
   const [holoLoading,setHoloLoading]=useState(false);
   const [holoSaving,setHoloSaving]=useState(false);
   const [holoName,setHoloName]=useState('');
@@ -4887,6 +4888,29 @@ function GuftinApp() {
     finally{setHoloLoading(false);}
   },[session?.user?.id,holoClient]);
   useEffect(()=>{if(tab==='HoloSpace')void loadHoloSpaces();},[tab,loadHoloSpaces]);
+  useEffect(()=>{
+    const roomId=holoSelected?.id,userId=session?.user?.id;
+    if(!roomId||!userId||holoView!=='room')return;
+    let active=true;let channel:any=null;
+    const refresh=async()=>{
+      try{
+        const [memories,gallery,events,members]=await Promise.all([holoClient.listMemories(roomId),holoClient.listGallery(roomId),holoClient.listEvents(roomId),holoClient.listMembers(roomId)]);
+        if(!active)return;
+        setHoloMemories(memories);
+        setHoloGallery(await Promise.all(gallery.map(async(item:any)=>({...item,url:await holoClient.gallerySignedUrl(item.object_path)}))));
+        setHoloEvents(events);setHoloMembers(members);
+      }catch(error:any){if(active)console.warn('HoloSpace realtime refresh failed:',error?.message||error);}
+    };
+    void holoClient.subscribeRoom(roomId,userId,()=>{void refresh();},state=>{
+      if(active)setHoloOnlineMembers(Object.values(state).flat() as any[]);
+    }).then(async joined=>{
+      if(!active){await supabase.removeChannel(joined);return;}
+      channel=joined;
+      await holoClient.trackPresence(joined,userId,profile?.display_name||profile?.username||'Guftin member','orbit');
+    }).catch((error:any)=>{if(active)console.warn('HoloSpace realtime connection unavailable:',error?.message||error);});
+    return ()=>{active=false;setHoloOnlineMembers([]);if(channel)void supabase.removeChannel(channel);};
+  },[holoSelected?.id,holoView,session?.user?.id,holoClient,profile?.display_name,profile?.username]);
+
   const openHoloRoom=async(room:any)=>{
     setHoloSelected(room);setHoloRoomNameDraft(room.name||'');setHoloRoomDescriptionDraft(room.description||'');setHoloRoomPrivacyDraft(room.privacy||'private');setHoloView('room');setHoloLoading(true);
     try{
@@ -5446,7 +5470,7 @@ function GuftinApp() {
       {holoView==='room'&&holoSelected?<View style={{backgroundColor:C.white,borderRadius:17,padding:15,borderWidth:1,borderColor:C.line}}>
         <Btn onPress={()=>{setHoloSelected(null);setHoloView('mine');}} style={{alignSelf:'flex-start',paddingVertical:7,paddingHorizontal:10,backgroundColor:C.paper,borderRadius:10}}><Text style={{color:C.green,fontWeight:'900'}}>‹ Back to spaces</Text></Btn>
         <Text style={{fontSize:20,fontWeight:'900',color:C.ink,marginTop:12}}>{holoSelected.name}</Text>
-        <Text style={{fontSize:11,color:C.muted,marginTop:4}}>{holoSelected.privacy} room · {holoMembers.filter(x=>x.invitation_status==='active').length} members</Text>
+        <Text style={{fontSize:11,color:C.muted,marginTop:4}}>{holoSelected.privacy} room · {holoMembers.filter(x=>x.invitation_status==='active').length} members · {holoOnlineMembers.length} online</Text>
         <Text style={{fontSize:15,fontWeight:'900',color:C.ink,marginTop:16}}>Members & invitations</Text>
         <Text style={{fontSize:10,color:C.muted,marginTop:4}}>Active: {holoMembers.filter((x:any)=>x.invitation_status==='active').length} · Pending: {holoMembers.filter((x:any)=>x.invitation_status==='invited').length}</Text>
         {holoSelected.owner_id===session?.user?.id?<Btn disabled={holoSaving} onPress={()=>void inviteHoloChatParticipants()} style={{backgroundColor:C.green,padding:10,borderRadius:10,alignItems:'center',marginTop:8}}><Text style={{color:'#fff',fontWeight:'900'}}>Invite linked chat participants</Text></Btn>:null}
