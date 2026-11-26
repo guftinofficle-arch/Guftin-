@@ -18,14 +18,14 @@ This is an isolated feature module on `feature/guftin-holospace`; it does not re
 - [x] Main navigation tab and a direct/group chat header entry that creates a room linked to its originating chat ID.
 - [ ] Real invitation cards through the current Guftin messaging send path.
 - [x] Basic persistent text Memory Wall create/list flow; edit/delete controls and memory media attachments remain incomplete.
-- [ ] Shared Gallery picker, progress, viewer and deletion.
+- [x] Shared Gallery picker, private upload, signed-URL viewer and authorized deletion UI; upload progress is not yet surfaced.
 - [x] Predefined avatar choices and saved per-room avatar preferences (UI currently saves a selected key).
 - [x] Predefined room themes persist through Supabase; custom wallpaper upload/preview remains incomplete.
-- [ ] Special Moments with timezone-aware countdown/event editing.
-- [ ] Members/room settings, privacy, leave and delete flows.
-- [ ] Live Hangout with real WebRTC, permissions, reconnect and tested ICE/TURN.
-- [ ] Realtime subscription lifecycle and offline recovery.
-- [x] Initial pgTAP schema/RLS-flag/private-bucket/Realtime smoke test file added (not yet executed); two-account authorization tests and Android/Web builds remain incomplete.
+- [x] Timezone-aware special-date/countdown creation and listing; event edit/delete UI remains incomplete.
+- [x] Linked-chat participant invitations, member listing/removal, room name/description/privacy settings, leave and owner-delete flows.
+- [x] LiveKit membership-authorized token endpoint and actual LiveKit audio-room join/mute/leave UI added; deployment, microphone-permission validation, ICE/TURN and two-device call test remain blocked/pending.
+- [x] Room-scoped Realtime refresh and unique per-user presence keys; reconnect/offline recovery still needs device testing.
+- [x] pgTAP schema/RLS-flag/private-bucket/Realtime smoke test file added (not yet executed); two-account authorization tests and Android/iOS device verification remain incomplete.
 
 ## Database migration
 `supabase/migrations/20261126190000_guftin_holospace_foundation.sql`
@@ -47,3 +47,21 @@ No paid provider is silently introduced. Live Hangout needs microphone permissio
 ## Current app wiring limits
 
 The current navigation entry creates a room associated with the active direct/group conversation. The existing chat invitation-card send path has not yet been wired, so chat participants are not automatically invited. The room detail currently exposes persistent text memories, predefined theme choices and avatar preferences. Gallery upload/view, member management, event creation, room settings and voice are not complete yet.
+
+
+## LiveKit voice deployment
+
+The function is at `supabase/functions/holospace-livekit-token/index.ts` relative to `apps/kingchat`. Deploy it to the existing Supabase project with the Supabase CLI from `apps/kingchat`:
+
+```sh
+supabase functions deploy holospace-livekit-token --project-ref oyjemlbsmffvofefgxvd
+```
+
+Configure these server-side Edge Function secrets in Supabase: `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET`. These values must never be copied into Expo public environment variables or client code. The endpoint verifies the user's active HoloSpace membership before issuing a short-lived room token. Voice is not verified until the function is deployed and two real devices successfully join, mute/unmute and leave.
+
+## Remaining release blockers
+
+- Invitation cards still need to be sent through the existing `kc_messages` chat pipeline.
+- Upload progress, event edit/delete, and profile-name resolution in the member list need polish.
+- The SQL migration and pgTAP tests have not been applied/run against a disposable Supabase branch.
+- The latest web export is being re-run after fixing platform-specific AdMob imports and artifact upload path. Android APK build and emulator startup test must complete on the final commit.
