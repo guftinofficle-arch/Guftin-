@@ -5036,7 +5036,7 @@ function GuftinApp() {
     if(!channel||!session?.user?.id)return;
     const now=Date.now();if(now-liveverseLastPointerSentRef.current<80)return;
     liveverseLastPointerSentRef.current=now;
-    void liveverseClient.broadcastPointer(channel,{userId:session.user.id,displayName:profile?.display_name||profile?.username||'Guftin member',x:Math.max(0,Math.min(1,x/liveverseCanvasWidth)),y:Math.max(0,Math.min(1,y/200))}).catch((error:any)=>console.warn('Liveverse pointer broadcast failed:',error?.message||error));
+    void liveverseClient.broadcastPointer(channel,{userId:session.user.id,displayName:profile?.display_name||profile?.username||'Guftin member',x:Math.max(0,Math.min(1,x/300)),y:Math.max(0,Math.min(1,y/200))}).catch((error:any)=>console.warn('Liveverse pointer broadcast failed:',error?.message||error));
   };
   const liveverseCanvasPanResponder=useMemo(()=>PanResponder.create({
     onStartShouldSetPanResponder:()=>true,
