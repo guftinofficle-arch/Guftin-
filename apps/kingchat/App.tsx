@@ -5594,7 +5594,7 @@ function GuftinApp() {
             <Svg width="100%" height="200" viewBox="0 0 300 200">
               {liveverseCanvasStrokes.map((stroke:any,index:number)=><Path key={index} d={stroke.d} stroke={stroke.color||'#19223d'} strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" fill="none"/>)}
             </Svg>
-            {liveversePointers.map((pointer:any)=><View key={pointer.user_id} pointerEvents="none" style={{position:'absolute',left:(pointer.x*100)+'%',top:pointer.y*200,transform:[{translateX:-3},{translateY:-3}],zIndex:5}}>
+            {liveversePointers.map((pointer:any)=><View key={pointer.user_id} pointerEvents="none" style={{position:'absolute',left:pointer.x*liveverseCanvasWidth,top:pointer.y*200,transform:[{translateX:-3},{translateY:-3}],zIndex:5}}>
               <View style={{width:9,height:9,borderRadius:5,backgroundColor:'#e14d5a',borderWidth:1,borderColor:'#fff'}}/>
               <Text numberOfLines={1} style={{maxWidth:110,backgroundColor:'#17105c',color:'#fff',fontSize:9,fontWeight:'800',paddingHorizontal:5,paddingVertical:2,borderRadius:5,marginTop:2}}>{pointer.display_name}</Text>
             </View>)}
