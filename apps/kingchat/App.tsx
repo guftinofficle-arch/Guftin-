@@ -956,6 +956,7 @@ function GuftinApp() {
   const [liveverseTaskDraft,setLiveverseTaskDraft]=useState('');
   const [liveverseCanvasDraft,setLiveverseCanvasDraft]=useState('');
   const [liveverseBusy,setLiveverseBusy]=useState(false);
+  const [liveversePresence,setLiveversePresence]=useState<any[]>([]);
   const activeTabRef=useRef(tab);
   activeTabRef.current=tab;
   const [session,setSession]=useState<any>(null);
@@ -4908,6 +4909,31 @@ function GuftinApp() {
     }catch(error:any){Alert.alert('Media upload failed',error?.message||'Please try again.');}
     finally{setLiveverseBusy(false);}
   };
+  const inviteLiveverseChatMembers=async()=>{
+    if(!liveverseSelected||liveverseSelected.owner_id!==session?.user?.id){Alert.alert('Owner access required','Only the space owner can invite members.');return;}
+    if(!liveverseSelected.source_chat_id){Alert.alert('No linked chat','This space was not created from a chat.');return;}
+    try{
+      const {data,error}=await supabase.from('kc_conversation_members').select('user_id').eq('conversation_id',liveverseSelected.source_chat_id);
+      if(error)throw error;
+      const ids=[...new Set((data||[]).map((x:any)=>x.user_id).filter((id:string)=>id&&id!==session.user.id))];
+      for(const id of ids)await liveverseClient.inviteMember(liveverseSelected.id,id);
+      Alert.alert('Invitations sent',ids.length+' linked chat member(s) have been added to the Liveverse space.');
+    }catch(error:any){Alert.alert('Could not invite members',error?.message||'Please try again.');}
+  };
+  useEffect(()=>{
+    if(tab!=='Liveverse'||liveverseView!=='room'||!liveverseSelected?.id||!session?.user?.id)return;
+    let active=true;let channel:any=null;
+    const refresh=async()=>{
+      try{
+        const [notes,tasks,media,canvas]=await Promise.all([liveverseClient.listNotes(liveverseSelected.id),liveverseClient.listTasks(liveverseSelected.id),liveverseClient.listMedia(liveverseSelected.id),liveverseClient.loadCanvas(liveverseSelected.id)]);
+        if(!active)return;setLiveverseNotes(notes);setLiveverseTasks(tasks);setLiveverseMedia(media);if(canvas?.document)setLiveverseCanvasDraft(JSON.stringify(canvas.document,null,2));
+      }catch(error:any){if(active)console.warn('Liveverse refresh failed:',error?.message||error);}
+    };
+    void liveverseClient.createSpaceChannel(liveverseSelected.id,session.user.id,()=>{void refresh();},state=>{if(active)setLiveversePresence(Object.values(state).flat() as any[]);})
+      .then(async joined=>{if(!active){await supabase.removeChannel(joined);return;}channel=joined;await liveverseClient.trackPresence(joined,session.user.id,profile?.display_name||profile?.username||'Guftin member');})
+      .catch((error:any)=>{if(active)console.warn('Liveverse realtime unavailable:',error?.message||error);});
+    return ()=>{active=false;setLiveversePresence([]);if(channel)void supabase.removeChannel(channel);};
+  },[tab,liveverseView,liveverseSelected?.id,session?.user?.id,liveverseClient,profile?.display_name,profile?.username]);
   const saveLiveverseCanvas=async()=>{
     if(!liveverseSelected||!session?.user?.id)return;
     try{
@@ -5402,6 +5428,8 @@ function GuftinApp() {
         <Btn onPress={()=>setLiveverseView('home')} style={{alignSelf:'flex-start',padding:7,backgroundColor:C.paper,borderRadius:8}}><Text style={{color:C.green,fontWeight:'900'}}>‹ All spaces</Text></Btn>
         <Text style={{fontSize:19,fontWeight:'900',color:C.ink,marginTop:10}}>{liveverseSelected.name}</Text>
         <Text style={{fontSize:11,color:C.muted,marginTop:4}}>{liveverseSelected.scope} · Shared workspace</Text>
+        <Text style={{fontSize:10,color:C.muted,marginTop:5}}>{liveversePresence.length} participant(s) currently online</Text>
+        {liveverseSelected.owner_id===session?.user?.id?<Btn onPress={()=>void inviteLiveverseChatMembers()} style={{backgroundColor:C.green,padding:9,borderRadius:9,alignSelf:'flex-start',marginTop:7}}><Text style={{color:'#fff',fontSize:10,fontWeight:'900'}}>Invite linked chat members</Text></Btn>:null}
         <View style={{flexDirection:'row',flexWrap:'wrap',gap:6,marginTop:12}}>
           {(['notes','tasks','media','canvas'] as const).map(key=><Btn key={key} onPress={()=>setLiveverseRoomTab(key)} style={{padding:9,borderRadius:9,backgroundColor:liveverseRoomTab===key?'#7764e8':C.paper}}><Text style={{fontSize:10,fontWeight:'900',color:liveverseRoomTab===key?'#fff':C.ink}}>{key.toUpperCase()}</Text></Btn>)}
         </View>
