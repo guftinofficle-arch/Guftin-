@@ -991,6 +991,8 @@ function GuftinApp() {
   const [holoRoomNameDraft,setHoloRoomNameDraft]=useState('');
   const [holoRoomDescriptionDraft,setHoloRoomDescriptionDraft]=useState('');
   const [holoRoomPrivacyDraft,setHoloRoomPrivacyDraft]=useState<'private'|'public'>('private');
+  const [holoEventTitle,setHoloEventTitle]=useState('');
+  const [holoEventDate,setHoloEventDate]=useState('');
   const activeTabRef=useRef(tab);
   activeTabRef.current=tab;
   const [session,setSession]=useState<any>(null);
@@ -4974,6 +4976,18 @@ function GuftinApp() {
     }catch(error:any){Alert.alert('Invitations failed',error?.message||'Check room owner permissions and try again.');}
     finally{setHoloSaving(false);}
   };
+  const createHoloEvent=async()=>{
+    if(!holoSelected||!session?.user?.id||!holoEventTitle.trim()||!holoEventDate.trim())return;
+    const parsed=new Date(holoEventDate);
+    if(!Number.isFinite(parsed.getTime())){Alert.alert('Date not valid','Enter a date and time such as 2026-12-31T20:00.');return;}
+    setHoloSaving(true);
+    try{
+      const event=await holoClient.createEvent({roomId:holoSelected.id,userId:session.user.id,title:holoEventTitle.trim(),type:'special_date',startsAt:parsed.toISOString(),timezone:Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC'});
+      setHoloEvents(items=>[...items,event].sort((a:any,b:any)=>a.starts_at.localeCompare(b.starts_at)));
+      setHoloEventTitle('');setHoloEventDate('');Alert.alert('Moment saved','Your room event and countdown date have been saved.');
+    }catch(error:any){Alert.alert('Could not save event',error?.message||'Please try again.');}
+    finally{setHoloSaving(false);}
+  };
   const saveHoloRoomSettings=async()=>{
     if(!holoSelected||holoSelected.owner_id!==session?.user?.id)return;
     setHoloSaving(true);
@@ -5508,8 +5522,11 @@ function GuftinApp() {
             {item.uploaded_by===session?.user?.id||holoSelected.owner_id===session?.user?.id?<Btn onPress={()=>void removeHoloGalleryMedia(item)} style={{alignSelf:'flex-start',padding:5,backgroundColor:C.paper}}><Text style={{fontSize:10,color:C.red,fontWeight:'800'}}>Remove</Text></Btn>:null}
           </View>)}
         </View>}
-        <Text style={{fontSize:15,fontWeight:'900',color:C.ink,marginTop:17}}>Special Moments</Text>
-        {holoEvents.map(event=><Text key={event.id} style={{color:C.ink,fontSize:12,paddingVertical:6}}>{event.title} · {timeLabel(event.starts_at)}</Text>)}
+        <Text style={{fontSize:15,fontWeight:'900',color:C.ink,marginTop:17}}>Special Moments & Countdowns</Text>
+        <TextInput value={holoEventTitle} onChangeText={setHoloEventTitle} placeholder="Birthday or special occasion" maxLength={120} style={{backgroundColor:C.paper,borderRadius:10,padding:10,color:C.ink,marginTop:8}}/>
+        <TextInput value={holoEventDate} onChangeText={setHoloEventDate} placeholder="Date and time (YYYY-MM-DDTHH:mm)" style={{backgroundColor:C.paper,borderRadius:10,padding:10,color:C.ink,marginTop:7}}/>
+        <Btn disabled={holoSaving||!holoEventTitle.trim()||!holoEventDate.trim()} onPress={()=>void createHoloEvent()} style={{backgroundColor:C.green,padding:10,borderRadius:10,alignItems:'center',marginTop:7}}><Text style={{color:'#fff',fontWeight:'900'}}>＋ Save countdown</Text></Btn>
+        {holoEvents.map(event=><View key={event.id} style={{paddingVertical:7,borderBottomWidth:1,borderColor:C.line}}><Text style={{color:C.ink,fontSize:12,fontWeight:'800'}}>{event.title}</Text><Text style={{color:C.muted,fontSize:10,marginTop:3}}>{timeLabel(event.starts_at)} · {event.timezone}</Text></View>)}
         {holoLoading?<GuftinLoader color={C.green}/>:null}
       </View>:null}
       {holoView==='home'||holoView==='mine'||holoView==='recent'?<View>
