@@ -65,3 +65,7 @@ Configure these server-side Edge Function secrets in Supabase: `LIVEKIT_URL`, `L
 - Upload progress, event edit/delete, and profile-name resolution in the member list need polish.
 - The SQL migration and pgTAP tests have not been applied/run against a disposable Supabase branch.
 - The latest web export is being re-run after fixing platform-specific AdMob imports and artifact upload path. Android APK build and emulator startup test must complete on the final commit.
+
+
+## Migration syntax verification
+The full migration was executed in a `BEGIN ... ROLLBACK` transaction against the current Guftin Supabase project and completed successfully. This confirms SQL syntax and compatibility at that point without persisting tables, buckets, policies or publication changes.
