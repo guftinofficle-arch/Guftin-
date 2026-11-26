@@ -4,7 +4,7 @@ import * as ExpoCrypto from 'expo-crypto';
 export type HoloPrivacy = 'private' | 'public';
 export type HoloRoom = {
   id:string; name:string; description:string; privacy:HoloPrivacy; owner_id:string;
-  timezone:string; created_at:string; updated_at:string;
+  source_chat_id:string|null; source_chat_kind:'direct'|'group'|null; timezone:string; created_at:string; updated_at:string;
 };
 export type HoloMemory = {
   id:string; room_id:string; body:string; media_path:string|null; author_id:string;
@@ -29,11 +29,11 @@ function id(value:string,label:string){if(!UUID.test(value))throw new Error('Inv
 function clean(value:string,max:number,label:string){const v=value.trim();if(!v||v.length>max)throw new Error(label+' is required and must be under '+max+' characters.');return v;}
 
 export function createHoloSpaceClient(db:SupabaseClient){
-  async function createRoom(input:{name:string;description?:string;privacy:HoloPrivacy;ownerId:string;timezone:string}):Promise<HoloRoom>{
+  async function createRoom(input:{name:string;description?:string;privacy:HoloPrivacy;ownerId:string;timezone:string;sourceChatId?:string|null;sourceChatKind?:'direct'|'group'|null}):Promise<HoloRoom>{
     id(input.ownerId,'owner'); const name=clean(input.name,80,'Room name');
     const {data,error}=await db.from('holospace_rooms').insert({
       name,description:(input.description||'').trim().slice(0,600),privacy:input.privacy,
-      owner_id:input.ownerId,timezone:clean(input.timezone,64,'Timezone')
+      owner_id:input.ownerId,timezone:clean(input.timezone,64,'Timezone'),source_chat_id:input.sourceChatId||null,source_chat_kind:input.sourceChatKind||null
     }).select('*').single();
     if(error)throw error; return data as HoloRoom;
   }
