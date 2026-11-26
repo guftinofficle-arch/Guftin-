@@ -2,19 +2,33 @@
 
 Feature branch: `feature/guftin-magic-moments`
 
-## Included foundation
-- Birthday Surprise, Memory Capsule, Future Message, Secret Surprise, Together Moments and Friendship Anniversary data model.
-- Member roles, contributor/recipient separation, private media bucket, signed media URLs.
-- RLS policies that hide unrevealed Secret Surprise content from its recipient and hide scheduled-message bodies from recipients until backend delivery.
-- Client CRUD for moments, invitations, items, comments, reactions, private uploads and scheduled-message management.
-- Future delivery is intentionally server-only; a trusted scheduler must call the delivery Edge Function. The app must never mark a scheduled message as sent.
-- No automatic chat-history ingestion. Users add content intentionally.
+## Included experiences
+- **Birthday Surprise** — private birthday moment with a server-enforced reveal date.
+- **Memory Capsule** — a shared, member-only collection of messages and media.
+- **Future Message** — an end-to-end encrypted message queued in Guftin's existing `kc_scheduled_messages` pipeline and delivered by the existing Postgres cron worker.
+- **Secret Surprise** — creator-only content until its scheduled reveal; reveal is enforced by RLS and a server-side minute scheduler.
+- **Together Moments** — shared text, photo/video contributions, comments and reactions.
+- **Friendship Anniversary** — a dedicated moment type for a shared milestone and memory collection.
 
-## Production activation still required
-1. Review and apply migration `20261126200000_guftin_magic_moments_foundation.sql` to the intended Supabase project.
-2. Configure private backend secrets for the delivery worker. Never put service-role credentials in the mobile app or repository.
-3. Deploy and schedule the delivery Edge Function using Supabase Vault + pg_cron/pg_net, following the official Supabase scheduling guide.
-4. Wire the UI/chat card flow and push notification delivery to the existing Guftin chat/notification infrastructure.
-5. Run two-account RLS tests, secret pre-reveal denial, idempotent scheduled delivery, cancellation and platform tests.
+## App behavior
+- Entry appears as the **Magic** tab and in a chat as an invitation card.
+- Moments are created from the currently open direct or group chat.
+- Users are not asked to import chat history. They intentionally choose what to add.
+- Private media is stored in the `magic-moments` bucket; signed URLs are short-lived.
+- The creator is added atomically as owner. Invitees accept before reading or contributing.
+- Secret/birthday content remains hidden from its recipient until the reveal time.
+- Future Message content is encrypted on-device for the active device roster. The server queues and delivers only the ciphertext.
+- Realtime publication covers moments, membership, items, comments, reactions and notifications.
 
-This is an implementation foundation, not a claim of live production activation. No database migration is applied automatically by this commit.
+## Production activation
+- Foundation migration: `20261126200000_guftin_magic_moments_foundation.sql`.
+- Production activation: `20261126210000_guftin_magic_moments_production_activation.sql`.
+- Edge Functions deployed with JWT verification: `invite-magic-moment-member` and `reveal-secret-surprise`.
+- Existing `guftin-scheduled-message-delivery` cron job is reused for encrypted Future Messages.
+- New `guftin-magic-moment-reveals` cron job checks scheduled birthday and secret reveals every minute.
+
+## Still to verify
+- Two-account RLS checks for invite acceptance and pre-reveal secrecy.
+- Actual Android media picker/upload and notification display.
+- End-to-end scheduled delivery with real registered E2EE devices.
+- Combined Android APK startup and two-phone tests after all three features are integrated.
