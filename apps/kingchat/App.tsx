@@ -15,6 +15,7 @@ import { CallControlButton } from './src/features/calls/CallControlButton';
 import { isStatusActive } from './src/features/status/statusUtils';
 import { saveMediaToGallery } from './src/features/media/saveMediaToGallery';
 import { ChatOptionsPopover } from './src/features/chat-menu/ChatOptionsPopover';
+import { LiveverseScreen } from './src/features/liveverse/LiveverseScreen';
 import { getChannelAnalytics, recordChannelAnalyticsEvent } from './src/features/channels/channelAnalytics';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
@@ -947,6 +948,7 @@ function GuftinApp() {
   const [profileReady,setProfileReady]=useState(false);
   const [chats,setChats]=useState<Chat[]>([]);
   const [active,setActive]=useState<Chat|null>(null);
+  const [liveverseOpen,setLiveverseOpen]=useState(false);
   const [pendingNotificationConversation,setPendingNotificationConversation]=useState<string|null>(null);
   const [messages,setMessages]=useState<Record<string,Message[]>>({});
   const [peerLastReadAt,setPeerLastReadAt]=useState<string|null>(null);
@@ -5002,6 +5004,14 @@ function GuftinApp() {
     />;
   }
 
+  if(active&&liveverseOpen){
+    return <SafeAreaView edges={['top','left','right','bottom']} style={{flex:1,backgroundColor:'#07131f'}}>
+      <StatusBar barStyle="light-content" backgroundColor="#07131f"/>
+      <LiveverseScreen chatId={active.id} chatTitle={active.name} chatKind={active.kind}
+        userId={session.user.id} onClose={()=>setLiveverseOpen(false)}/>
+    </SafeAreaView>;
+  }
+
   if(active){
     const list=messages[active.id]||[];
     return <KeyboardAvoidingView style={{flex:1}} behavior={Platform.OS==='ios'?'padding':'height'} keyboardVerticalOffset={Platform.OS==='ios'?insets.top:0}>
@@ -5017,6 +5027,9 @@ function GuftinApp() {
         {active.kind!=='channel'?(outgoingCall?<Btn onPress={()=>void endCall(outgoingCall.id)} style={{backgroundColor:'#fde8e8',borderRadius:15,width:62,height:58,alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:'#f3c6c6'}}><Text style={{fontSize:11,fontWeight:'900',color:C.red}}>Cancel</Text><Text style={{fontSize:9,color:C.red}}>call</Text></Btn>:<>
           <Btn disabled={callBusy} onPress={()=>void startCall('voice')} style={{backgroundColor:'#087b4c',borderRadius:28,width:48,height:48,alignItems:'center',justifyContent:'center',opacity:callBusy?0.5:1,borderWidth:1,borderColor:'#42bf83'}}><Text style={{fontSize:20,color:C.green}}>☎</Text><Text style={{fontSize:10,fontWeight:'900',color:C.green}}>{active.kind==='group'?'Group call':'Call'}</Text></Btn>
           <Btn disabled={callBusy} onPress={()=>void startCall('video')} style={{backgroundColor:'#087b4c',borderRadius:28,width:48,height:48,alignItems:'center',justifyContent:'center',opacity:callBusy?0.5:1,borderWidth:1,borderColor:'#42bf83'}}><Text style={{fontSize:19,color:C.green}}>▣</Text><Text style={{fontSize:10,fontWeight:'900',color:C.green}}>Video</Text></Btn>
+          <Btn onPress={()=>setLiveverseOpen(true)} style={{backgroundColor:'#073e3b',borderRadius:16,width:49,height:48,alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:'#65e9c0'}}>
+            <Text style={{fontSize:18,color:'#a4ffe0'}}>♫</Text><Text style={{fontSize:9,fontWeight:'900',color:'#a4ffe0'}}>LIVE</Text>
+          </Btn>
         </>):null}
         <Btn onPress={()=>active.kind==='channel'?showChannelOptions():setChatOptionsOpen(true)} style={{width:40,height:48,borderRadius:22,alignItems:'center',justifyContent:'center',backgroundColor:'#ffffff20'}}><Text style={{fontSize:25,fontWeight:'900',color:'#fff'}}>⋮</Text></Btn>
       </View>
