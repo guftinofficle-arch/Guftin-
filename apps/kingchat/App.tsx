@@ -4,7 +4,7 @@ import * as SecureStore from 'expo-secure-store';
 import * as LocalAuthentication from 'expo-local-authentication';
 import NetInfo from '@react-native-community/netinfo';
 import {
-  Alert, Animated, AppState, BackHandler, FlatList, Image, KeyboardAvoidingView, Modal,
+  Alert, Animated, AppState, BackHandler, FlatList, Image, KeyboardAvoidingView, Modal, PanResponder,
   Platform, RefreshControl, ScrollView, Share, StatusBar, Switch, Text, TextInput, ToastAndroid,
   TouchableOpacity, View, useWindowDimensions
 } from 'react-native';
@@ -37,6 +37,7 @@ import * as ExpoCrypto from 'expo-crypto';
 import { DeviceIdentity, E2EE_MEDIA_PREFIX, E2EE_PREFIX, decryptCallKeyForDevice, decryptMediaForDevice, decryptMessageForDevice, encryptCallKeyForDevices, encryptMediaForDevices, encryptMessageForDevices, loadOrCreateDeviceIdentity } from './src/lib/e2ee';
 import { AudioSession, AndroidAudioTypePresets, LiveKitRoom, VideoTrack, isTrackReference, registerGlobals, useLocalParticipant, useParticipants, useRoomContext, useRNE2EEManager, useTracks } from '@livekit/react-native';
 import { Track } from 'livekit-client';
+import Svg, { Path } from 'react-native-svg';
 
 WebBrowser.maybeCompleteAuthSession();
 registerGlobals();
@@ -974,6 +975,12 @@ function GuftinApp() {
   const [liveverseNoteDraft,setLiveverseNoteDraft]=useState('');
   const [liveverseTaskDraft,setLiveverseTaskDraft]=useState('');
   const [liveverseCanvasDraft,setLiveverseCanvasDraft]=useState('');
+  const [liveverseCanvasStrokes,setLiveverseCanvasStrokes]=useState<any[]>([]);
+  const [liveverseCanvasColor,setLiveverseCanvasColor]=useState('#19223d');
+  const [liveverseCanvasWidth,setLiveverseCanvasWidth]=useState(300);
+  const liveverseCanvasStrokesRef=useRef<any[]>([]);
+  const liveverseCanvasVersionRef=useRef(0);
+  const liveverseCurrentStrokeRef=useRef('');
   const [liveverseBusy,setLiveverseBusy]=useState(false);
   const [liveversePresence,setLiveversePresence]=useState<any[]>([]);
   const [liveverseVoiceSession,setLiveverseVoiceSession]=useState<any>(null);
@@ -4886,7 +4893,7 @@ function GuftinApp() {
     setLiveverseSelected(space);setLiveverseView('room');setLiveverseBusy(true);
     try{
       const [notes,tasks,media,canvas]=await Promise.all([liveverseClient.listNotes(space.id),liveverseClient.listTasks(space.id),liveverseClient.listMedia(space.id),liveverseClient.loadCanvas(space.id)]);
-      setLiveverseNotes(notes);setLiveverseTasks(tasks);setLiveverseMedia(media);setLiveverseCanvasDraft(canvas?.document?JSON.stringify(canvas.document,null,2):'{}');
+      setLiveverseNotes(notes);setLiveverseTasks(tasks);setLiveverseMedia(media);setLiveverseCanvasDraft(canvas?.document?JSON.stringify(canvas.document,null,2):'{}');liveverseCanvasStrokesRef.current=Array.isArray(canvas?.document?.strokes)?canvas.document.strokes:[];setLiveverseCanvasStrokes(liveverseCanvasStrokesRef.current);liveverseCanvasVersionRef.current=canvas?.version||0;
       setLiveverseNoteDraft(notes[0]?.content||'');setLiveverseNoteTitle(notes[0]?.title||'Shared notes');
     }catch(error:any){Alert.alert('Space could not open',error?.message||'Check your membership and try again.');}
     finally{setLiveverseBusy(false);}
@@ -4965,6 +4972,41 @@ function GuftinApp() {
       .catch((error:any)=>{if(active)console.warn('Liveverse realtime unavailable:',error?.message||error);});
     return ()=>{active=false;setLiveversePresence([]);if(channel)void supabase.removeChannel(channel);};
   },[tab,liveverseView,liveverseSelected?.id,session?.user?.id,liveverseClient,profile?.display_name,profile?.username]);
+  const persistLiveverseCanvas=async(strokes:any[]=liveverseCanvasStrokesRef.current)=>{
+    if(!liveverseSelected||!session?.user?.id)return;
+    try{
+      const current=await liveverseClient.loadCanvas(liveverseSelected.id);
+      const saved=await liveverseClient.saveCanvas(liveverseSelected.id,session.user.id,{kind:'liveverse-canvas',strokes:strokes.slice(-500)},current?.version||0);
+      liveverseCanvasVersionRef.current=saved.version;
+    }catch(error:any){Alert.alert('Canvas sync conflict',error?.message||'Reload the shared canvas before drawing again.');}
+  };
+  const clearLiveverseCanvas=async()=>{
+    liveverseCanvasStrokesRef.current=[];setLiveverseCanvasStrokes([]);
+    await persistLiveverseCanvas([]);
+  };
+  const liveverseCanvasPanResponder=useMemo(()=>PanResponder.create({
+    onStartShouldSetPanResponder:()=>true,
+    onMoveShouldSetPanResponder:()=>true,
+    onPanResponderGrant:(event:any)=>{
+      const x=Math.max(0,Math.min(300,event.nativeEvent.locationX*300/liveverseCanvasWidth));
+      const y=Math.max(0,Math.min(200,event.nativeEvent.locationY));
+      const d='M '+x.toFixed(1)+' '+y.toFixed(1);
+      liveverseCurrentStrokeRef.current=d;
+      const next=[...liveverseCanvasStrokesRef.current,{d,color:liveverseCanvasColor}];
+      liveverseCanvasStrokesRef.current=next;setLiveverseCanvasStrokes(next);
+    },
+    onPanResponderMove:(event:any)=>{
+      if(!liveverseCurrentStrokeRef.current)return;
+      const x=Math.max(0,Math.min(300,event.nativeEvent.locationX*300/liveverseCanvasWidth));
+      const y=Math.max(0,Math.min(200,event.nativeEvent.locationY));
+      liveverseCurrentStrokeRef.current+=' L '+x.toFixed(1)+' '+y.toFixed(1);
+      const next=liveverseCanvasStrokesRef.current.slice();
+      if(next.length)next[next.length-1]={...next[next.length-1],d:liveverseCurrentStrokeRef.current};
+      liveverseCanvasStrokesRef.current=next;setLiveverseCanvasStrokes(next);
+    },
+    onPanResponderRelease:()=>{liveverseCurrentStrokeRef.current='';void persistLiveverseCanvas();},
+    onPanResponderTerminate:()=>{liveverseCurrentStrokeRef.current='';void persistLiveverseCanvas();}
+  }),[liveverseCanvasWidth,liveverseCanvasColor,liveverseSelected?.id,session?.user?.id]);
   const saveLiveverseCanvas=async()=>{
     if(!liveverseSelected||!session?.user?.id)return;
     try{
@@ -5481,9 +5523,16 @@ function GuftinApp() {
           {liveverseMedia.map(item=><View key={item.id} style={{marginTop:10}}>{item.media_type==='image'?<Image source={{uri:item.url}} style={{width:'100%',height:170,borderRadius:12}} resizeMode="cover"/>:<VideoBubble uri={item.url}/>}</View>)}
         </View>:null}
         {liveverseRoomTab==='canvas'?<View style={{marginTop:13}}>
-          <Text style={{fontSize:11,color:C.muted}}>Canvas document storage is connected. The interactive drawing surface and synchronized strokes are not yet implemented.</Text>
-          <TextInput value={liveverseCanvasDraft} onChangeText={setLiveverseCanvasDraft} multiline style={{backgroundColor:C.paper,padding:10,borderRadius:10,color:C.ink,minHeight:120,marginTop:8}}/>
-          <Btn onPress={()=>void saveLiveverseCanvas()} style={{backgroundColor:C.green,padding:10,borderRadius:9,alignItems:'center',marginTop:8}}><Text style={{color:'#fff',fontWeight:'900'}}>Save canvas document</Text></Btn>
+          <Text style={{fontSize:11,color:C.muted}}>Draw together. Strokes are saved after each completed stroke and shared through the room's Realtime channel.</Text>
+          <View onLayout={event=>setLiveverseCanvasWidth(Math.max(1,event.nativeEvent.layout.width))} style={{height:200,backgroundColor:'#fff',borderRadius:12,overflow:'hidden',marginTop:9,borderWidth:1,borderColor:C.line}} {...liveverseCanvasPanResponder.panHandlers}>
+            <Svg width="100%" height="200" viewBox="0 0 300 200">
+              {liveverseCanvasStrokes.map((stroke:any,index:number)=><Path key={index} d={stroke.d} stroke={stroke.color||'#19223d'} strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" fill="none"/>)}
+            </Svg>
+          </View>
+          <View style={{flexDirection:'row',flexWrap:'wrap',gap:7,marginTop:9,alignItems:'center'}}>
+            {['#19223d','#e14d5a','#2476d2','#16845d','#d99b24','#ffffff'].map(color=><Btn key={color} onPress={()=>setLiveverseCanvasColor(color)} style={{width:30,height:30,borderRadius:15,backgroundColor:color,borderWidth:2,borderColor:liveverseCanvasColor===color?C.green:C.line}}/>)}
+            <Btn onPress={()=>void clearLiveverseCanvas()} style={{padding:9,borderRadius:9,backgroundColor:C.paper}}><Text style={{fontSize:10,color:C.red,fontWeight:'900'}}>Clear</Text></Btn>
+          </View>
         </View>:null}
       </View>:null}
       {liveverseView==='home'?<View>
