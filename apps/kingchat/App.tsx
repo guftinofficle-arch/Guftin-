@@ -17,6 +17,7 @@ import { saveMediaToGallery } from './src/features/media/saveMediaToGallery';
 import { ChatOptionsPopover } from './src/features/chat-menu/ChatOptionsPopover';
 import { getChannelAnalytics, recordChannelAnalyticsEvent } from './src/features/channels/channelAnalytics';
 import { createLiveverseClient } from './src/features/liveverse/liveverseClient';
+import { createMagicMomentsClient, MagicMomentKind } from './src/features/magic-moments/magicMomentsClient';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 import * as ImagePicker from 'expo-image-picker';
@@ -278,7 +279,7 @@ const THEMES:any = {
   night:{ink:'#edf3ff',muted:'#9baac0',green:'#77b9ff',mint:'#223d5d',paper:'#101a2b',white:'#1a2940',line:'#2a3b54',red:'#ff8894'}
 };
 type Chat = { id:string; name:string; avatar:string; avatarUrl?:string; color:string; last:string; time:string; unread:number; online:boolean; kind:string; lastAt:number; isOfficial?:boolean; isVerified?:boolean; isChannelOwner?:boolean; inviteCode?:string; isPublic?:boolean; ownerId?:string; description?:string; hasConversationActivity?:boolean; hasCallActivity?:boolean; pendingContactId?:string; hasPendingActivity?:boolean };
-const LIVEVERSE_INVITE_PREFIX='GUFTIN_LIVEVERSE_INVITE:';
+const LIVEVERSE_INVITE_PREFIX='GUFTIN_LIVEVERSE_INVITE:';\nconst MAGIC_MOMENT_INVITE_PREFIX='GUFTIN_MAGIC_MOMENT_INVITE:';
 type Message = { id:string; conversation_id:string; sender_id:string|null; body:string|null; message_type:string; attachment_url?:string|null; created_at:string; edited_at?:string|null; mine:boolean; deleted_at?:string|null; pending?:boolean };
 const sortInboxChats=(items:Chat[])=>items.slice().sort((a,b)=>(Number(!!b.isOfficial)-Number(!!a.isOfficial))||((Number(b.lastAt)||0)-(Number(a.lastAt)||0)));
 const normalizeGuftinPhone=(value:string):string|null=>{
@@ -960,7 +961,7 @@ function LiveverseVoiceControls({onLeave,connected}:any){
 function GuftinApp() {
   const insets=useSafeAreaInsets();
   const [tab,setTab]=useState('Chats');
-  const liveverseClient=useMemo(()=>createLiveverseClient(supabase),[]);
+  const liveverseClient=useMemo(()=>createLiveverseClient(supabase),[]);\n  const magicMomentsClient=useMemo(()=>createMagicMomentsClient(supabase),[]);\n  const [magicMoments,setMagicMoments]=useState<any[]>([]);\n  const [magicSelected,setMagicSelected]=useState<any>(null);\n  const [magicItems,setMagicItems]=useState<any[]>([]);\n  const [magicComments,setMagicComments]=useState<any[]>([]);\n  const [magicNotifications,setMagicNotifications]=useState<any[]>([]);\n  const [magicBusy,setMagicBusy]=useState(false);\n  const [magicView,setMagicView]=useState<'home'|'create'|'detail'>('home');\n  const [magicKind,setMagicKind]=useState<MagicMomentKind>('birthday');\n  const [magicTitle,setMagicTitle]=useState('A special moment');\n  const [magicDescription,setMagicDescription]=useState('');\n  const [magicDraft,setMagicDraft]=useState('');\n  const [magicScheduleAt,setMagicScheduleAt]=useState('');\n  const [magicCommentDraft,setMagicCommentDraft]=useState('');
   const [liveverseView,setLiveverseView]=useState<'home'|'create'|'room'>('home');
   const [liveverseSpaces,setLiveverseSpaces]=useState<any[]>([]);
   const [liveverseSelected,setLiveverseSelected]=useState<any>(null);
@@ -4876,6 +4877,97 @@ function GuftinApp() {
     setAiHistoryOpen(false);
     setAiMode('chat');
   };
+  const loadMagicMoments=useCallback(async()=>{
+    if(!session?.user?.id)return;
+    setMagicBusy(true);
+    try{
+      const [moments,notifications]=await Promise.all([magicMomentsClient.list(session.user.id),magicMomentsClient.notifications()]);
+      setMagicMoments(moments);setMagicNotifications(notifications);
+    }catch(error:any){Alert.alert('Magic Moments unavailable',error?.message||'Could not load your moments.');}
+    finally{setMagicBusy(false);}
+  },[session?.user?.id,magicMomentsClient]);
+  useEffect(()=>{if(tab==='Magic Moments')void loadMagicMoments();},[tab,loadMagicMoments]);
+  const openMagicMoment=async(moment:any)=>{
+    setMagicBusy(true);
+    try{
+      await magicMomentsClient.acceptInvite(moment.id);
+      const {data,error}=await supabase.from('magic_moments').select('*').eq('id',moment.id).maybeSingle();
+      if(error)throw error;
+      if(!data){Alert.alert('Still a surprise','This moment is sealed. Its private content will appear only after its reveal time.');return;}
+      const [items,comments]=await Promise.all([magicMomentsClient.listItems(moment.id),magicMomentsClient.comments(moment.id)]);
+      setMagicSelected(data);setMagicItems(await Promise.all(items.map(async(item:any)=>item.object_path?{...item,signedUrl:await magicMomentsClient.signedUrl(item.object_path)}:item)));
+      setMagicComments(comments);setMagicView('detail');
+    }catch(error:any){Alert.alert('Could not open moment',error?.message||'Accept the invitation and try again.');}
+    finally{setMagicBusy(false);}
+  };
+  const createMagicMoment=async()=>{
+    if(!session?.user?.id||!active?.id||!['direct','group'].includes(active.kind)){Alert.alert('Open a chat first','Open the direct or group chat where you want to create and share this moment.');return;}
+    if(!magicTitle.trim()){Alert.alert('Add a title','Enter a title for this moment.');return;}
+    setMagicBusy(true);
+    try{
+      const {data:memberRows,error:memberError}=await supabase.from('kc_conversation_members').select('user_id').eq('conversation_id',active.id);
+      if(memberError)throw memberError;
+      const otherIds=[...new Set((memberRows||[]).map((x:any)=>x.user_id).filter((id:string)=>id&&id!==session.user.id))];
+      if(!otherIds.length)throw new Error('No other chat members were found.');
+      const isFuture=magicKind==='future_message';
+      if(isFuture&&!magicScheduleAt.trim())throw new Error('Enter the delivery date and time.');
+      const scheduledAt=isFuture?new Date(magicScheduleAt).toISOString():null;
+      if(isFuture&&new Date(scheduledAt as string).getTime()<=Date.now())throw new Error('Choose a future date and time.');
+      const recipientId=['birthday','future_message','secret_surprise'].includes(magicKind)?otherIds[0]:null;
+      const revealAt=['birthday','secret_surprise'].includes(magicKind)?(magicScheduleAt?new Date(magicScheduleAt).toISOString():null):null;
+      const moment=await magicMomentsClient.create({creatorId:session.user.id,kind:magicKind,title:magicTitle.trim(),description:magicDescription,conversationId:active.id,recipientId,revealAt,scheduledAt,timezone:Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC'});
+      for(const id of otherIds){
+        const role=id===recipientId?'recipient':'contributor';
+        await magicMomentsClient.invite(moment.id,id,session.user.id,role as any);
+      }
+      if(isFuture){
+        await magicMomentsClient.scheduleMessage({senderId:session.user.id,recipientId:recipientId as string,conversationId:active.id,content:magicDraft.trim()||magicDescription||magicTitle,scheduledAt:scheduledAt as string,timezone:Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC'});
+      }else if(magicDraft.trim()){
+        await magicMomentsClient.addText(moment.id,session.user.id,magicDraft.trim());
+      }
+      await sendMessage(MAGIC_MOMENT_INVITE_PREFIX+JSON.stringify({moment_id:moment.id,kind:magicKind}));
+      setMagicTitle('A special moment');setMagicDescription('');setMagicDraft('');setMagicScheduleAt('');setMagicView('home');
+      await loadMagicMoments();
+      Alert.alert('Moment created','The moment is saved and its invitation card was posted in this chat.');
+    }catch(error:any){Alert.alert('Moment not created',error?.message||'Please check the details and try again.');}
+    finally{setMagicBusy(false);}
+  };
+  const addMagicText=async()=>{
+    if(!magicSelected||!session?.user?.id||!magicDraft.trim())return;
+    setMagicBusy(true);
+    try{const item=await magicMomentsClient.addText(magicSelected.id,session.user.id,magicDraft.trim());setMagicItems(items=>[...items,item]);setMagicDraft('');}
+    catch(error:any){Alert.alert('Memory not saved',error?.message||'Try again.');}
+    finally{setMagicBusy(false);}
+  };
+  const uploadMagicMedia=async()=>{
+    if(!magicSelected||!session?.user?.id)return;
+    const permission=await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if(!permission.granted){Alert.alert('Permission needed','Allow photo library access to choose media.');return;}
+    const result=await ImagePicker.launchImageLibraryAsync({mediaTypes:['images','videos'],allowsEditing:false,quality:0.85,videoMaxDuration:120});
+    if(result.canceled||!result.assets?.[0])return;
+    const asset=result.assets[0],file=new File(asset.uri),mime=asset.mimeType||(asset.type==='video'?'video/mp4':'image/jpeg');
+    setMagicBusy(true);
+    try{
+      const item=await magicMomentsClient.upload({momentId:magicSelected.id,authorId:session.user.id,fileName:asset.fileName||'moment-media',mimeType:mime,body:new Blob([await file.arrayBuffer()],{type:mime}),bytes:file.size||0,itemType:asset.type==='video'?'video':'image'});
+      setMagicItems(items=>[...items,item]);
+    }catch(error:any){Alert.alert('Upload failed',error?.message||'The selected media could not be uploaded.');}
+    finally{setMagicBusy(false);}
+  };
+  const addMagicComment=async()=>{
+    if(!magicSelected||!session?.user?.id||!magicCommentDraft.trim())return;
+    try{const comment=await magicMomentsClient.comment(magicSelected.id,session.user.id,magicCommentDraft.trim());setMagicComments(items=>[...items,comment]);setMagicCommentDraft('');}
+    catch(error:any){Alert.alert('Comment not sent',error?.message||'Try again.');}
+  };
+  const revealMagicMoment=async()=>{
+    if(!magicSelected)return;
+    setMagicBusy(true);
+    try{
+      const {data,error}=await supabase.functions.invoke('reveal-secret-surprise',{body:{moment_id:magicSelected.id}});
+      if(error)throw error;if(!data?.revealed)throw new Error(data?.error||'The reveal time has not arrived.');
+      await openMagicMoment(magicSelected);
+    }catch(error:any){Alert.alert('Not revealed yet',error?.message||'The server could not reveal this moment.');}
+    finally{setMagicBusy(false);}
+  };
   const loadLiveverseSpaces=useCallback(async()=>{
     if(!session?.user?.id)return;
     setLiveverseBusy(true);
@@ -5276,7 +5368,7 @@ function GuftinApp() {
         ListHeaderComponent={active.kind==='group'&&(groupPolls.length>0||groupEvents.length>0||groupCollabLoading)?<View style={{gap:10,marginBottom:10}}>{groupCollabLoading?<GuftinLoader color={C.green}/>:null}{groupPolls.map(poll=><View key={poll.id} style={{backgroundColor:C.white,borderWidth:1,borderColor:C.line,borderRadius:15,padding:13}}><Text style={{fontSize:13,fontWeight:'900',color:C.ink}}>{poll.question}</Text><Text style={{fontSize:10,color:C.muted,marginTop:3}}>{poll.allows_multiple?'Multiple choices allowed':'Choose one option'} · {poll.kc_poll_votes?.length||0} votes</Text>{poll.options.map((option:any)=><Btn key={option.id} disabled={!!poll.closed_at||poll.myVoteOptionIds.includes(option.id)||!!poll.myVoteOptionIds.length&&!poll.allows_multiple} onPress={()=>void voteInGroupPoll(poll.id,option.id)} style={{backgroundColor:poll.myVoteOptionIds.includes(option.id)?C.mint:C.paper,borderRadius:10,padding:10,marginTop:7,alignItems:'flex-start'}}><Text style={{color:C.ink,fontSize:12,fontWeight:'800'}}>{option.label}　·　{option.voteCount}</Text></Btn>)}{poll.closed_at?<Text style={{fontSize:10,color:C.muted,marginTop:7}}>Poll closed</Text>:poll.creator_id===session?.user?.id?<Btn onPress={()=>Alert.alert('Close this poll?','Members will no longer be able to vote.',[{text:'Keep open',style:'cancel'},{text:'Close poll',style:'destructive',onPress:()=>void (async()=>{try{await upgrade20.closePoll(poll.id);await loadGroupPolls(active.id);}catch(error:any){Alert.alert('Poll not closed',error?.message||'Please try again.');}})()}])} style={{alignSelf:'flex-end',padding:7,marginTop:7}}><Text style={{fontSize:10,color:C.red,fontWeight:'900'}}>Close poll</Text></Btn>:null}</View>)}{groupEvents.map(event=><View key={event.id} style={{backgroundColor:C.white,borderWidth:1,borderColor:C.line,borderRadius:15,padding:13}}><Text style={{fontSize:13,fontWeight:'900',color:C.ink}}>{event.title}</Text><Text style={{fontSize:10,color:C.muted,marginTop:4}}>{new Date(event.starts_at).toLocaleString()} · Reminder {event.reminder_minutes} min before</Text>{event.details?<Text style={{fontSize:12,color:C.ink,marginTop:7}}>{event.details}</Text>:null}<Text style={{fontSize:10,color:C.muted,marginTop:7}}>{(event.kc_group_event_rsvps||[]).filter((r:any)=>r.response==='going').length} going · {(event.kc_group_event_rsvps||[]).filter((r:any)=>r.response==='maybe').length} maybe</Text><View style={{flexDirection:'row',gap:6,marginTop:9}}>{(['going','maybe','not_going'] as const).map(response=><Btn key={response} onPress={()=>void respondToGroupEvent(event.id,response)} style={{flex:1,padding:8,borderRadius:9,backgroundColor:(event.kc_group_event_rsvps||[]).some((r:any)=>r.user_id===session?.user?.id&&r.response===response)?C.mint:C.paper,alignItems:'center'}}><Text style={{fontSize:10,color:C.green,fontWeight:'900'}}>{response==='going'?'Going':response==='maybe'?'Maybe':'No'}</Text></Btn>)}</View>{event.creator_id===session?.user?.id?<Btn onPress={()=>cancelGroupEvent(event.id)} style={{marginTop:7,padding:7,alignSelf:'flex-end'}}><Text style={{fontSize:10,color:C.red,fontWeight:'900'}}>Cancel event</Text></Btn>:null}</View>)}</View>:null}
         ListEmptyComponent={<Text style={{textAlign:'center',color:C.muted}}>No messages yet. Send the first message.</Text>}
         renderItem={({item})=><TouchableOpacity activeOpacity={1} onLongPress={active.kind==='channel'&&!active.isChannelOwner?undefined:()=>deleteMessage(item)} delayLongPress={420} style={{alignSelf:item.mine?'flex-end':'flex-start',maxWidth:'86%',backgroundColor:item.mine?'#d2f8bd':'#fff',paddingHorizontal:16,paddingVertical:13,borderRadius:23,borderBottomRightRadius:item.mine?6:23,borderTopLeftRadius:item.mine?23:6,borderWidth:1,borderColor:item.mine?'#b7e9a2':'#eeeae3',elevation:2,shadowColor:'#8c806c',shadowOpacity:.10,shadowRadius:4,shadowOffset:{width:0,height:2}}}>
-          {item.deleted_at?<Text style={{fontSize:12,color:C.muted,fontStyle:'italic'}}>This message was deleted</Text>:item.body?.startsWith(LIVEVERSE_INVITE_PREFIX)?<View style={{minWidth:220,maxWidth:260,backgroundColor:'#17163d',borderRadius:13,padding:12}}>
+          {item.deleted_at?<Text style={{fontSize:12,color:C.muted,fontStyle:'italic'}}>This message was deleted</Text>:item.body?.startsWith(MAGIC_MOMENT_INVITE_PREFIX)?<View style={{minWidth:220,maxWidth:260,backgroundColor:'#251548',borderRadius:13,padding:12}}><Text style={{fontSize:10,color:'#e2c98a',fontWeight:'900',letterSpacing:1}}>GUFTIN MAGIC MOMENTS</Text><Text style={{fontSize:16,color:'#fff',fontWeight:'900',marginTop:5}}>A special moment is waiting</Text><Text style={{fontSize:10,color:'#ded4f4',marginTop:4}}>Open the invitation to view or contribute. Private surprises stay sealed until reveal.</Text><Btn onPress={()=>void (async()=>{try{const data=JSON.parse((item.body||'').slice(MAGIC_MOMENT_INVITE_PREFIX.length));await openMagicMoment({id:data.moment_id});setTab('Magic Moments');}catch(error:any){Alert.alert('Could not open moment',error?.message||'Please try again.');}})()} style={{backgroundColor:'#9471d8',padding:10,borderRadius:9,alignItems:'center',marginTop:9}}><Text style={{color:'#fff',fontWeight:'900'}}>Open Magic Moment</Text></Btn></View>:item.body?.startsWith(LIVEVERSE_INVITE_PREFIX)?<View style={{minWidth:220,maxWidth:260,backgroundColor:'#17163d',borderRadius:13,padding:12}}>
             <Text style={{fontSize:10,color:'#c2b8ff',fontWeight:'900',letterSpacing:1}}>GUFTIN LIVEVERSE</Text>
             <Text style={{fontSize:16,color:'#fff',fontWeight:'900',marginTop:5}}>{(()=>{try{return JSON.parse((item.body||'').slice(LIVEVERSE_INVITE_PREFIX.length)).name||'Shared space';}catch{return 'Shared space';}})()}</Text>
             <Text style={{fontSize:10,color:'#d1cdef',marginTop:4}}>Collaborate with your Guftin chat members</Text>
@@ -5624,6 +5716,57 @@ function GuftinApp() {
         <LiveverseVoiceControls connected={liveverseVoiceConnected} onLeave={()=>{setLiveverseVoiceConnected(false);setLiveverseVoiceSession(null);}}/>
       </LiveKitRoom>:null}
     </Modal>
+    {tab==='Magic Moments'?<ScrollView contentContainerStyle={{padding:16,paddingBottom:32}}>
+      <View style={{backgroundColor:'#17153f',borderRadius:22,padding:19,marginBottom:15}}>
+        <Text style={{fontSize:10,color:'#e6c98c',fontWeight:'900',letterSpacing:2}}>GUFTIN · CREATE TOGETHER</Text>
+        <Text style={{fontSize:26,color:'#fff',fontWeight:'900',marginTop:6}}>Magic Moments ✨</Text>
+        <Text style={{fontSize:12,color:'#ded8f4',marginTop:5}}>Make memories today. Send a surprise into tomorrow.</Text>
+        <Btn onPress={()=>{setMagicView('create');setMagicKind('birthday');}} style={{backgroundColor:'#9471d8',padding:13,borderRadius:12,alignItems:'center',marginTop:14}}><Text style={{color:'#fff',fontWeight:'900'}}>＋ Create a Magic Moment</Text></Btn>
+      </View>
+      {magicView==='create'?<View style={{backgroundColor:C.white,borderRadius:17,padding:14,borderWidth:1,borderColor:C.line,marginBottom:14}}>
+        <Text style={{fontSize:17,color:C.ink,fontWeight:'900'}}>Choose your moment</Text>
+        <View style={{flexDirection:'row',flexWrap:'wrap',gap:7,marginTop:10}}>
+          {([['birthday','Birthday Surprise'],['capsule','Memory Capsule'],['future_message','Future Message'],['secret_surprise','Secret Surprise'],['together','Together Moments'],['anniversary','Friendship Anniversary']] as [MagicMomentKind,string][]).map(([kind,label])=><Btn key={kind} onPress={()=>setMagicKind(kind)} style={{padding:9,borderRadius:10,backgroundColor:magicKind===kind?'#6f4db4':C.paper}}><Text style={{fontSize:10,fontWeight:'900',color:magicKind===kind?'#fff':C.ink}}>{label}</Text></Btn>)}
+        </View>
+        <TextInput value={magicTitle} onChangeText={setMagicTitle} placeholder="Moment title" maxLength={140} style={{backgroundColor:C.paper,padding:11,borderRadius:10,color:C.ink,marginTop:12}}/>
+        <TextInput value={magicDescription} onChangeText={setMagicDescription} placeholder="Add a short description (optional)" multiline maxLength={8000} style={{backgroundColor:C.paper,padding:11,borderRadius:10,color:C.ink,minHeight:70,textAlignVertical:'top',marginTop:8}}/>
+        <TextInput value={magicDraft} onChangeText={setMagicDraft} placeholder={magicKind==='future_message'?'Write the message to deliver later…':'Write a memory or personal message…'} multiline maxLength={20000} style={{backgroundColor:C.paper,padding:11,borderRadius:10,color:C.ink,minHeight:95,textAlignVertical:'top',marginTop:8}}/>
+        {['birthday','secret_surprise','future_message'].includes(magicKind)?<><Text style={{fontSize:10,color:C.muted,marginTop:10,fontWeight:'800'}}>{magicKind==='future_message'?'Delivery date & time':'Reveal date & time'} (local time)</Text><TextInput value={magicScheduleAt} onChangeText={setMagicScheduleAt} placeholder="YYYY-MM-DDTHH:mm" autoCapitalize="none" style={{backgroundColor:C.paper,padding:11,borderRadius:10,color:C.ink,marginTop:6}}/></>:null}
+        <Text style={{fontSize:10,color:C.muted,marginTop:8}}>Share with the currently open direct or group chat. No chat history is imported automatically.</Text>
+        <Btn disabled={magicBusy||!magicTitle.trim()} onPress={()=>void createMagicMoment()} style={{backgroundColor:'#6f4db4',padding:12,borderRadius:11,alignItems:'center',marginTop:11}}><Text style={{color:'#fff',fontWeight:'900'}}>{magicBusy?'Saving…':'Save moment & send invitation card'}</Text></Btn>
+        <Btn onPress={()=>setMagicView('home')} style={{padding:9,alignSelf:'center',marginTop:5}}><Text style={{color:C.muted,fontWeight:'800'}}>Cancel</Text></Btn>
+      </View>:null}
+      {magicView==='detail'&&magicSelected?<View style={{backgroundColor:C.white,borderRadius:17,padding:14,borderWidth:1,borderColor:C.line,marginBottom:14}}>
+        <Btn onPress={()=>{setMagicView('home');setMagicSelected(null);}} style={{alignSelf:'flex-start',padding:7,backgroundColor:C.paper,borderRadius:8}}><Text style={{color:'#6f4db4',fontWeight:'900'}}>‹ All moments</Text></Btn>
+        <Text style={{fontSize:20,color:C.ink,fontWeight:'900',marginTop:10}}>{magicSelected.title}</Text>
+        <Text style={{fontSize:10,color:C.muted,marginTop:4}}>{String(magicSelected.kind).replace('_',' ').toUpperCase()} · {magicSelected.status}</Text>
+        {magicSelected.description?<Text style={{fontSize:12,color:C.ink,marginTop:8}}>{magicSelected.description}</Text>:null}
+        {magicSelected.kind==='secret_surprise'&&magicSelected.creator_id===session?.user?.id?<Btn disabled={magicBusy} onPress={()=>void revealMagicMoment()} style={{backgroundColor:'#6f4db4',padding:10,borderRadius:10,marginTop:10}}><Text style={{color:'#fff',fontWeight:'900'}}>Reveal surprise (server checks reveal time)</Text></Btn>:null}
+        <View style={{flexDirection:'row',gap:7,marginTop:13}}>
+          <Btn onPress={()=>void uploadMagicMedia()} disabled={magicBusy} style={{backgroundColor:'#6f4db4',padding:10,borderRadius:9,flex:1}}><Text style={{color:'#fff',fontWeight:'900',textAlign:'center'}}>＋ Add photo/video</Text></Btn>
+        </View>
+        <TextInput value={magicDraft} onChangeText={setMagicDraft} placeholder="Add a memory or contribution…" multiline style={{backgroundColor:C.paper,padding:10,borderRadius:10,color:C.ink,minHeight:75,marginTop:10,textAlignVertical:'top'}}/>
+        <Btn disabled={magicBusy||!magicDraft.trim()} onPress={()=>void addMagicText()} style={{backgroundColor:C.green,padding:10,borderRadius:9,marginTop:7}}><Text style={{color:'#fff',fontWeight:'900',textAlign:'center'}}>Save contribution</Text></Btn>
+        {magicItems.map((item:any)=><View key={item.id} style={{padding:10,backgroundColor:C.paper,borderRadius:11,marginTop:9}}>
+          {item.item_type==='text'?<Text style={{color:C.ink,fontSize:13}}>{item.body}</Text>:item.item_type==='image'&&item.signedUrl?<Image source={{uri:item.signedUrl}} style={{width:'100%',height:190,borderRadius:10}} resizeMode="cover"/>:item.item_type==='video'&&item.signedUrl?<VideoBubble uri={item.signedUrl}/>:<Text style={{color:C.muted}}>Shared {item.item_type}</Text>}
+          <Text style={{fontSize:9,color:C.muted,marginTop:5}}>{timeLabel(item.created_at)}</Text>
+          <Btn onPress={()=>void magicMomentsClient.react(magicSelected.id,item.id,session.user.id,'❤️').then(()=>Alert.alert('Reaction saved','Your reaction was added.')).catch((e:any)=>Alert.alert('Reaction failed',e.message))} style={{alignSelf:'flex-start',padding:6,marginTop:4}}><Text style={{color:'#6f4db4',fontWeight:'900'}}>♡ React</Text></Btn>
+        </View>)}
+        <Text style={{fontSize:14,fontWeight:'900',color:C.ink,marginTop:15}}>Comments</Text>
+        {magicComments.map((comment:any)=><Text key={comment.id} style={{fontSize:11,color:C.ink,paddingVertical:6,borderBottomWidth:1,borderColor:C.line}}>{comment.body}</Text>)}
+        <TextInput value={magicCommentDraft} onChangeText={setMagicCommentDraft} placeholder="Write a comment…" style={{backgroundColor:C.paper,padding:10,borderRadius:9,color:C.ink,marginTop:8}}/>
+        <Btn onPress={()=>void addMagicComment()} disabled={!magicCommentDraft.trim()} style={{backgroundColor:C.green,padding:10,borderRadius:9,marginTop:7}}><Text style={{color:'#fff',fontWeight:'900',textAlign:'center'}}>Post comment</Text></Btn>
+      </View>:null}
+      {magicView==='home'?<View>
+        <Text style={{fontSize:16,color:C.ink,fontWeight:'900',marginBottom:9}}>Your memories & invitations</Text>
+        {magicBusy&&magicMoments.length===0?<GuftinLoader color="#6f4db4"/>:magicMoments.length===0?<Text style={{fontSize:12,color:C.muted,textAlign:'center',padding:22}}>Your created moments and accepted invitations will appear here.</Text>:magicMoments.map((moment:any)=><Btn key={moment.id} onPress={()=>void openMagicMoment(moment)} style={{backgroundColor:C.white,borderWidth:1,borderColor:C.line,borderRadius:13,padding:13,marginBottom:8,alignItems:'stretch'}}>
+          <Text style={{fontSize:10,color:'#8a6bc0',fontWeight:'900'}}>{String(moment.kind).replace('_',' ').toUpperCase()}</Text>
+          <Text style={{fontSize:14,color:C.ink,fontWeight:'900',marginTop:4}}>{moment.title}</Text>
+          <Text style={{fontSize:10,color:C.muted,marginTop:4}}>{moment.status} · {timeLabel(moment.updated_at)}</Text>
+        </Btn>)}
+        {magicNotifications.length?<><Text style={{fontSize:14,color:C.ink,fontWeight:'900',marginTop:12,marginBottom:7}}>Moments Shared With Me</Text>{magicNotifications.map((n:any)=><View key={n.id} style={{backgroundColor:C.paper,padding:10,borderRadius:10,marginBottom:6}}><Text style={{fontSize:11,color:C.ink,fontWeight:'800'}}>{n.title}</Text><Text style={{fontSize:10,color:C.muted,marginTop:3}}>{n.body}</Text></View>)}</>:null}
+      </View>:null}
+    </ScrollView>:null}
     {tab==='AI'?<View style={{flex:1,paddingHorizontal:14,paddingTop:14,paddingBottom:10}}>
       <View style={{backgroundColor:C.mint,borderRadius:18,padding:15,marginBottom:10}}>
         <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}>
@@ -5722,9 +5865,9 @@ function GuftinApp() {
       />
     </View>:null}
     <View style={{marginHorizontal:7,marginBottom:Math.max(insets.bottom,5),height:66,paddingTop:5,paddingBottom:5,borderRadius:27,borderWidth:1,borderColor:C.line,flexDirection:'row',alignItems:'center',justifyContent:'space-around',backgroundColor:C.white,elevation:10,shadowColor:'#123d2d',shadowOpacity:.09,shadowRadius:12,shadowOffset:{width:0,height:4}}}>
-      {([['Chats','▤'],['Liveverse','◎'],['AI','✦'],['Updates','◉'],['Hub','⌂'],['Calls','☎'],['You','●']] as string[][]).map(([t,icon])=><Btn key={t} onPress={()=>setTab(t)} style={{alignItems:'center',justifyContent:'center',minWidth:48,paddingHorizontal:2,paddingVertical:4}}>
+      {([['Chats','▤'],['Liveverse','◎'],['Magic Moments','✧'],['AI','✦'],['Updates','◉'],['Hub','⌂'],['Calls','☎'],['You','●']] as string[][]).map(([t,icon])=><Btn key={t} onPress={()=>setTab(t)} style={{alignItems:'center',justifyContent:'center',minWidth:48,paddingHorizontal:2,paddingVertical:4}}>
         <Text style={{fontSize:20,color:tab===t?C.green:C.muted,fontWeight:'900'}}>{icon}</Text>
-        <Text style={{fontSize:10,fontWeight:tab===t?'900':'600',color:tab===t?C.green:C.muted,marginTop:3}}>{t==='Hub'?'Business':t}</Text>
+        <Text style={{fontSize:10,fontWeight:tab===t?'900':'600',color:tab===t?C.green:C.muted,marginTop:3}}>{t==='Hub'?'Business':t==='Magic Moments'?'Magic':t}</Text>
         {tab===t?<View style={{height:3,width:24,borderRadius:3,backgroundColor:C.green,marginTop:3}}/>:null}
       </Btn>)}
     </View>
