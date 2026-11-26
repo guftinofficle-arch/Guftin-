@@ -3290,8 +3290,8 @@ function GuftinApp() {
     }
   };
 
-  const sendMessage=async()=>{
-    const body=draft.trim();
+  const sendMessage=async(bodyOverride?:string)=>{
+    const body=(bodyOverride??draft).trim();
     if(!body||!active||!session||sending||clearingConversationIds.current.has(active.id))return;
     if(active.kind==='channel'){
       if(!active.isChannelOwner){Alert.alert('Channel is read-only','Only the channel owner can publish updates.');return;}
@@ -5156,7 +5156,7 @@ function GuftinApp() {
           <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginTop:16}}>
             <Btn onPress={()=>{setScheduleComposerOpen(false);setScheduledMessagesOpen(true);void loadScheduledMessages();}} disabled={scheduleBusy} style={{paddingVertical:10,paddingRight:8}}><Text style={{color:C.green,fontSize:11,fontWeight:'900'}}>View scheduled</Text></Btn>
             <View style={{flexDirection:'row',gap:8,alignItems:'center'}}>
-              <Btn disabled={scheduleBusy} onPress={()=>setScheduleComposerOpen(false)} style={{padding:11}}><Text style={{color:C.muted,fontWeight:'800'}}>Cancel</Text></Btn>
+              <Btn disabled={scheduleBusy||!scheduleDraft.trim()||sending} onPress={()=>{const body=scheduleDraft.trim();setScheduleComposerOpen(false);void sendMessage(body);}} style={{padding:11}}><Text style={{color:C.green,fontWeight:'900'}}>Send now</Text></Btn><Btn disabled={scheduleBusy} onPress={()=>setScheduleComposerOpen(false)} style={{padding:11}}><Text style={{color:C.muted,fontWeight:'800'}}>Cancel</Text></Btn>
               <Btn disabled={scheduleBusy||!scheduleDraft.trim()||(scheduleMode==='at'&&!scheduleAtInput.trim())||(scheduleMode==='after'&&!scheduleDelayAmount.trim())} onPress={()=>void submitScheduledMessage()} style={{backgroundColor:C.green,paddingHorizontal:17,paddingVertical:12,borderRadius:12}}>{scheduleBusy?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Schedule & send</Text>}</Btn>
             </View>
           </View>
