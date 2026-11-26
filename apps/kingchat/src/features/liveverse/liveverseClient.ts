@@ -37,13 +37,14 @@ export function createLiveverseClient(db: SupabaseClient) {
   const requireSpace = (spaceId: string) => assertUuid(spaceId, 'space ID');
 
   async function createSpace(input: {
-    name: string; description?: string; scope: LiveverseScope; sourceChatId?: string | null;
+    name: string; description?: string; scope: LiveverseScope; ownerId: string; sourceChatId?: string | null;
   }): Promise<LiveverseSpace> {
     const name = assertText(input.name, 80, 'Space name');
+    assertUuid(input.ownerId, 'owner ID');
     if (input.sourceChatId) assertUuid(input.sourceChatId, 'chat ID');
     const { data, error } = await db.from('liveverse_spaces').insert({
       name, description: (input.description || '').trim().slice(0, 500),
-      scope: input.scope, source_chat_id: input.sourceChatId || null
+      scope: input.scope, owner_id: input.ownerId, source_chat_id: input.sourceChatId || null
     }).select('*').single();
     if (error) throw error;
     return data as LiveverseSpace;
@@ -189,11 +190,11 @@ export function createLiveverseClient(db: SupabaseClient) {
     return data;
   }
 
-  async function createSpaceChannel(spaceId: string, onDatabaseChange: (payload: any) => void,
+  async function createSpaceChannel(spaceId: string, userId: string, onDatabaseChange: (payload: any) => void,
     onPresenceChange: (state: Record<string, unknown[]>) => void): Promise<RealtimeChannel> {
-    requireSpace(spaceId);
+    requireSpace(spaceId); assertUuid(userId, 'user ID');
     const channel = db.channel(`liveverse:${spaceId}`, {
-      config: { presence: { key: 'member' }, broadcast: { self: false, ack: true } }
+      config: { presence: { key: userId }, broadcast: { self: false, ack: true } }
     });
     channel.on('postgres_changes', { event: '*', schema: 'public', table: 'liveverse_notes', filter: `space_id=eq.${spaceId}` }, onDatabaseChange);
     channel.on('postgres_changes', { event: '*', schema: 'public', table: 'liveverse_tasks', filter: `space_id=eq.${spaceId}` }, onDatabaseChange);
