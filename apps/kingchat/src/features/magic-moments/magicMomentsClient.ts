@@ -29,8 +29,7 @@ export function createMagicMomentsClient(supabase:SupabaseClient){
     scheduled_at:input.scheduledAt||null,timezone:input.timezone||'UTC',settings:input.settings||{},status:input.scheduledAt?'scheduled':'draft'
    }).select('*').single();
    if(error)throw error;
-   const {error:memberError}=await supabase.from('magic_moment_members').insert({moment_id:data.id,user_id:input.creatorId,role:'owner',invited_by:input.creatorId,accepted_at:new Date().toISOString()});
-   if(memberError)throw memberError;
+   // The database trigger creates the creator's accepted owner membership atomically.
    return data as MagicMoment;
   },
   async invite(momentId:string,userId:string,inviterId:string,role:'contributor'|'recipient'|'viewer'='contributor'){
