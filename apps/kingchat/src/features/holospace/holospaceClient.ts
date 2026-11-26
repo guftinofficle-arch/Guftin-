@@ -48,7 +48,10 @@ export function createHoloSpaceClient(db:SupabaseClient){
     if(error)throw error; return (data||[]) as HoloRoom[];
   }
   async function listInvitations(){
-    const {data,error}=await db.from('holospace_members').select('room_id,invited_by,created_at,holospace_rooms(id,name,description,privacy,owner_id,timezone,created_at,updated_at)').eq('invitation_status','invited').order('created_at',{ascending:false}).limit(100);
+    const {data:{user},error:userError}=await db.auth.getUser();
+    if(userError)throw userError;
+    if(!user)return [];
+    const {data,error}=await db.from('holospace_members').select('room_id,invited_by,created_at,holospace_rooms(id,name,description,privacy,owner_id,timezone,created_at,updated_at)').eq('user_id',user.id).eq('invitation_status','invited').order('created_at',{ascending:false}).limit(100);
     if(error)throw error; return data||[];
   }
   async function invite(roomId:string,userId:string,inviterId:string){
