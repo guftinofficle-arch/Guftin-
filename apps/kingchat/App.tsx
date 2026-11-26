@@ -4806,19 +4806,12 @@ function GuftinApp() {
   const sendAIMessage=async()=>{
     const raw=aiDraft.trim();
     if(!raw||aiBusy)return;
-    const instructions={
-      chat:raw,
-      write:'Act as a helpful writing assistant. Draft or improve a message based on the user request. Keep the intended meaning and requested tone. Do not send the message.\n\nUser request: '+raw,
-      translate:'Translate the following text. Preserve its meaning and tone. If the target language is not specified, ask which language is wanted.\n\nText: '+raw,
-      summarize:'Summarize the text or conversation below into clear, concise points. Do not add facts that are not present.\n\nText: '+raw,
-      reply:'Help the user reply to the message or situation below. Suggest three natural reply options with different tones. Do not send anything.\n\nMessage or situation: '+raw
-    };
-    const outgoing=(instructions as any)[aiMode]||raw;
+    const outgoing=raw;
     setAiDraft('');
     setAiMessages(previous=>[...previous,{role:'user',content:raw}]);
     setAiBusy(true);
     try{
-      const data=await invokeGuftinAI({message:outgoing,chatId:aiChatId});
+      const data=await invokeGuftinAI({message:outgoing,chatId:aiChatId,mode:aiMode});
       if(typeof data.chatId==='string')setAiChatId(data.chatId);
       setAiMessages(previous=>[...previous,{role:'assistant',content:String(data.reply||'')}]);
       const list=await invokeGuftinAI({action:'list_chats'});
