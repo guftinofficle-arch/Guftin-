@@ -123,7 +123,7 @@ export function createHoloSpaceClient(db:SupabaseClient){
     if(error)throw error;return (data||[]) as HoloGalleryItem[];
   }
   async function gallerySignedUrl(path:string,expiresIn=300){
-    if(!path.startsWith('')||path.split('/').length<3)throw new Error('Invalid media path.');
+    if(path.split('/').length!==3||!UUID.test(path.split('/')[0])||!UUID.test(path.split('/')[1]))throw new Error('Invalid media path.');
     const {data,error}=await db.storage.from(GALLERY).createSignedUrl(path,expiresIn);
     if(error)throw error;return data.signedUrl;
   }
