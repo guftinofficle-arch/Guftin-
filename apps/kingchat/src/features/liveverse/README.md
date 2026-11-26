@@ -32,7 +32,7 @@ This directory is the isolated implementation area for Liveverse. It is delibera
 
 ## Migration
 
-Apply `supabase/migrations/20261126180000_guftin_liveverse_foundation.sql` only after reviewing it against the current database and testing it in a disposable Supabase branch. The migration creates the private bucket and policies as well as tables. Do not apply it to production until the SQL and RLS tests pass.
+The migration was syntax-checked against the current project inside a transaction that was rolled back. No production schema changes were retained. Apply only after two-account security tests and a reviewed deployment window. The migration creates the private bucket and policies as well as tables. Do not apply it to production until the SQL and RLS tests pass.
 
 ## Required settings / secrets
 
@@ -81,3 +81,7 @@ Configure server-side Edge Function secrets `LIVEKIT_URL`, `LIVEKIT_API_KEY`, an
 - SQL migration and tests have not been applied/run against a disposable Supabase branch; two-account authorization tests remain outstanding.
 - The current Liveverse workspace UI does not yet include a fully polished member role manager or synchronized video playback.
 - Android/web builds must pass on the final feature commit; iOS still needs a device build/test.
+
+
+## Migration syntax verification
+The full Liveverse migration was executed in a `BEGIN ... ROLLBACK` transaction against the current Guftin Supabase project and completed successfully. This confirms SQL syntax and compatibility at that point without persisting tables, buckets, policies or publication changes.
