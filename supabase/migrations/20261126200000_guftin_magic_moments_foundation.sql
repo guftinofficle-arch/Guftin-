@@ -195,10 +195,11 @@ create policy magic_notifications_update_own on public.magic_moment_notification
 
 grant select,insert,delete on public.magic_moments,public.magic_moment_members,public.magic_moment_items,public.magic_moment_comments,public.magic_moment_reactions,public.magic_moment_notifications to authenticated;
 revoke update on public.magic_moments,public.magic_moment_members,public.magic_moment_items,public.magic_moment_notifications from authenticated;
-grant update(title,description,cover_object_path,settings,updated_at) on public.magic_moments to authenticated;
+grant update(title,description,reveal_at,scheduled_at,timezone,status,cover_object_path,settings,updated_at,revealed_at) on public.magic_moments to authenticated;
 grant update(accepted_at) on public.magic_moment_members to authenticated;
 grant update(body,metadata,updated_at) on public.magic_moment_items to authenticated;
 grant update(read_at) on public.magic_moment_notifications to authenticated;
+grant update(reaction) on public.magic_moment_reactions to authenticated;
 
 -- Private media bucket; object names begin with moment UUID. Storage RLS ties each path to an accepted member.
 insert into storage.buckets(id,name,public,file_size_limit,allowed_mime_types)
