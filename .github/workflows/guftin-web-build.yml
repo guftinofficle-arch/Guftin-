@@ -6,6 +6,7 @@ on:
       - feature/guftin-20-feature-upgrade
       - feature/guftin-liveverse
       - feature/guftin-holospace
+      - feature/guftin-all-three-features
     paths:
       - "apps/kingchat/**"
       - ".github/workflows/guftin-web-build.yml"
