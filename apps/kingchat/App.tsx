@@ -968,6 +968,13 @@ function GuftinApp() {
     activeConversationKindRef.current=active?.kind||null;
   },[active?.id,active?.kind]);
   const [draft,setDraft]=useState('');
+  const [aiDraft,setAiDraft]=useState('');
+  const [aiChatId,setAiChatId]=useState<string|null>(null);
+  const [aiMessages,setAiMessages]=useState<Array<{role:string;content:string}>>([]);
+  const [aiChats,setAiChats]=useState<any[]>([]);
+  const [aiBusy,setAiBusy]=useState(false);
+  const [aiHistoryOpen,setAiHistoryOpen]=useState(false);
+  const [aiMode,setAiMode]=useState<'chat'|'write'|'translate'|'summarize'|'reply'>('chat');
   const [search,setSearch]=useState('');
   const [searching,setSearching]=useState(false);
   const [loading,setLoading]=useState(true);
@@ -4775,7 +4782,58 @@ function GuftinApp() {
   useEffect(()=>{if(session?.user?.id)void loadChatFolders();else{setChatFolders([]);setActiveFolderId(null);}},[session?.user?.id]);
 
   const visible=useMemo(()=>chats.filter(c=>c.name.toLowerCase().includes(search.toLowerCase())&&(!activeFolderId||chatFolders.some((folder:any)=>folder.id===activeFolderId&&folder.conversation_ids.includes(c.id)))),[chats,search,activeFolderId,chatFolders]);
-  const pageTitle=tab==='Chats'?'Guftin':tab==='Updates'?'Updates':tab==='Channels'?'Channels':tab==='Hub'?'Business & Communities':tab==='Calls'?'Calls':'You';
+  const invokeGuftinAI=async(body:any)=>{
+    const {data,error}=await supabase.functions.invoke('ai-chat',{body});
+    if(error)throw new Error(error.message||'Karaboz AI could not be reached.');
+    if(data?.error)throw new Error(String(data.error));
+    return data;
+  };
+  const loadAIChats=async()=>{
+    try{
+      const data=await invokeGuftinAI({action:'list_chats'});
+      setAiChats(Array.isArray(data.chats)?data.chats:[]);
+      setAiHistoryOpen(true);
+    }catch(error:any){Alert.alert('Karaboz AI',error?.message||'Could not load AI history.');}
+  };
+  const openAIChat=async(chatId:string)=>{
+    try{
+      const data=await invokeGuftinAI({action:'load_chat',chatId});
+      setAiChatId(chatId);
+      setAiMessages(Array.isArray(data.messages)?data.messages:[]);
+      setAiHistoryOpen(false);
+    }catch(error:any){Alert.alert('Karaboz AI',error?.message||'Could not open this AI chat.');}
+  };
+  const sendAIMessage=async()=>{
+    const raw=aiDraft.trim();
+    if(!raw||aiBusy)return;
+    const instructions={
+      chat:raw,
+      write:'Act as a helpful writing assistant. Draft or improve a message based on the user request. Keep the intended meaning and requested tone. Do not send the message.\n\nUser request: '+raw,
+      translate:'Translate the following text. Preserve its meaning and tone. If the target language is not specified, ask which language is wanted.\n\nText: '+raw,
+      summarize:'Summarize the text or conversation below into clear, concise points. Do not add facts that are not present.\n\nText: '+raw,
+      reply:'Help the user reply to the message or situation below. Suggest three natural reply options with different tones. Do not send anything.\n\nMessage or situation: '+raw
+    };
+    const outgoing=(instructions as any)[aiMode]||raw;
+    setAiDraft('');
+    setAiMessages(previous=>[...previous,{role:'user',content:raw}]);
+    setAiBusy(true);
+    try{
+      const data=await invokeGuftinAI({message:outgoing,chatId:aiChatId});
+      if(typeof data.chatId==='string')setAiChatId(data.chatId);
+      setAiMessages(previous=>[...previous,{role:'assistant',content:String(data.reply||'')}]);
+      const list=await invokeGuftinAI({action:'list_chats'});
+      setAiChats(Array.isArray(list.chats)?list.chats:[]);
+    }catch(error:any){
+      setAiMessages(previous=>[...previous,{role:'assistant',content:'Karaboz AI: '+(error?.message||'Please try again.')}]);
+    }finally{setAiBusy(false);}
+  };
+  const startNewAIChat=()=>{
+    setAiChatId(null);
+    setAiMessages([]);
+    setAiHistoryOpen(false);
+    setAiMode('chat');
+  };
+  const pageTitle=tab==='Chats'?'Guftin':tab==='AI'?'Karaboz AI':tab==='Updates'?'Updates':tab==='Channels'?'Channels':tab==='Hub'?'Business & Communities':tab==='Calls'?'Calls':'You';
   const totalUnread=chats.reduce((sum:any,item:any)=>sum+(Number(item.unread)||0),0);
 
   if(authRestoring){
@@ -5104,7 +5162,7 @@ function GuftinApp() {
           {tab==='Chats'?<BrandLogo size={62}/>:<Btn onPress={()=>setTab('You')}><Avatar label={initials(profile?.display_name||'G')} color={C.green} size={42} uri={profileAvatarUrl}/></Btn>}
           <View style={{flex:1}}>
             <Text style={{fontSize:29,fontWeight:'900',letterSpacing:-.8,color:tab==='Chats'?'#fff':C.ink}}>{pageTitle}</Text>
-            <Text style={{color:tab==='Chats'?'#e4fff1':C.muted,fontSize:12,marginTop:2}}>{tab==='Chats'?'Your real conversations':tab==='You'?'Your Guftin ID':tab==='Hub'?'Stores and communities':'Guftin'}</Text>
+            <Text style={{color:tab==='Chats'?'#e4fff1':C.muted,fontSize:12,marginTop:2}}>{tab==='Chats'?'Your real conversations':tab==='AI'?'Ask, write, translate and summarize':tab==='You'?'Your Guftin ID':tab==='Hub'?'Stores and communities':'Guftin'}</Text>
           </View>
         </View>
         <View style={{flexDirection:'row',gap:8}}>
@@ -5218,6 +5276,46 @@ function GuftinApp() {
       {hubCommunities.length?hubCommunities.map(x=><View key={x.id} style={{backgroundColor:C.white,borderRadius:14,padding:12,marginBottom:8}}><Text style={{fontWeight:'900',color:C.ink}}>{x.title}</Text><Text style={{fontSize:10,color:C.muted,marginTop:4}}>{x.role==='owner'?'Community owner':'Community member'} · {timeLabel(x.created_at)}</Text></View>):<Text style={{fontSize:11,color:C.muted}}>Your joined communities will appear here.</Text>}
 
     </ScrollView>:null}
+    {tab==='AI'?<View style={{flex:1,paddingHorizontal:14,paddingTop:14,paddingBottom:10}}>
+      <View style={{backgroundColor:C.mint,borderRadius:18,padding:15,marginBottom:10}}>
+        <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}>
+          <View style={{flex:1}}>
+            <Text style={{fontSize:18,fontWeight:'900',color:C.green}}>✦ Karaboz AI</Text>
+            <Text style={{fontSize:11,color:C.ink,marginTop:4}}>Your Guftin assistant · Urdu, Hindi and English</Text>
+          </View>
+          <Btn onPress={startNewAIChat} style={{backgroundColor:C.white,paddingHorizontal:12,paddingVertical:9,borderRadius:12}}><Text style={{color:C.green,fontWeight:'900'}}>＋ New</Text></Btn>
+          <Btn onPress={()=>void loadAIChats()} style={{backgroundColor:C.white,paddingHorizontal:12,paddingVertical:9,borderRadius:12,marginLeft:6}}><Text style={{color:C.green,fontWeight:'900'}}>History</Text></Btn>
+        </View>
+      </View>
+      <View style={{flexDirection:'row',flexWrap:'wrap',gap:7,marginBottom:10}}>
+        {([['chat','Ask AI'],['write','Write'],['translate','Translate'],['summarize','Summarize'],['reply','Suggest reply']] as Array<[typeof aiMode,string]>).map(([mode,label])=><Btn key={mode} onPress={()=>setAiMode(mode)} style={{paddingHorizontal:12,paddingVertical:8,borderRadius:18,backgroundColor:aiMode===mode?C.green:C.white,borderWidth:1,borderColor:aiMode===mode?C.green:C.line}}><Text style={{fontSize:11,fontWeight:'900',color:aiMode===mode?'#fff':C.ink}}>{label}</Text></Btn>)}
+      </View>
+      {aiHistoryOpen?<View style={{backgroundColor:C.white,borderRadius:15,padding:10,marginBottom:10,maxHeight:160}}>
+        <Text style={{fontWeight:'900',color:C.ink,marginBottom:7}}>Recent AI chats</Text>
+        <ScrollView>
+          {aiChats.length?aiChats.map((chat:any)=><Btn key={chat.id} onPress={()=>void openAIChat(chat.id)} style={{paddingVertical:9,borderBottomWidth:1,borderColor:C.line,alignItems:'flex-start'}}><Text numberOfLines={1} style={{color:C.ink,fontWeight:'700'}}>{chat.title||'New chat'}</Text><Text style={{fontSize:10,color:C.muted}}>{chat.message_count||0} messages</Text></Btn>):<Text style={{color:C.muted,fontSize:11,padding:8}}>No saved AI chats yet.</Text>}
+        </ScrollView>
+      </View>:null}
+      <ScrollView style={{flex:1}} contentContainerStyle={{paddingBottom:12,gap:10}}>
+        {aiMessages.length===0?<View style={{alignItems:'center',paddingHorizontal:18,paddingVertical:34}}>
+          <View style={{width:66,height:66,borderRadius:23,backgroundColor:C.mint,alignItems:'center',justifyContent:'center',marginBottom:14}}><Text style={{fontSize:32,color:C.green}}>✦</Text></View>
+          <Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>How can I help?</Text>
+          <Text style={{fontSize:12,color:C.muted,textAlign:'center',lineHeight:18,marginTop:7}}>Ask a question, write a message, translate text or get help replying to someone.</Text>
+          <View style={{flexDirection:'row',flexWrap:'wrap',justifyContent:'center',gap:8,marginTop:18}}>
+            {['Explain something simply','Write a polite message','Translate into Urdu','Suggest a friendly reply'].map((hint,i)=><Btn key={hint} onPress={()=>{setAiMode((['chat','write','translate','reply'] as any)[i]);setAiDraft(hint+': ');}} style={{backgroundColor:C.white,borderWidth:1,borderColor:C.line,borderRadius:13,padding:11}}><Text style={{fontSize:11,color:C.green,fontWeight:'800'}}>{hint}</Text></Btn>)}
+          </View>
+        </View>:aiMessages.map((item,index)=><View key={index} style={{alignSelf:item.role==='user'?'flex-end':'flex-start',maxWidth:'90%',backgroundColor:item.role==='user'?C.mint:C.white,borderRadius:16,padding:13,borderWidth:1,borderColor:C.line}}>
+          <Text style={{fontSize:10,fontWeight:'900',color:C.green,marginBottom:5}}>{item.role==='user'?'You':'Karaboz AI'}</Text>
+          <Text selectable style={{fontSize:13,color:C.ink,lineHeight:20}}>{item.content}</Text>
+        </View>)}
+        {aiBusy?<View style={{alignSelf:'flex-start',backgroundColor:C.white,borderRadius:14,padding:12}}><Text style={{fontSize:12,color:C.muted}}>Karaboz AI is thinking…</Text></View>:null}
+      </ScrollView>
+      <View style={{backgroundColor:C.white,borderRadius:18,padding:9,borderWidth:1,borderColor:C.line,flexDirection:'row',alignItems:'flex-end',gap:8}}>
+        <TextInput value={aiDraft} onChangeText={setAiDraft} placeholder={aiMode==='translate'?'Text to translate…':aiMode==='write'?'What message should I write?':aiMode==='reply'?'Paste a message to get reply ideas…':'Message Karaboz AI…'} multiline maxLength={4000} style={{flex:1,minHeight:44,maxHeight:120,paddingHorizontal:9,paddingVertical:8,color:C.ink,textAlignVertical:'center'}}/>
+        <Btn disabled={aiBusy||!aiDraft.trim()} onPress={()=>void sendAIMessage()} style={{width:43,height:43,borderRadius:14,backgroundColor:aiBusy||!aiDraft.trim()?C.line:C.green,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:18,color:'#fff',fontWeight:'900'}}>➤</Text></Btn>
+      </View>
+      <Text style={{fontSize:9,color:C.muted,textAlign:'center',marginTop:6}}>AI can make mistakes. Review suggested messages before sending.</Text>
+    </View>:null}
     {tab==='Calls'?<ScrollView contentContainerStyle={{padding:18,paddingBottom:30}}>
       <View style={{backgroundColor:C.paper,borderRadius:18,padding:16,marginBottom:16}}>
         <Text style={{fontSize:18,fontWeight:'900',color:C.ink}}>Call history</Text>
@@ -5276,7 +5374,7 @@ function GuftinApp() {
       />
     </View>:null}
     <View style={{marginHorizontal:7,marginBottom:Math.max(insets.bottom,5),height:66,paddingTop:5,paddingBottom:5,borderRadius:27,borderWidth:1,borderColor:C.line,flexDirection:'row',alignItems:'center',justifyContent:'space-around',backgroundColor:C.white,elevation:10,shadowColor:'#123d2d',shadowOpacity:.09,shadowRadius:12,shadowOffset:{width:0,height:4}}}>
-      {([['Chats','▤'],['Updates','◉'],['Hub','⌂'],['Calls','☎'],['You','●']] as string[][]).map(([t,icon])=><Btn key={t} onPress={()=>setTab(t)} style={{alignItems:'center',justifyContent:'center',minWidth:58,paddingVertical:4}}>
+      {([['Chats','▤'],['AI','✦'],['Updates','◉'],['Hub','⌂'],['Calls','☎'],['You','●']] as string[][]).map(([t,icon])=><Btn key={t} onPress={()=>setTab(t)} style={{alignItems:'center',justifyContent:'center',minWidth:48,paddingHorizontal:2,paddingVertical:4}}>
         <Text style={{fontSize:20,color:tab===t?C.green:C.muted,fontWeight:'900'}}>{icon}</Text>
         <Text style={{fontSize:10,fontWeight:tab===t?'900':'600',color:tab===t?C.green:C.muted,marginTop:3}}>{t==='Hub'?'Business':t}</Text>
         {tab===t?<View style={{height:3,width:24,borderRadius:3,backgroundColor:C.green,marginTop:3}}/>:null}
