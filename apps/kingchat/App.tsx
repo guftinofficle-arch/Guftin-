@@ -990,6 +990,9 @@ function GuftinApp() {
   const [holoDescription,setHoloDescription]=useState('');
   const [holoPrivacy,setHoloPrivacy]=useState<'private'|'public'>('private');
   const [holoMemoryDraft,setHoloMemoryDraft]=useState('');
+  const [holoMemoryEditingId,setHoloMemoryEditingId]=useState<string|null>(null);
+  const [holoMemoryEditingBody,setHoloMemoryEditingBody]=useState('');
+  const [holoEventEditingId,setHoloEventEditingId]=useState<string|null>(null);
   const [holoRoomNameDraft,setHoloRoomNameDraft]=useState('');
   const [holoRoomDescriptionDraft,setHoloRoomDescriptionDraft]=useState('');
   const [holoRoomPrivacyDraft,setHoloRoomPrivacyDraft]=useState<'private'|'public'>('private');
@@ -4955,6 +4958,33 @@ function GuftinApp() {
     catch(error:any){Alert.alert('Memory not saved',error?.message||'Please try again.');}
     finally{setHoloSaving(false);}
   };
+  const saveHoloMemoryEdit=async()=>{
+    if(!holoSelected||!holoMemoryEditingId||!holoMemoryEditingBody.trim())return;
+    setHoloSaving(true);
+    try{await holoClient.editMemory(holoMemoryEditingId,holoMemoryEditingBody);setHoloMemories(await holoClient.listMemories(holoSelected.id));setHoloMemoryEditingId(null);setHoloMemoryEditingBody('');}
+    catch(error:any){Alert.alert('Memory not updated',error?.message||'Please try again.');}
+    finally{setHoloSaving(false);}
+  };
+  const deleteHoloMemory=async(memory:any)=>{
+    Alert.alert('Delete memory?','This removes the selected memory from the shared wall.',[
+      {text:'Cancel',style:'cancel'},
+      {text:'Delete',style:'destructive',onPress:async()=>{
+        try{await holoClient.deleteMemory(memory.id);setHoloMemories(items=>items.filter((x:any)=>x.id!==memory.id));}
+        catch(error:any){Alert.alert('Memory not deleted',error?.message||'Please try again.');}
+      }}
+    ]);
+  };
+  const saveHoloEventEdit=async()=>{
+    if(!holoEventEditingId||!holoEventTitle.trim()||!holoEventDate.trim())return;
+    const parsed=new Date(holoEventDate);if(!Number.isFinite(parsed.getTime())){Alert.alert('Date not valid','Enter a date and time such as 2026-12-31T20:00.');return;}
+    setHoloSaving(true);
+    try{
+      const updated=await holoClient.updateEvent(holoEventEditingId,{title:holoEventTitle,startsAt:parsed.toISOString(),timezone:Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC'});
+      setHoloEvents(items=>items.map((x:any)=>x.id===updated.id?updated:x).sort((a:any,b:any)=>a.starts_at.localeCompare(b.starts_at)));
+      setHoloEventEditingId(null);setHoloEventTitle('');setHoloEventDate('');
+    }catch(error:any){Alert.alert('Event not updated',error?.message||'Please try again.');}
+    finally{setHoloSaving(false);}
+  };
   const chooseHoloTheme=async(themeKey:string)=>{
     if(!holoSelected||!session?.user?.id)return;
     try{await holoClient.saveTheme({roomId:holoSelected.id,userId:session.user.id,themeKey,accentColor:themeKey==='ocean'?'#2476D2':themeKey==='sunset'?'#D45B42':themeKey==='forest'?'#16845D':'#0B9B72'});Alert.alert('Theme saved','Room appearance has been updated.');}
@@ -5524,7 +5554,9 @@ function GuftinApp() {
         <Text style={{fontSize:15,fontWeight:'900',color:C.ink,marginTop:18}}>Memory Wall</Text>
         <TextInput value={holoMemoryDraft} onChangeText={setHoloMemoryDraft} placeholder="Write a memory to share…" multiline maxLength={5000} style={{backgroundColor:C.paper,borderRadius:12,padding:12,minHeight:75,textAlignVertical:'top',color:C.ink,marginTop:8}}/>
         <Btn disabled={holoSaving||!holoMemoryDraft.trim()} onPress={()=>void addHoloMemory()} style={{backgroundColor:C.green,padding:11,borderRadius:11,alignItems:'center',marginTop:8}}><Text style={{color:'#fff',fontWeight:'900'}}>＋ Save memory</Text></Btn>
-        {holoMemories.map(memory=><View key={memory.id} style={{padding:11,borderBottomWidth:1,borderColor:C.line}}><Text style={{color:C.ink,lineHeight:20}}>{memory.body}</Text><Text style={{color:C.muted,fontSize:10,marginTop:5}}>{timeLabel(memory.created_at)}</Text></View>)}
+        {holoMemories.map(memory=><View key={memory.id} style={{padding:11,borderBottomWidth:1,borderColor:C.line}}>
+          {holoMemoryEditingId===memory.id?<><TextInput value={holoMemoryEditingBody} onChangeText={setHoloMemoryEditingBody} multiline maxLength={5000} style={{backgroundColor:C.paper,borderRadius:9,padding:9,color:C.ink,minHeight:65}}/><View style={{flexDirection:'row',gap:8,marginTop:7}}><Btn disabled={holoSaving||!holoMemoryEditingBody.trim()} onPress={()=>void saveHoloMemoryEdit()} style={{padding:8,backgroundColor:C.green,borderRadius:8}}><Text style={{color:'#fff',fontSize:10,fontWeight:'900'}}>Save</Text></Btn><Btn onPress={()=>{setHoloMemoryEditingId(null);setHoloMemoryEditingBody('');}} style={{padding:8,backgroundColor:C.paper,borderRadius:8}}><Text style={{color:C.ink,fontSize:10}}>Cancel</Text></Btn></View></>:<><Text style={{color:C.ink,lineHeight:20}}>{memory.body}</Text><Text style={{color:C.muted,fontSize:10,marginTop:5}}>{timeLabel(memory.created_at)}</Text>{memory.author_id===session?.user?.id?<View style={{flexDirection:'row',gap:8,marginTop:6}}><Btn onPress={()=>{setHoloMemoryEditingId(memory.id);setHoloMemoryEditingBody(memory.body);}} style={{padding:7,backgroundColor:C.paper,borderRadius:8}}><Text style={{color:C.ink,fontSize:10,fontWeight:'800'}}>Edit</Text></Btn><Btn onPress={()=>void deleteHoloMemory(memory)} style={{padding:7,backgroundColor:C.paper,borderRadius:8}}><Text style={{color:C.red,fontSize:10,fontWeight:'800'}}>Delete</Text></Btn></View>:null}</>}
+        </View>)}
         <Text style={{fontSize:15,fontWeight:'900',color:C.ink,marginTop:17}}>Room themes</Text>
         <View style={{flexDirection:'row',flexWrap:'wrap',gap:7,marginTop:8}}>{['aurora','midnight','ocean','sunset','forest','starlight'].map(theme=><Btn key={theme} onPress={()=>void chooseHoloTheme(theme)} style={{padding:10,borderRadius:10,backgroundColor:C.mint}}><Text style={{color:C.green,fontWeight:'800',fontSize:10}}>{theme}</Text></Btn>)}</View>
         <Text style={{fontSize:15,fontWeight:'900',color:C.ink,marginTop:17}}>Your room avatar</Text>
@@ -5544,7 +5576,10 @@ function GuftinApp() {
         <TextInput value={holoEventTitle} onChangeText={setHoloEventTitle} placeholder="Birthday or special occasion" maxLength={120} style={{backgroundColor:C.paper,borderRadius:10,padding:10,color:C.ink,marginTop:8}}/>
         <TextInput value={holoEventDate} onChangeText={setHoloEventDate} placeholder="Date and time (YYYY-MM-DDTHH:mm)" style={{backgroundColor:C.paper,borderRadius:10,padding:10,color:C.ink,marginTop:7}}/>
         <Btn disabled={holoSaving||!holoEventTitle.trim()||!holoEventDate.trim()} onPress={()=>void createHoloEvent()} style={{backgroundColor:C.green,padding:10,borderRadius:10,alignItems:'center',marginTop:7}}><Text style={{color:'#fff',fontWeight:'900'}}>＋ Save countdown</Text></Btn>
-        {holoEvents.map(event=><View key={event.id} style={{paddingVertical:8,borderBottomWidth:1,borderColor:C.line,flexDirection:'row',alignItems:'center',gap:8}}><View style={{flex:1}}><Text style={{color:C.ink,fontSize:12,fontWeight:'800'}}>{event.title}</Text><Text style={{color:C.muted,fontSize:10,marginTop:3}}>{timeLabel(event.starts_at)} · {event.timezone}</Text></View>{event.created_by===session?.user?.id||holoSelected.owner_id===session?.user?.id?<Btn onPress={()=>Alert.alert('Delete event?','Remove this room countdown?', [{text:'Cancel',style:'cancel'},{text:'Delete',style:'destructive',onPress:async()=>{try{await holoClient.deleteEvent(event.id);setHoloEvents(items=>items.filter((x:any)=>x.id!==event.id));}catch(error:any){Alert.alert('Could not delete event',error?.message||'Please try again.');}}}])} style={{padding:7,backgroundColor:C.paper,borderRadius:8}}><Text style={{color:C.red,fontSize:10,fontWeight:'800'}}>Delete</Text></Btn>:null}</View>)}
+        {holoEvents.map(event=><View key={event.id} style={{paddingVertical:8,borderBottomWidth:1,borderColor:C.line}}>
+          <View style={{flexDirection:'row',alignItems:'center',gap:8}}><View style={{flex:1}}><Text style={{color:C.ink,fontSize:12,fontWeight:'800'}}>{event.title}</Text><Text style={{color:C.muted,fontSize:10,marginTop:3}}>{timeLabel(event.starts_at)} · {event.timezone}</Text></View>{event.created_by===session?.user?.id||holoSelected.owner_id===session?.user?.id?<View style={{flexDirection:'row',gap:6}}><Btn onPress={()=>{setHoloEventEditingId(event.id);setHoloEventTitle(event.title);setHoloEventDate(new Date(event.starts_at).toISOString().slice(0,16));}} style={{padding:7,backgroundColor:C.paper,borderRadius:8}}><Text style={{color:C.ink,fontSize:10,fontWeight:'800'}}>Edit</Text></Btn><Btn onPress={()=>Alert.alert('Delete event?','Remove this room countdown?', [{text:'Cancel',style:'cancel'},{text:'Delete',style:'destructive',onPress:async()=>{try{await holoClient.deleteEvent(event.id);setHoloEvents(items=>items.filter((x:any)=>x.id!==event.id));}catch(error:any){Alert.alert('Could not delete event',error?.message||'Please try again.');}}}])} style={{padding:7,backgroundColor:C.paper,borderRadius:8}}><Text style={{color:C.red,fontSize:10,fontWeight:'800'}}>Delete</Text></Btn></View>:null}</View>
+          {holoEventEditingId===event.id?<View style={{gap:7,marginTop:8}}><TextInput value={holoEventTitle} onChangeText={setHoloEventTitle} maxLength={120} placeholder="Event title" style={{backgroundColor:C.paper,borderRadius:8,padding:9,color:C.ink}}/><TextInput value={holoEventDate} onChangeText={setHoloEventDate} placeholder="YYYY-MM-DDTHH:mm" style={{backgroundColor:C.paper,borderRadius:8,padding:9,color:C.ink}}/><View style={{flexDirection:'row',gap:7}}><Btn disabled={holoSaving} onPress={()=>void saveHoloEventEdit()} style={{padding:8,backgroundColor:C.green,borderRadius:8}}><Text style={{color:'#fff',fontSize:10,fontWeight:'900'}}>Save changes</Text></Btn><Btn onPress={()=>{setHoloEventEditingId(null);setHoloEventTitle('');setHoloEventDate('');}} style={{padding:8,backgroundColor:C.paper,borderRadius:8}}><Text style={{color:C.ink,fontSize:10}}>Cancel</Text></Btn></View></View>:null}
+        </View>)}
         {holoLoading?<GuftinLoader color={C.green}/>:null}
       </View>:null}
       {holoView==='home'||holoView==='mine'||holoView==='recent'?<View>
