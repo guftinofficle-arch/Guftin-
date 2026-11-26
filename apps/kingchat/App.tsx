@@ -4925,11 +4925,11 @@ function GuftinApp() {
       const otherIds=[...new Set((memberRows||[]).map((x:any)=>x.user_id).filter((id:string)=>id&&id!==session.user.id))];
       if(!otherIds.length)throw new Error('No other chat members were found.');
       const isFuture=magicKind==='future_message';
-      if((isFuture||magicKind==='birthday'||magicKind==='secret_surprise')&&!magicScheduleAt.trim())throw new Error('Enter the reveal or delivery date and time.');
+      if((isFuture||magicKind==='birthday'||magicKind==='secret_surprise'||magicKind==='anniversary')&&!magicScheduleAt.trim())throw new Error('Enter the reveal or delivery date and time.');
       const scheduledAt=isFuture?new Date(magicScheduleAt).toISOString():null;
-      if((isFuture||magicKind==='birthday'||magicKind==='secret_surprise')&&new Date(magicScheduleAt).getTime()<=Date.now())throw new Error('Choose a future date and time.');
+      if((isFuture||magicKind==='birthday'||magicKind==='secret_surprise'||magicKind==='anniversary')&&new Date(magicScheduleAt).getTime()<=Date.now())throw new Error('Choose a future date and time.');
       const recipientId=['birthday','future_message','secret_surprise'].includes(magicKind)?otherIds[0]:null;
-      const revealAt=['birthday','secret_surprise'].includes(magicKind)?new Date(magicScheduleAt).toISOString():null;
+      const revealAt=['birthday','secret_surprise','anniversary'].includes(magicKind)?new Date(magicScheduleAt).toISOString():null;
       const moment=await magicMomentsClient.create({creatorId:session.user.id,kind:magicKind,title:magicTitle.trim(),description:magicDescription,conversationId:active.id,recipientId,revealAt,scheduledAt,timezone:Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC'});
       for(const id of otherIds){
         const role=id===recipientId?'recipient':'contributor';
@@ -5753,7 +5753,7 @@ function GuftinApp() {
         <TextInput value={magicTitle} onChangeText={setMagicTitle} placeholder="Moment title" maxLength={140} style={{backgroundColor:C.paper,padding:11,borderRadius:10,color:C.ink,marginTop:12}}/>
         <TextInput value={magicDescription} onChangeText={setMagicDescription} placeholder="Add a short description (optional)" multiline maxLength={8000} style={{backgroundColor:C.paper,padding:11,borderRadius:10,color:C.ink,minHeight:70,textAlignVertical:'top',marginTop:8}}/>
         <TextInput value={magicDraft} onChangeText={setMagicDraft} placeholder={magicKind==='future_message'?'Write the message to deliver later…':'Write a memory or personal message…'} multiline maxLength={20000} style={{backgroundColor:C.paper,padding:11,borderRadius:10,color:C.ink,minHeight:95,textAlignVertical:'top',marginTop:8}}/>
-        {['birthday','secret_surprise','future_message'].includes(magicKind)?<><Text style={{fontSize:10,color:C.muted,marginTop:10,fontWeight:'800'}}>{magicKind==='future_message'?'Delivery date & time':'Reveal date & time'} (local time)</Text><TextInput value={magicScheduleAt} onChangeText={setMagicScheduleAt} placeholder="YYYY-MM-DDTHH:mm" autoCapitalize="none" style={{backgroundColor:C.paper,padding:11,borderRadius:10,color:C.ink,marginTop:6}}/></>:null}
+        {['birthday','secret_surprise','future_message','anniversary'].includes(magicKind)?<><Text style={{fontSize:10,color:C.muted,marginTop:10,fontWeight:'800'}}>{magicKind==='future_message'?'Delivery date & time':magicKind==='anniversary'?'Anniversary reminder date & time':'Reveal date & time'} (local time)</Text><TextInput value={magicScheduleAt} onChangeText={setMagicScheduleAt} placeholder="YYYY-MM-DDTHH:mm" autoCapitalize="none" style={{backgroundColor:C.paper,padding:11,borderRadius:10,color:C.ink,marginTop:6}}/></>:null}
         <Text style={{fontSize:10,color:C.muted,marginTop:8}}>Share with the currently open direct or group chat. No chat history is imported automatically.</Text>
         <Btn disabled={magicBusy||!magicTitle.trim()} onPress={()=>void createMagicMoment()} style={{backgroundColor:'#6f4db4',padding:12,borderRadius:11,alignItems:'center',marginTop:11}}><Text style={{color:'#fff',fontWeight:'900'}}>{magicBusy?'Saving…':'Save moment & send invitation card'}</Text></Btn>
         <Btn onPress={()=>setMagicView('home')} style={{padding:9,alignSelf:'center',marginTop:5}}><Text style={{color:C.muted,fontWeight:'800'}}>Cancel</Text></Btn>
