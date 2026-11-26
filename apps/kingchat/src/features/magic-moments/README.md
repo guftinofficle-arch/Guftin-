@@ -1,34 +1,41 @@
 # Guftin Magic Moments
 
-Feature branch: `feature/guftin-magic-moments`
+**Make memories today. Send a surprise into tomorrow.**
 
 ## Included experiences
 - **Birthday Surprise** — private birthday moment with a server-enforced reveal date.
-- **Memory Capsule** — a shared, member-only collection of messages and media.
-- **Future Message** — an end-to-end encrypted message queued in Guftin's existing `kc_scheduled_messages` pipeline and delivered by the existing Postgres cron worker.
-- **Secret Surprise** — creator-only content until its scheduled reveal; reveal is enforced by RLS and a server-side minute scheduler.
+- **Memory Capsule** — shared member-only collection of text and selected media.
+- **Future Message** — end-to-end encrypted message queued in Guftin's existing `kc_scheduled_messages` pipeline and delivered by its Postgres cron worker.
+- **Secret Surprise** — recipient-only hidden content until its scheduled reveal.
 - **Together Moments** — shared text, photo/video contributions, comments and reactions.
-- **Friendship Anniversary** — a dedicated moment type for a shared milestone and memory collection.
+- **Friendship Anniversary** — scheduled anniversary reminder and shared memories.
 
 ## App behavior
-- Entry appears as the **Magic** tab and in a chat as an invitation card.
-- Moments are created from the currently open direct or group chat.
-- Users are not asked to import chat history. They intentionally choose what to add.
-- Private media is stored in the `magic-moments` bucket; signed URLs are short-lived.
-- The creator is added atomically as owner. Invitees accept before reading or contributing.
-- Secret/birthday content remains hidden from its recipient until the reveal time.
-- Future Message content is encrypted on-device for the active device roster. The server queues and delivers only the ciphertext.
-- Realtime publication covers moments, membership, items, comments, reactions and notifications.
+- Magic Moments has its own navigation tab and sends invitation cards into the currently open direct/group chat.
+- Users choose what to add; chat history is never imported automatically.
+- The creator is added as owner; invitees accept before reading or contributing.
+- Private media is stored in the `magic-moments` bucket with short-lived signed URLs.
+- Birthday/secret reveals and anniversary reminders are checked server-side every minute.
+- Future Message is encrypted on-device for every active conversation device. The server queues ciphertext only.
+- Invite/reveal notifications are stored in-app; invitation and manual reveal flows also dispatch Expo push notifications.
 
-## Production activation
-- Foundation migration: `20261126200000_guftin_magic_moments_foundation.sql`.
-- Production activation: `20261126210000_guftin_magic_moments_production_activation.sql`.
-- Edge Functions deployed with JWT verification: `invite-magic-moment-member` and `reveal-secret-surprise`.
-- Existing `guftin-scheduled-message-delivery` cron job is reused for encrypted Future Messages.
-- New `guftin-magic-moment-reveals` cron job checks scheduled birthday and secret reveals every minute.
+## Production backend status
+- Foundation, production activation and anniversary migrations are applied.
+- RLS is enabled for all six Magic Moment tables; Realtime is enabled.
+- `magic-moments` Storage bucket is private.
+- `invite-magic-moment-member`, `reveal-secret-surprise` and updated `guftin-push` Edge Functions are deployed with JWT verification.
+- Two-account RLS smoke tests passed: a recipient could not read secret content before reveal; after reveal the moment and content became visible and a notification was created.
+- Future Message queue/link smoke test passed: it remained hidden before delivery, then became visible with a scheduled-delivery notification after the queue status changed to sent. This was a database transaction test, not a real E2EE device delivery test.
 
-## Still to verify
-- Two-account RLS checks for invite acceptance and pre-reveal secrecy.
-- Actual Android media picker/upload and notification display.
-- End-to-end scheduled delivery with real registered E2EE devices.
-- Combined Android APK startup and two-phone tests after all three features are integrated.
+## Still pending
+- Real E2EE scheduled delivery with two registered devices and the production cron worker.
+- Real Android media picker/upload and push-notification display.
+- Final Android APK startup QA and two-phone tests after all three features are integrated.
+
+## Backend files
+- Client: `apps/kingchat/src/features/magic-moments/magicMomentsClient.ts`
+- Foundation: `supabase/migrations/20261126200000_guftin_magic_moments_foundation.sql`
+- Production activation: `supabase/migrations/20261126210000_guftin_magic_moments_production_activation.sql`
+- Anniversary reminders: `supabase/migrations/20261126220000_guftin_magic_anniversary_reminders.sql`
+
+The existing scheduled-message worker is reused; no duplicate scheduled-message table or worker is introduced.
