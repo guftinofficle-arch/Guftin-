@@ -12,10 +12,10 @@ HoloSpace is developed on the isolated `feature/guftin-holospace` branch and reu
 - [x] Persist room details and private/public visibility.
 - [x] Invite members from the linked chat participant list; invited users can accept their own invitation.
 - [x] Member list, owner-authorized member removal, member leave and owner room deletion.
-- [x] Persistent Memory Wall text entries.
+- [x] Persistent Memory Wall text entries; authors can edit or delete their own entries.
 - [x] Private shared Gallery: select photo/video, validate type/size, upload, create short-lived signed URLs, view media and remove permitted items.
 - [x] Per-user avatar preference keys and predefined room themes persisted in Supabase.
-- [x] Create and list timezone-aware room countdown/events; event creator or room owner can delete events.
+- [x] Create, list, edit and delete timezone-aware room countdown/events; event creator or room owner can manage events.
 - [x] Room-scoped Realtime subscriptions and unique per-user presence identity.
 - [x] LiveKit audio hangout UI with participant list, microphone mute/unmute and leave controls.
 - [x] Membership-authorized short-lived LiveKit token Edge Function source.
@@ -26,7 +26,7 @@ HoloSpace is developed on the isolated `feature/guftin-holospace` branch and reu
 - Deploy the migration and Edge Function to a disposable Supabase branch/project first; production project has not been modified by these source commits.
 - Execute pgTAP and two-account authorization tests, including negative tests for non-members, invitation acceptance, member removal, storage downloads and secret/token access.
 - Configure server-side `LIVEKIT_URL`, `LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET`; then test two real devices across different networks with microphone permission, reconnect, mute/unmute and leave.
-- Add profile-name/avatar resolution to the member list, memory edit/delete UI, event edit UI, visible upload progress, offline queue/retry and full recent-activity feed.
+- Add visible upload progress, offline queue/retry and a full recent-activity feed.
 - Verify gallery/storage cleanup when a room is deleted. Database cascade does not by itself remove Storage objects.
 - Run iOS device build/tests and Android/web regression checks after all requested features are complete.
 - Verify existing chat, calls, groups, statuses and channels remain unaffected.
@@ -35,7 +35,7 @@ HoloSpace is developed on the isolated `feature/guftin-holospace` branch and reu
 
 - Migration: `supabase/migrations/20261126190000_guftin_holospace_foundation.sql`
 - Client: `apps/kingchat/src/features/holospace/holospaceClient.ts`
-- Voice token function: `supabase/functions/holospace-livekit-token/index.ts`
+- Voice token function: `apps/kingchat/supabase/functions/holospace-livekit-token/index.ts`
 - Schema smoke tests: `supabase/tests/holospace_schema.test.sql`
 
 Deploy the token function from `apps/kingchat` only after the database migration has been tested:
