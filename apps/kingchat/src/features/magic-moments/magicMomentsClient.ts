@@ -26,7 +26,7 @@ export function createMagicMomentsClient(supabase:SupabaseClient){
    const {data,error}=await supabase.from('magic_moments').insert({
     creator_id:input.creatorId,kind:input.kind,title:input.title.trim(),description:input.description||'',
     conversation_id:input.conversationId||null,recipient_id:input.recipientId||null,reveal_at:input.revealAt||null,
-    scheduled_at:input.scheduledAt||null,timezone:input.timezone||'UTC',settings:input.settings||{},status:input.scheduledAt?'scheduled':'draft'
+    scheduled_at:input.scheduledAt||null,timezone:input.timezone||'UTC',settings:input.settings||{},status:(input.scheduledAt||input.revealAt)?'scheduled':'draft'
    }).select('*').single();
    if(error)throw error;
    // The database trigger creates the creator's accepted owner membership atomically.
