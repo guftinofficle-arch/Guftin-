@@ -99,6 +99,19 @@ as $$
   );
 $$;
 
+create or replace function private.liveverse_is_owner(p_space_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $
+  select exists (
+    select 1 from public.liveverse_spaces s
+    where s.id = p_space_id and s.owner_id = (select auth.uid())
+  );
+$;
+
 create or replace function private.liveverse_is_manager(p_space_id uuid)
 returns boolean
 language sql
@@ -116,9 +129,11 @@ $$;
 
 revoke all on function private.liveverse_is_member(uuid) from public, anon;
 revoke all on function private.liveverse_is_manager(uuid) from public, anon;
+revoke all on function private.liveverse_is_owner(uuid) from public, anon;
 grant usage on schema private to authenticated;
 grant execute on function private.liveverse_is_member(uuid) to authenticated;
 grant execute on function private.liveverse_is_manager(uuid) to authenticated;
+grant execute on function private.liveverse_is_owner(uuid) to authenticated;
 
 alter table public.liveverse_spaces enable row level security;
 alter table public.liveverse_members enable row level security;
@@ -156,8 +171,8 @@ create policy liveverse_members_remove_manager_or_self on public.liveverse_membe
 using (user_id = (select auth.uid()) or private.liveverse_is_manager(space_id));
 drop policy if exists liveverse_members_update_manager on public.liveverse_members;
 create policy liveverse_members_update_manager on public.liveverse_members for update to authenticated
-using (private.liveverse_is_manager(space_id))
-with check (private.liveverse_is_manager(space_id));
+using (private.liveverse_is_owner(space_id))
+with check (private.liveverse_is_owner(space_id));
 
 drop policy if exists liveverse_notes_member_access on public.liveverse_notes;
 create policy liveverse_notes_member_access on public.liveverse_notes for all to authenticated
@@ -176,7 +191,7 @@ create policy liveverse_media_member_read on public.liveverse_media for select t
 using (private.liveverse_is_member(space_id));
 drop policy if exists liveverse_media_member_insert on public.liveverse_media;
 create policy liveverse_media_member_insert on public.liveverse_media for insert to authenticated
-with check (private.liveverse_is_member(space_id) and created_by = (select auth.uid()));
+with check (private.liveverse_is_member(space_id) and created_by = (select auth.uid()) and object_path like space_id::text || '/%');
 drop policy if exists liveverse_media_manager_delete on public.liveverse_media;
 create policy liveverse_media_manager_delete on public.liveverse_media for delete to authenticated
 using (created_by = (select auth.uid()) or private.liveverse_is_manager(space_id));
@@ -209,7 +224,111 @@ drop policy if exists liveverse_storage_read_member on storage.objects;
 create policy liveverse_storage_read_member on storage.objects for select to authenticated
 using (
   bucket_id = 'liveverse-media'
+  and case when (storage.foldername(name))[1] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}
+);
+drop policy if exists liveverse_storage_insert_member on storage.objects;
+create policy liveverse_storage_insert_member on storage.objects for insert to authenticated
+with check (
+  bucket_id = 'liveverse-media'
   and private.liveverse_is_member(((storage.foldername(name))[1])::uuid)
+);
+drop policy if exists liveverse_storage_update_member on storage.objects;
+create policy liveverse_storage_update_member on storage.objects for update to authenticated
+using (
+  bucket_id = 'liveverse-media'
+  and private.liveverse_is_member(((storage.foldername(name))[1])::uuid)
+)
+with check (
+  bucket_id = 'liveverse-media'
+  and private.liveverse_is_member(((storage.foldername(name))[1])::uuid)
+);
+drop policy if exists liveverse_storage_delete_manager on storage.objects;
+create policy liveverse_storage_delete_manager on storage.objects for delete to authenticated
+using (
+  bucket_id = 'liveverse-media'
+  and case when (storage.foldername(name))[1] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}
+);
+
+-- Realtime table publication is idempotent. Presence and pointers use ephemeral
+-- Realtime Presence/Broadcast channels and are deliberately not written per frame.
+do $$
+declare t text;
+begin
+  foreach t in array array[
+    'liveverse_spaces','liveverse_members','liveverse_notes',
+    'liveverse_tasks','liveverse_canvas','liveverse_media','liveverse_events'
+  ] loop
+    if not exists (
+      select 1 from pg_publication_tables
+      where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = t
+    ) then
+      execute format('alter publication supabase_realtime add table public.%I', t);
+    end if;
+  end loop;
+end $$;
+ then private.liveverse_is_member(((storage.foldername(name))[1])::uuid) else false end
+);
+drop policy if exists liveverse_storage_insert_member on storage.objects;
+create policy liveverse_storage_insert_member on storage.objects for insert to authenticated
+with check (
+  bucket_id = 'liveverse-media'
+  and private.liveverse_is_member(((storage.foldername(name))[1])::uuid)
+);
+drop policy if exists liveverse_storage_update_member on storage.objects;
+create policy liveverse_storage_update_member on storage.objects for update to authenticated
+using (
+  bucket_id = 'liveverse-media'
+  and private.liveverse_is_member(((storage.foldername(name))[1])::uuid)
+)
+with check (
+  bucket_id = 'liveverse-media'
+  and private.liveverse_is_member(((storage.foldername(name))[1])::uuid)
+);
+drop policy if exists liveverse_storage_delete_manager on storage.objects;
+create policy liveverse_storage_delete_manager on storage.objects for delete to authenticated
+using (
+  bucket_id = 'liveverse-media'
+  and private.liveverse_is_manager(((storage.foldername(name))[1])::uuid)
+);
+
+-- Realtime table publication is idempotent. Presence and pointers use ephemeral
+-- Realtime Presence/Broadcast channels and are deliberately not written per frame.
+do $$
+declare t text;
+begin
+  foreach t in array array[
+    'liveverse_spaces','liveverse_members','liveverse_notes',
+    'liveverse_tasks','liveverse_canvas','liveverse_media','liveverse_events'
+  ] loop
+    if not exists (
+      select 1 from pg_publication_tables
+      where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = t
+    ) then
+      execute format('alter publication supabase_realtime add table public.%I', t);
+    end if;
+  end loop;
+end $$;
+ then private.liveverse_is_manager(((storage.foldername(name))[1])::uuid) else false end
+);
+
+-- Realtime table publication is idempotent. Presence and pointers use ephemeral
+-- Realtime Presence/Broadcast channels and are deliberately not written per frame.
+do $$
+declare t text;
+begin
+  foreach t in array array[
+    'liveverse_spaces','liveverse_members','liveverse_notes',
+    'liveverse_tasks','liveverse_canvas','liveverse_media','liveverse_events'
+  ] loop
+    if not exists (
+      select 1 from pg_publication_tables
+      where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = t
+    ) then
+      execute format('alter publication supabase_realtime add table public.%I', t);
+    end if;
+  end loop;
+end $$;
+ then private.liveverse_is_member(((storage.foldername(name))[1])::uuid) else false end
 );
 drop policy if exists liveverse_storage_insert_member on storage.objects;
 create policy liveverse_storage_insert_member on storage.objects for insert to authenticated
