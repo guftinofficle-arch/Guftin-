@@ -81,31 +81,11 @@ create table if not exists public.magic_moment_reactions (
   unique(moment_id,item_id,user_id)
 );
 
-create table if not exists public.scheduled_messages (
-  id uuid primary key default gen_random_uuid(),
-  sender_id uuid not null references auth.users(id) on delete cascade,
-  recipient_id uuid not null references auth.users(id) on delete cascade,
-  conversation_id uuid not null,
-  content text not null check (char_length(btrim(content)) between 1 and 20000),
-  attachments jsonb not null default '[]'::jsonb check (pg_column_size(attachments) <= 32768),
-  scheduled_at timestamptz not null,
-  timezone text not null default 'UTC',
-  status text not null default 'pending' check (status in ('pending','processing','sent','delivered','failed','cancelled')),
-  idempotency_key uuid not null default gen_random_uuid(),
-  attempts integer not null default 0 check (attempts between 0 and 20),
-  last_error text,
-  delivered_at timestamptz,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  unique(idempotency_key),
-  check (scheduled_at > created_at - interval '1 minute')
-);
-
 create table if not exists public.magic_moment_notifications (
   id uuid primary key default gen_random_uuid(),
   recipient_id uuid not null references auth.users(id) on delete cascade,
   moment_id uuid references public.magic_moments(id) on delete cascade,
-  scheduled_message_id uuid references public.scheduled_messages(id) on delete cascade,
+  scheduled_message_id uuid references public.kc_scheduled_messages(id) on delete cascade,
   notification_type text not null check (notification_type in ('invite','contribution','capsule','scheduled_confirmation','scheduled_delivery','reveal','together','anniversary')),
   title text not null check (char_length(title) between 1 and 120),
   body text not null default '' check (char_length(body) <= 500),
@@ -118,7 +98,6 @@ create index if not exists magic_moments_creator_idx on public.magic_moments(cre
 create index if not exists magic_moment_members_user_idx on public.magic_moment_members(user_id,accepted_at,created_at desc);
 create index if not exists magic_moment_items_moment_idx on public.magic_moment_items(moment_id,created_at);
 create index if not exists magic_moment_comments_moment_idx on public.magic_moment_comments(moment_id,created_at);
-create index if not exists scheduled_messages_due_idx on public.scheduled_messages(scheduled_at) where status in ('pending','failed');
 create index if not exists magic_notifications_user_idx on public.magic_moment_notifications(recipient_id,created_at desc);
 
 create or replace function private.magic_moment_is_member(p_moment_id uuid)
@@ -142,7 +121,6 @@ alter table public.magic_moment_members enable row level security;
 alter table public.magic_moment_items enable row level security;
 alter table public.magic_moment_comments enable row level security;
 alter table public.magic_moment_reactions enable row level security;
-alter table public.scheduled_messages enable row level security;
 alter table public.magic_moment_notifications enable row level security;
 
 drop policy if exists magic_moments_member_read on public.magic_moments;
@@ -209,27 +187,17 @@ create policy magic_reactions_member_read on public.magic_moment_reactions for s
 );
 create policy magic_reactions_self_write on public.magic_moment_reactions for all to authenticated using (user_id=(select auth.uid()) and private.magic_moment_is_member(moment_id)) with check (user_id=(select auth.uid()) and private.magic_moment_is_member(moment_id));
 
-drop policy if exists scheduled_sender_read on public.scheduled_messages;
-create policy scheduled_sender_read on public.scheduled_messages for select to authenticated using (sender_id=(select auth.uid()));
-drop policy if exists scheduled_recipient_read_after_delivery on public.scheduled_messages;
-create policy scheduled_recipient_read_after_delivery on public.scheduled_messages for select to authenticated using (recipient_id=(select auth.uid()) and status in ('sent','delivered'));
-drop policy if exists scheduled_sender_insert on public.scheduled_messages;
-create policy scheduled_sender_insert on public.scheduled_messages for insert to authenticated with check (sender_id=(select auth.uid()) and status='pending');
-drop policy if exists scheduled_sender_update_pending on public.scheduled_messages;
-create policy scheduled_sender_update_pending on public.scheduled_messages for update to authenticated using (sender_id=(select auth.uid()) and status='pending') with check (sender_id=(select auth.uid()) and status in ('pending','cancelled'));
-
 drop policy if exists magic_notifications_read_own on public.magic_moment_notifications;
 create policy magic_notifications_read_own on public.magic_moment_notifications for select to authenticated using (recipient_id=(select auth.uid()));
 drop policy if exists magic_notifications_update_own on public.magic_moment_notifications;
 create policy magic_notifications_update_own on public.magic_moment_notifications for update to authenticated using (recipient_id=(select auth.uid())) with check (recipient_id=(select auth.uid()));
 -- No client INSERT/DELETE policies for notifications: only trusted backend code may create them.
 
-grant select,insert,delete on public.magic_moments,public.magic_moment_members,public.magic_moment_items,public.magic_moment_comments,public.magic_moment_reactions,public.scheduled_messages,public.magic_moment_notifications to authenticated;
-revoke update on public.magic_moments,public.magic_moment_members,public.magic_moment_items,public.scheduled_messages,public.magic_moment_notifications from authenticated;
+grant select,insert,delete on public.magic_moments,public.magic_moment_members,public.magic_moment_items,public.magic_moment_comments,public.magic_moment_reactions,public.magic_moment_notifications to authenticated;
+revoke update on public.magic_moments,public.magic_moment_members,public.magic_moment_items,public.magic_moment_notifications from authenticated;
 grant update(title,description,cover_object_path,settings,updated_at) on public.magic_moments to authenticated;
 grant update(accepted_at) on public.magic_moment_members to authenticated;
 grant update(body,metadata,updated_at) on public.magic_moment_items to authenticated;
-grant update(content,attachments,scheduled_at,timezone,status,updated_at) on public.scheduled_messages to authenticated;
 grant update(read_at) on public.magic_moment_notifications to authenticated;
 
 -- Private media bucket; object names begin with moment UUID. Storage RLS ties each path to an accepted member.
