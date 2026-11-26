@@ -4964,7 +4964,7 @@ function GuftinApp() {
     const refresh=async()=>{
       try{
         const [notes,tasks,media,canvas]=await Promise.all([liveverseClient.listNotes(liveverseSelected.id),liveverseClient.listTasks(liveverseSelected.id),liveverseClient.listMedia(liveverseSelected.id),liveverseClient.loadCanvas(liveverseSelected.id)]);
-        if(!active)return;setLiveverseNotes(notes);setLiveverseTasks(tasks);setLiveverseMedia(media);if(canvas?.document)setLiveverseCanvasDraft(JSON.stringify(canvas.document,null,2));
+        if(!active)return;setLiveverseNotes(notes);setLiveverseTasks(tasks);setLiveverseMedia(media);if(canvas?.document){setLiveverseCanvasDraft(JSON.stringify(canvas.document,null,2));if(Array.isArray(canvas.document.strokes)){liveverseCanvasStrokesRef.current=canvas.document.strokes;setLiveverseCanvasStrokes(canvas.document.strokes);}}
       }catch(error:any){if(active)console.warn('Liveverse refresh failed:',error?.message||error);}
     };
     void liveverseClient.createSpaceChannel(liveverseSelected.id,session.user.id,()=>{void refresh();},state=>{if(active)setLiveversePresence(Object.values(state).flat() as any[]);})
