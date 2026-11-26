@@ -2,7 +2,12 @@ name: Guftin Android APK — Build and Startup QA
 # QA Guftin 1.6.2 offline queues, explicit status viewing, complete channel history and account discovery.
 
 on:
-  # APK builds are intentionally manual until the requested feature set is complete.
+  push:
+    branches:
+      - feature/guftin-all-three-features
+    paths:
+      - "apps/kingchat/**"
+      - ".github/workflows/guftin-android-apk.yml"
   workflow_dispatch:
 
 permissions:
