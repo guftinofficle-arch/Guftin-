@@ -252,7 +252,9 @@ create policy holospace_gallery_storage_write on storage.objects for insert to a
 with check(bucket_id='holospace-gallery' and case when (storage.foldername(name))[1] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' then private.holospace_is_member(((storage.foldername(name))[1])::uuid) else false end);
 drop policy if exists holospace_gallery_storage_delete on storage.objects;
 create policy holospace_gallery_storage_delete on storage.objects for delete to authenticated
-using(bucket_id='holospace-gallery' and case when (storage.foldername(name))[1] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12} on storage.objects;
+using(bucket_id='holospace-gallery' and case when (storage.foldername(name))[1] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' then private.holospace_is_member(((storage.foldername(name))[1])::uuid) and ((storage.foldername(name))[2]=(select auth.uid())::text or private.holospace_is_owner(((storage.foldername(name))[1])::uuid)) else false end);
+
+drop policy if exists holospace_avatar_storage_access on storage.objects;
 create policy holospace_avatar_storage_access on storage.objects for all to authenticated
 using(bucket_id='holospace-avatars' and case when (storage.foldername(name))[1] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' then private.holospace_is_member(((storage.foldername(name))[1])::uuid) and (storage.foldername(name))[2]=(select auth.uid())::text else false end)
 with check(bucket_id='holospace-avatars' and case when (storage.foldername(name))[1] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' then private.holospace_is_member(((storage.foldername(name))[1])::uuid) and (storage.foldername(name))[2]=(select auth.uid())::text else false end);
@@ -262,7 +264,8 @@ create policy holospace_background_storage_read on storage.objects for select to
 using(bucket_id='holospace-backgrounds' and case when (storage.foldername(name))[1] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' then private.holospace_is_member(((storage.foldername(name))[1])::uuid) else false end);
 drop policy if exists holospace_background_storage_write on storage.objects;
 create policy holospace_background_storage_write on storage.objects for all to authenticated
-using(bucket_id='holospace-backgrounds' and case when (storage.foldername(name))[1] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}
+using(bucket_id='holospace-backgrounds' and case when (storage.foldername(name))[1] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' then private.holospace_is_owner(((storage.foldername(name))[1])::uuid) else false end)
+with check(bucket_id='holospace-backgrounds' and case when (storage.foldername(name))[1] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' then private.holospace_is_owner(((storage.foldername(name))[1])::uuid) else false end);
 
 do $$
 declare t text;
