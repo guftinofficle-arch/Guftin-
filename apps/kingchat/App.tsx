@@ -2982,7 +2982,7 @@ function GuftinApp() {
     }finally{setChannelsLoading(false);}
   },[session,getSignedMediaUrl]);
 
-  useEffect(()=>{if(session&&tab==='Channels')void loadChannels();},[session?.user?.id,tab,loadChannels]);
+  useEffect(()=>{if(session&&tab==='Updates')void loadChannels();},[session?.user?.id,tab,loadChannels]);
 
   const openChannelEditor=(channel:any)=>{
     const target=channel||channels.find(row=>row.conversation_id===active?.id)||active;
@@ -5137,6 +5137,31 @@ function GuftinApp() {
         </View>
       
     </ChatOptionsPopover>
+      {scheduleComposerOpen?<View style={{position:'absolute',left:0,right:0,top:0,bottom:0,zIndex:1000,elevation:30,backgroundColor:'#0009',justifyContent:'center',padding:18}}>
+        <View style={{backgroundColor:C.white,borderRadius:22,padding:18,maxHeight:'88%'}}>
+          <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}>
+            <View><Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>Schedule message</Text><Text style={{fontSize:11,color:C.muted,marginTop:4}}>This chat · Encrypted · Server scheduled</Text></View>
+            <Btn onPress={()=>{if(!scheduleBusy)setScheduleComposerOpen(false);}} style={{padding:7}}><Text style={{fontSize:24,color:C.muted}}>×</Text></Btn>
+          </View>
+          <TextInput value={scheduleDraft} onChangeText={setScheduleDraft} placeholder="Write your message…" multiline maxLength={4000} style={{minHeight:105,maxHeight:180,backgroundColor:C.paper,borderRadius:13,padding:12,color:C.ink,textAlignVertical:'top',marginTop:14}}/>
+          <Text style={{color:C.ink,fontWeight:'900',marginTop:16,marginBottom:8}}>When should it be sent?</Text>
+          <View style={{flexDirection:'row',gap:8}}>
+            <Btn onPress={()=>setScheduleMode('at')} style={{flex:1,alignItems:'center',padding:11,borderRadius:11,backgroundColor:scheduleMode==='at'?C.mint:C.paper,borderWidth:1,borderColor:scheduleMode==='at'?C.green:C.line}}><Text style={{fontSize:12,fontWeight:'900',color:scheduleMode==='at'?C.green:C.muted}}>Date & time</Text></Btn>
+            <Btn onPress={()=>setScheduleMode('after')} style={{flex:1,alignItems:'center',padding:11,borderRadius:11,backgroundColor:scheduleMode==='after'?C.mint:C.paper,borderWidth:1,borderColor:scheduleMode==='after'?C.green:C.line}}><Text style={{fontSize:12,fontWeight:'900',color:scheduleMode==='after'?C.green:C.muted}}>After duration</Text></Btn>
+          </View>
+          {scheduleMode==='at'?<TextInput value={scheduleAtInput} onChangeText={setScheduleAtInput} placeholder="YYYY-MM-DD HH:mm" autoCapitalize="none" style={{backgroundColor:C.paper,borderRadius:12,padding:13,color:C.ink,borderWidth:1,borderColor:C.line,marginTop:12}}/>:<View style={{flexDirection:'row',gap:8,alignItems:'center',marginTop:12}}>
+            <TextInput value={scheduleDelayAmount} onChangeText={setScheduleDelayAmount} keyboardType="number-pad" placeholder="10" style={{flex:1,backgroundColor:C.paper,borderRadius:12,padding:13,color:C.ink,borderWidth:1,borderColor:C.line}}/>
+            {(['minutes','hours','days'] as const).map(unit=><Btn key={unit} onPress={()=>setScheduleDelayUnit(unit)} style={{paddingHorizontal:10,paddingVertical:12,borderRadius:10,backgroundColor:scheduleDelayUnit===unit?C.mint:C.paper,borderWidth:1,borderColor:scheduleDelayUnit===unit?C.green:C.line}}><Text style={{fontSize:11,fontWeight:'900',color:scheduleDelayUnit===unit?C.green:C.muted}}>{unit}</Text></Btn>)}
+          </View>}
+          <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginTop:16}}>
+            <Btn onPress={()=>{setScheduleComposerOpen(false);setScheduledMessagesOpen(true);void loadScheduledMessages();}} disabled={scheduleBusy} style={{paddingVertical:10,paddingRight:8}}><Text style={{color:C.green,fontSize:11,fontWeight:'900'}}>View scheduled</Text></Btn>
+            <View style={{flexDirection:'row',gap:8,alignItems:'center'}}>
+              <Btn disabled={scheduleBusy} onPress={()=>setScheduleComposerOpen(false)} style={{padding:11}}><Text style={{color:C.muted,fontWeight:'800'}}>Cancel</Text></Btn>
+              <Btn disabled={scheduleBusy||!scheduleDraft.trim()||(scheduleMode==='at'&&!scheduleAtInput.trim())||(scheduleMode==='after'&&!scheduleDelayAmount.trim())} onPress={()=>void submitScheduledMessage()} style={{backgroundColor:C.green,paddingHorizontal:17,paddingVertical:12,borderRadius:12}}>{scheduleBusy?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Schedule & send</Text>}</Btn>
+            </View>
+          </View>
+        </View>
+      </View>:null}
       </SafeAreaView>
     </KeyboardAvoidingView>;
   }
@@ -5162,8 +5187,6 @@ function GuftinApp() {
           <Btn onPress={()=>setSettingsOpen(true)} style={{backgroundColor:tab==='Chats'?'#ffffff20':C.paper,width:43,height:43,borderRadius:22,alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:tab==='Chats'?'#ffffff30':C.line}}><Text style={{fontSize:21,color:tab==='Chats'?'#fff':C.green}}>⚙</Text></Btn>
           {tab==='Chats'?<Btn onPress={()=>void openGroupCreator()} style={{backgroundColor:'#ffffff20',width:43,height:43,borderRadius:22,alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:'#ffffff30'}}><Text style={{fontSize:19,color:'#fff'}}>👥</Text></Btn>:null}
           {tab==='Chats'?<Btn onPress={()=>setSearching(!searching)} style={{backgroundColor:'#ffffff20',width:43,height:43,borderRadius:22,alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:'#ffffff30'}}><Text style={{fontSize:22,color:'#fff'}}>⌕</Text></Btn>:null}
-          {tab==='Updates'?<Btn onPress={()=>setTab('Channels')} style={{backgroundColor:C.mint,paddingHorizontal:13,height:42,borderRadius:15,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:12,fontWeight:'900',color:C.green}}>Channels　›</Text></Btn>:null}
-          {tab==='Channels'?<><Btn onPress={()=>setChannelJoinOpen(true)} style={{backgroundColor:C.mint,width:42,height:42,borderRadius:15,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:18,color:C.green}}>↗</Text></Btn><Btn onPress={()=>setChannelCreateOpen(true)} style={{backgroundColor:C.green,width:42,height:42,borderRadius:15,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:24,color:'#fff'}}>＋</Text></Btn></>:null}
         </View>
       </View>
     </View>
@@ -5239,22 +5262,23 @@ function GuftinApp() {
           </View>
         </View>)}
       </ScrollView>}
-    </ScrollView>:null}
-    {tab==='Channels'?<ScrollView contentContainerStyle={{padding:20,paddingBottom:30}}>
-      <View style={{backgroundColor:C.paper,borderRadius:18,padding:16,marginBottom:14}}>
-        <Text style={{fontSize:18,fontWeight:'900',color:C.ink}}>Discover channels</Text>
-        <Text style={{fontSize:11,color:C.muted,marginTop:4}}>Find Guftin Official and creators, follow channels, or manage your own</Text>
-      </View>
-      <View style={{marginTop:20,marginBottom:10,flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}>
-        <View style={{flex:1}}><Text style={{fontSize:18,fontWeight:'900',color:C.ink}}>Channels</Text><Text style={{fontSize:11,color:C.muted}}>Broadcast updates from creators and official accounts</Text></View>
-        <View style={{flexDirection:'row',gap:7}}><Btn onPress={()=>setChannelJoinOpen(true)} style={{backgroundColor:C.mint,padding:10,borderRadius:11}}><Text style={{color:C.green,fontWeight:'900'}}>Join</Text></Btn><Btn onPress={()=>setChannelCreateOpen(true)} style={{backgroundColor:C.green,padding:10,borderRadius:11}}><Text style={{color:'#fff',fontWeight:'900'}}>＋ Create</Text></Btn></View>
+      <View style={{height:1,backgroundColor:C.line,marginTop:18,marginBottom:18}}/>
+      <View style={{marginBottom:12,flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}>
+        <View style={{flex:1,paddingRight:8}}>
+          <Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>Channels</Text>
+          <Text style={{fontSize:11,color:C.muted,marginTop:3}}>Follow updates from Guftin Official and creators</Text>
+        </View>
+        <View style={{flexDirection:'row',gap:7}}>
+          <Btn onPress={()=>setChannelJoinOpen(true)} style={{backgroundColor:C.mint,padding:10,borderRadius:11}}><Text style={{color:C.green,fontWeight:'900'}}>Join</Text></Btn>
+          <Btn onPress={()=>setChannelCreateOpen(true)} style={{backgroundColor:C.green,padding:10,borderRadius:11}}><Text style={{color:'#fff',fontWeight:'900'}}>＋ Create</Text></Btn>
+        </View>
       </View>
       <TextInput value={channelSearch} onChangeText={setChannelSearch} placeholder="Search public channels..." autoCapitalize="none" style={{backgroundColor:C.paper,borderRadius:13,padding:13,color:C.ink,marginBottom:10}}/>
       {channelsLoading&&channels.length===0?<Text style={{color:C.muted,padding:8}}>Loading channels…</Text>:null}
       {ownChannels.map(channel=><View key={channel.conversation_id} style={{backgroundColor:C.white,borderRadius:15,padding:12,marginBottom:8,borderWidth:1,borderColor:C.line}}><View style={{flexDirection:'row',alignItems:'center',gap:10}}><Avatar label={initials(channel.title||'C')} color={C.green} size={43} uri={channel.logo_signed_url}/><View style={{flex:1}}><Text style={{fontWeight:'900',color:C.ink}}>{channel.title||'My channel'}</Text><Text style={{fontSize:10,color:C.muted}}>{channel.is_public?'Public':'Private'} · Owner</Text></View><Btn onPress={()=>void shareChannelInvite(channel)} style={{padding:9,backgroundColor:C.mint,borderRadius:10}}><Text style={{color:C.green,fontWeight:'900'}}>Invite</Text></Btn><Btn onPress={()=>openChannelChat(channel)} style={{padding:9,backgroundColor:C.paper,borderRadius:10}}><Text style={{color:C.green,fontWeight:'900'}}>Open</Text></Btn></View></View>)}
       {discoverChannels.map(channel=><View key={channel.conversation_id} style={{flexDirection:'row',alignItems:'center',gap:10,backgroundColor:C.white,padding:11,borderRadius:14,marginBottom:7}}><Avatar label={initials(channel.title||'C')} color={C.green} size={42} uri={channel.logo_signed_url}/><View style={{flex:1}}><Text style={{fontWeight:'900',color:C.ink}}>{channel.title||'Guftin channel'}</Text><Text numberOfLines={2} style={{fontSize:10,color:C.muted}}>{channel.description||'Public channel'}</Text></View>{channel.isFollowing?<Btn onPress={()=>openChannelChat(channel)}><Text style={{color:C.green,fontWeight:'900'}}>Open</Text></Btn>:<Btn disabled={channelBusy} onPress={()=>void followPublicChannel(channel)} style={{padding:9,backgroundColor:C.green,borderRadius:10}}><Text style={{color:'#fff',fontWeight:'900'}}>Follow</Text></Btn>}</View>)}
-      <Text style={{fontSize:10,color:C.muted,marginTop:6}}>Channel posts are broadcast content, separate from private end-to-end encrypted chats.</Text>
-
+      {!channelsLoading&&!ownChannels.length&&!discoverChannels.length?<Text style={{color:C.muted,textAlign:'center',padding:24}}>No channels found yet. Create one or search for a public channel.</Text>:null}
+      <Text style={{fontSize:10,color:C.muted,marginTop:6}}>Channel broadcasts are separate from private encrypted chats.</Text>
     </ScrollView>:null}
     {tab==='Hub'?<ScrollView contentContainerStyle={{padding:20,paddingBottom:30}}>
       <View style={{backgroundColor:C.paper,borderRadius:18,padding:16,marginBottom:14}}>
