@@ -219,7 +219,8 @@ export function createLiveverseClient(db: SupabaseClient) {
   }
 
   async function createSpaceChannel(spaceId: string, userId: string, onDatabaseChange: (payload: any) => void,
-    onPresenceChange: (state: Record<string, unknown[]>) => void): Promise<RealtimeChannel> {
+    onPresenceChange: (state: Record<string, unknown[]>) => void,
+    onPointerChange: (payload: any) => void = () => undefined): Promise<RealtimeChannel> {
     requireSpace(spaceId); assertUuid(userId, 'user ID');
     const channel = db.channel(`liveverse:${spaceId}`, {
       config: { presence: { key: userId }, broadcast: { self: false, ack: true } }
@@ -229,6 +230,7 @@ export function createLiveverseClient(db: SupabaseClient) {
     channel.on('postgres_changes', { event: '*', schema: 'public', table: 'liveverse_canvas', filter: `space_id=eq.${spaceId}` }, onDatabaseChange);
     channel.on('postgres_changes', { event: '*', schema: 'public', table: 'liveverse_media', filter: `space_id=eq.${spaceId}` }, onDatabaseChange);
     channel.on('presence', { event: 'sync' }, () => onPresenceChange(channel.presenceState()));
+    channel.on('broadcast', { event: 'pointer' }, (message: any) => onPointerChange(message?.payload || {}));
     const status = await new Promise<string>((resolve) => {
       channel.subscribe((s) => { if (s === 'SUBSCRIBED' || s === 'CHANNEL_ERROR' || s === 'TIMED_OUT' || s === 'CLOSED') resolve(s); });
     });
