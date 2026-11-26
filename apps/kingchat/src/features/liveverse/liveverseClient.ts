@@ -74,6 +74,34 @@ export function createLiveverseClient(db: SupabaseClient) {
     return (data || []) as LiveverseSpace[];
   }
 
+  async function listNotes(spaceId:string):Promise<LiveverseNote[]>{
+    requireSpace(spaceId);
+    const {data,error}=await db.from('liveverse_notes').select('*').eq('space_id',spaceId).order('updated_at',{ascending:false}).limit(100);
+    if(error)throw error;return (data||[]) as LiveverseNote[];
+  }
+  async function loadCanvas(spaceId:string){
+    requireSpace(spaceId);
+    const {data,error}=await db.from('liveverse_canvas').select('*').eq('space_id',spaceId).maybeSingle();
+    if(error)throw error;return data;
+  }
+  async function listMedia(spaceId:string){
+    requireSpace(spaceId);
+    const {data,error}=await db.from('liveverse_media').select('*').eq('space_id',spaceId).order('created_at',{ascending:false}).limit(100);
+    if(error)throw error;
+    return await Promise.all((data||[]).map(async(item:any)=>{
+      const {data:link,error:linkError}=await db.storage.from(MEDIA_BUCKET).createSignedUrl(item.object_path,300);
+      if(linkError)throw linkError;
+      return {...item,url:link.signedUrl};
+    }));
+  }
+  async function deleteMedia(mediaId:string,spaceId:string,path:string){
+    assertUuid(mediaId,'media ID');requireSpace(spaceId);
+    const {error}=await db.from('liveverse_media').delete().eq('id',mediaId).eq('space_id',spaceId);
+    if(error)throw error;
+    const {error:storageError}=await db.storage.from(MEDIA_BUCKET).remove([path]);
+    if(storageError)throw storageError;
+  }
+
   async function createNote(spaceId: string, userId: string, title = 'Untitled note') {
     requireSpace(spaceId); assertUuid(userId, 'user ID');
     const { data, error } = await db.from('liveverse_notes').insert({
@@ -228,7 +256,7 @@ export function createLiveverseClient(db: SupabaseClient) {
     }});
   }
 
-  return { createSpace, inviteMember, leaveSpace, listSpaces, createNote, saveNote,
+  return { createSpace, inviteMember, leaveSpace, listSpaces, listNotes, loadCanvas, listMedia, deleteMedia, createNote, saveNote,
     listTasks, createTask, updateTask, deleteTask, saveCanvas, uploadMedia,
     createSpaceChannel, trackPresence, broadcastPointer };
 }
