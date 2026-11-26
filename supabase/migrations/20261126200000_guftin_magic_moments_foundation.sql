@@ -187,10 +187,26 @@ drop policy if exists magic_items_author_delete on public.magic_moment_items;
 create policy magic_items_author_delete on public.magic_moment_items for delete to authenticated using (author_id=(select auth.uid()) and private.magic_moment_is_editor(moment_id));
 
 drop policy if exists magic_comments_member_access on public.magic_moment_comments;
-create policy magic_comments_member_access on public.magic_moment_comments for select to authenticated using (private.magic_moment_is_member(moment_id));
+create policy magic_comments_member_access on public.magic_moment_comments for select to authenticated using (
+ private.magic_moment_is_member(moment_id) and exists(
+  select 1 from public.magic_moments mm where mm.id=moment_id and (
+   mm.kind not in ('secret_surprise','birthday','future_message') or mm.recipient_id is distinct from (select auth.uid()) or
+   (mm.kind='future_message' and mm.status not in ('scheduled','draft')) or
+   (mm.kind<>'future_message' and (mm.reveal_at is null or mm.reveal_at<=now() or mm.status='revealed'))
+  )
+ )
+);
 create policy magic_comments_insert on public.magic_moment_comments for insert to authenticated with check (author_id=(select auth.uid()) and private.magic_moment_is_member(moment_id));
 drop policy if exists magic_reactions_member_read on public.magic_moment_reactions;
-create policy magic_reactions_member_read on public.magic_moment_reactions for select to authenticated using (private.magic_moment_is_member(moment_id));
+create policy magic_reactions_member_read on public.magic_moment_reactions for select to authenticated using (
+ private.magic_moment_is_member(moment_id) and exists(
+  select 1 from public.magic_moments mm where mm.id=moment_id and (
+   mm.kind not in ('secret_surprise','birthday','future_message') or mm.recipient_id is distinct from (select auth.uid()) or
+   (mm.kind='future_message' and mm.status not in ('scheduled','draft')) or
+   (mm.kind<>'future_message' and (mm.reveal_at is null or mm.reveal_at<=now() or mm.status='revealed'))
+  )
+ )
+);
 create policy magic_reactions_self_write on public.magic_moment_reactions for all to authenticated using (user_id=(select auth.uid()) and private.magic_moment_is_member(moment_id)) with check (user_id=(select auth.uid()) and private.magic_moment_is_member(moment_id));
 
 drop policy if exists scheduled_sender_read on public.scheduled_messages;
@@ -208,7 +224,13 @@ drop policy if exists magic_notifications_update_own on public.magic_moment_noti
 create policy magic_notifications_update_own on public.magic_moment_notifications for update to authenticated using (recipient_id=(select auth.uid())) with check (recipient_id=(select auth.uid()));
 -- No client INSERT/DELETE policies for notifications: only trusted backend code may create them.
 
-grant select,insert,update,delete on public.magic_moments,public.magic_moment_members,public.magic_moment_items,public.magic_moment_comments,public.magic_moment_reactions,public.scheduled_messages,public.magic_moment_notifications to authenticated;
+grant select,insert,delete on public.magic_moments,public.magic_moment_members,public.magic_moment_items,public.magic_moment_comments,public.magic_moment_reactions,public.scheduled_messages,public.magic_moment_notifications to authenticated;
+revoke update on public.magic_moments,public.magic_moment_members,public.magic_moment_items,public.scheduled_messages,public.magic_moment_notifications from authenticated;
+grant update(title,description,cover_object_path,settings,updated_at) on public.magic_moments to authenticated;
+grant update(accepted_at) on public.magic_moment_members to authenticated;
+grant update(body,metadata,updated_at) on public.magic_moment_items to authenticated;
+grant update(content,attachments,scheduled_at,timezone,status,updated_at) on public.scheduled_messages to authenticated;
+grant update(read_at) on public.magic_moment_notifications to authenticated;
 
 -- Private media bucket; object names begin with moment UUID. Storage RLS ties each path to an accepted member.
 insert into storage.buckets(id,name,public,file_size_limit,allowed_mime_types)
@@ -219,7 +241,11 @@ drop policy if exists magic_storage_member_read on storage.objects;
 create policy magic_storage_member_read on storage.objects for select to authenticated using (
  bucket_id='magic-moments' and exists (
   select 1 from public.magic_moment_members m
+  join public.magic_moments mm on mm.id=m.moment_id
   where m.user_id=(select auth.uid()) and m.moment_id::text=split_part(name,'/',1) and m.accepted_at is not null
+    and (mm.kind not in ('secret_surprise','birthday','future_message') or mm.recipient_id is distinct from (select auth.uid()) or
+      (mm.kind='future_message' and mm.status not in ('scheduled','draft')) or
+      (mm.kind<>'future_message' and (mm.reveal_at is null or mm.reveal_at<=now() or mm.status='revealed')))
  )
 );
 drop policy if exists magic_storage_member_upload on storage.objects;
