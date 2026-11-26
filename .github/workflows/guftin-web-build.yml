@@ -1,0 +1,43 @@
+name: Guftin Responsive Web Export
+
+on:
+  push:
+    branches:
+      - feature/guftin-20-feature-upgrade
+      - feature/guftin-liveverse
+      - feature/guftin-holospace
+      - feature/guftin-magic-moments
+    paths:
+      - "apps/kingchat/**"
+      - ".github/workflows/guftin-web-build.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  web-export:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: apps/kingchat
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Export responsive web app
+        run: npx expo export --platform web --output-dir web-export
+      - name: Upload web export
+        uses: actions/upload-artifact@v4
+        with:
+          name: Guftin-Web-${{ github.run_number }}
+          path: apps/kingchat/web-export
+          if-no-files-found: error
+          retention-days: 14
