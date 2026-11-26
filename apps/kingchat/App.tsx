@@ -937,6 +937,25 @@ function VerifiedBadge({label='Verified account'}:{label?:string}) {
   return <Text accessibilityRole="image" accessibilityLabel={label} style={{color:'#2387e8',fontWeight:'900',fontSize:14,marginLeft:3}}>✓</Text>;
 }
 
+function LiveverseVoiceControls({onLeave}:any){
+  const participants=useParticipants();
+  const {localParticipant,isMicrophoneEnabled}=useLocalParticipant();
+  const room=useRoomContext();
+  const [connected,setConnected]=useState(false);
+  const [busy,setBusy]=useState(false);
+  useEffect(()=>{let active=true;void startGuftinCallAudioSession().then(()=>{if(active)setConnected(true);}).catch((error:any)=>Alert.alert('Audio unavailable',error?.message||'Could not start audio.'));return()=>{active=false;void stopGuftinCallAudioSession();};},[]);
+  const toggle=async()=>{if(busy)return;setBusy(true);try{await localParticipant.setMicrophoneEnabled(!isMicrophoneEnabled);}catch(error:any){Alert.alert('Microphone unavailable',error?.message||'Check microphone permission.');}finally{setBusy(false);}};
+  const leave=async()=>{try{await room.disconnect();}finally{await stopGuftinCallAudioSession();onLeave?.();}};
+  return <View style={{flex:1,backgroundColor:'#090d24',padding:24,justifyContent:'center',alignItems:'center'}}>
+    <Text style={{fontSize:22,fontWeight:'900',color:'#fff'}}>Liveverse Voice Room</Text>
+    <Text style={{fontSize:12,color:'#aab5d8',marginTop:7}}>{connected?'Connected audio room':'Connecting audio…'} · {participants.length} participant(s)</Text>
+    <View style={{width:'100%',backgroundColor:'#151b3a',borderRadius:18,padding:16,marginTop:24}}>{participants.map((p:any)=><Text key={p.identity} style={{color:'#fff',paddingVertical:7}}>● {p.name||p.identity}{p.isLocal?' (You)':''}</Text>)}</View>
+    <View style={{flexDirection:'row',gap:12,marginTop:25}}>
+      <Btn disabled={busy||!connected} onPress={()=>void toggle()} style={{padding:15,borderRadius:14,backgroundColor:isMicrophoneEnabled?'#2b9a75':'#8b344b'}}><Text style={{color:'#fff',fontWeight:'900'}}>{isMicrophoneEnabled?'Mute microphone':'Unmute microphone'}</Text></Btn>
+      <Btn onPress={()=>void leave()} style={{padding:15,borderRadius:14,backgroundColor:'#bd4055'}}><Text style={{color:'#fff',fontWeight:'900'}}>Leave</Text></Btn>
+    </View>
+  </View>;
+}
 function GuftinApp() {
   const insets=useSafeAreaInsets();
   const [tab,setTab]=useState('Chats');
@@ -957,6 +976,7 @@ function GuftinApp() {
   const [liveverseCanvasDraft,setLiveverseCanvasDraft]=useState('');
   const [liveverseBusy,setLiveverseBusy]=useState(false);
   const [liveversePresence,setLiveversePresence]=useState<any[]>([]);
+  const [liveverseVoiceSession,setLiveverseVoiceSession]=useState<any>(null);
   const activeTabRef=useRef(tab);
   activeTabRef.current=tab;
   const [session,setSession]=useState<any>(null);
@@ -4909,6 +4929,17 @@ function GuftinApp() {
     }catch(error:any){Alert.alert('Media upload failed',error?.message||'Please try again.');}
     finally{setLiveverseBusy(false);}
   };
+  const joinLiveverseVoiceRoom=async()=>{
+    if(!liveverseSelected)return;
+    setLiveverseBusy(true);
+    try{
+      const {data,error}=await supabase.functions.invoke('liveverse-livekit-token',{body:{space_id:liveverseSelected.id}});
+      if(error)throw error;
+      if(!data?.server_url||!data?.participant_token)throw new Error(data?.error||'The Liveverse voice service is not configured.');
+      setLiveverseVoiceSession({serverUrl:data.server_url,token:data.participant_token});
+    }catch(error:any){Alert.alert('Voice room unavailable',error?.message||'Deploy the Liveverse token function and configure LiveKit secrets.');}
+    finally{setLiveverseBusy(false);}
+  };
   const inviteLiveverseChatMembers=async()=>{
     if(!liveverseSelected||liveverseSelected.owner_id!==session?.user?.id){Alert.alert('Owner access required','Only the space owner can invite members.');return;}
     if(!liveverseSelected.source_chat_id){Alert.alert('No linked chat','This space was not created from a chat.');return;}
@@ -5428,6 +5459,7 @@ function GuftinApp() {
         <Btn onPress={()=>setLiveverseView('home')} style={{alignSelf:'flex-start',padding:7,backgroundColor:C.paper,borderRadius:8}}><Text style={{color:C.green,fontWeight:'900'}}>‹ All spaces</Text></Btn>
         <Text style={{fontSize:19,fontWeight:'900',color:C.ink,marginTop:10}}>{liveverseSelected.name}</Text>
         <Text style={{fontSize:11,color:C.muted,marginTop:4}}>{liveverseSelected.scope} · Shared workspace</Text>
+        <Btn disabled={liveverseBusy} onPress={()=>void joinLiveverseVoiceRoom()} style={{backgroundColor:'#17105c',padding:11,borderRadius:10,alignItems:'center',marginTop:9}}><Text style={{color:'#fff',fontWeight:'900'}}>Join real-time voice room</Text></Btn>
         <Text style={{fontSize:10,color:C.muted,marginTop:5}}>{liveversePresence.length} participant(s) currently online</Text>
         {liveverseSelected.owner_id===session?.user?.id?<Btn onPress={()=>void inviteLiveverseChatMembers()} style={{backgroundColor:C.green,padding:9,borderRadius:9,alignSelf:'flex-start',marginTop:7}}><Text style={{color:'#fff',fontSize:10,fontWeight:'900'}}>Invite linked chat members</Text></Btn>:null}
         <View style={{flexDirection:'row',flexWrap:'wrap',gap:6,marginTop:12}}>
@@ -5460,6 +5492,14 @@ function GuftinApp() {
       </View>:null}
       {liveverseBusy&&liveverseView==='room'?<GuftinLoader color={C.green}/>:null}
     </ScrollView>:null}
+    <Modal visible={!!liveverseVoiceSession} animationType="slide" presentationStyle="fullScreen" onRequestClose={()=>setLiveverseVoiceSession(null)}>
+      {liveverseVoiceSession?<LiveKitRoom serverUrl={liveverseVoiceSession.serverUrl} token={liveverseVoiceSession.token} connect={true} audio={true} video={false}
+        onConnected={()=>console.info('Liveverse voice connected')}
+        onDisconnected={()=>{void stopGuftinCallAudioSession();setLiveverseVoiceSession(null);}}
+        onError={(error:any)=>{Alert.alert('Voice connection failed',error?.message||'Could not connect to the room.');setLiveverseVoiceSession(null);}}>
+        <LiveverseVoiceControls onLeave={()=>setLiveverseVoiceSession(null)}/>
+      </LiveKitRoom>:null}
+    </Modal>
     {tab==='AI'?<View style={{flex:1,paddingHorizontal:14,paddingTop:14,paddingBottom:10}}>
       <View style={{backgroundColor:C.mint,borderRadius:18,padding:15,marginBottom:10}}>
         <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}>
