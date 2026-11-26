@@ -16,6 +16,7 @@ import { isStatusActive } from './src/features/status/statusUtils';
 import { saveMediaToGallery } from './src/features/media/saveMediaToGallery';
 import { ChatOptionsPopover } from './src/features/chat-menu/ChatOptionsPopover';
 import { getChannelAnalytics, recordChannelAnalyticsEvent } from './src/features/channels/channelAnalytics';
+import { createHoloSpaceClient } from './src/features/holospace/holospaceClient';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 import * as ImagePicker from 'expo-image-picker';
@@ -939,6 +940,21 @@ function VerifiedBadge({label='Verified account'}:{label?:string}) {
 function GuftinApp() {
   const insets=useSafeAreaInsets();
   const [tab,setTab]=useState('Chats');
+  const holoClient=useMemo(()=>createHoloSpaceClient(supabase),[]);
+  const [holoView,setHoloView]=useState<'home'|'mine'|'invited'|'recent'|'create'|'room'>('home');
+  const [holoRooms,setHoloRooms]=useState<any[]>([]);
+  const [holoInvites,setHoloInvites]=useState<any[]>([]);
+  const [holoSelected,setHoloSelected]=useState<any>(null);
+  const [holoMemories,setHoloMemories]=useState<any[]>([]);
+  const [holoGallery,setHoloGallery]=useState<any[]>([]);
+  const [holoEvents,setHoloEvents]=useState<any[]>([]);
+  const [holoMembers,setHoloMembers]=useState<any[]>([]);
+  const [holoLoading,setHoloLoading]=useState(false);
+  const [holoSaving,setHoloSaving]=useState(false);
+  const [holoName,setHoloName]=useState('');
+  const [holoDescription,setHoloDescription]=useState('');
+  const [holoPrivacy,setHoloPrivacy]=useState<'private'|'public'>('private');
+  const [holoMemoryDraft,setHoloMemoryDraft]=useState('');
   const activeTabRef=useRef(tab);
   activeTabRef.current=tab;
   const [session,setSession]=useState<any>(null);
@@ -4826,7 +4842,59 @@ function GuftinApp() {
     setAiHistoryOpen(false);
     setAiMode('chat');
   };
-  const pageTitle=tab==='Chats'?'Guftin':tab==='AI'?'Karaboz AI':tab==='Updates'?'Updates':tab==='Channels'?'Channels':tab==='Hub'?'Business & Communities':tab==='Calls'?'Calls':'You';
+  const loadHoloSpaces=useCallback(async()=>{
+    if(!session?.user?.id)return;
+    setHoloLoading(true);
+    try{
+      const [rooms,invites]=await Promise.all([holoClient.listMyRooms(),holoClient.listInvitations()]);
+      setHoloRooms(rooms);setHoloInvites(invites);
+    }catch(error:any){Alert.alert('HoloSpace could not load',error?.message||'Please try again.');}
+    finally{setHoloLoading(false);}
+  },[session?.user?.id,holoClient]);
+  useEffect(()=>{if(tab==='HoloSpace')void loadHoloSpaces();},[tab,loadHoloSpaces]);
+  const openHoloRoom=async(room:any)=>{
+    setHoloSelected(room);setHoloView('room');setHoloLoading(true);
+    try{
+      const [memories,gallery,events,members]=await Promise.all([
+        holoClient.listMemories(room.id),holoClient.listGallery(room.id),
+        holoClient.listEvents(room.id),holoClient.listMembers(room.id)
+      ]);
+      setHoloMemories(memories);setHoloGallery(gallery);setHoloEvents(events);setHoloMembers(members);
+    }catch(error:any){Alert.alert('Room could not open',error?.message||'Check your membership and try again.');}
+    finally{setHoloLoading(false);}
+  };
+  const createHoloRoom=async()=>{
+    if(!session?.user?.id||!holoName.trim())return;
+    setHoloSaving(true);
+    try{
+      await holoClient.createRoom({name:holoName,description:holoDescription,privacy:holoPrivacy,ownerId:session.user.id,timezone:Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC'});
+      setHoloName('');setHoloDescription('');setHoloPrivacy('private');setHoloView('mine');
+      await loadHoloSpaces();Alert.alert('HoloSpace created','Your private room has been saved.');
+    }catch(error:any){Alert.alert('Room not created',error?.message||'Please try again.');}
+    finally{setHoloSaving(false);}
+  };
+  const acceptHoloInvite=async(roomId:string)=>{
+    try{await holoClient.acceptInvitation(roomId);await loadHoloSpaces();Alert.alert('Invitation accepted','The room is now in My HoloSpaces.');}
+    catch(error:any){Alert.alert('Could not join room',error?.message||'Please try again.');}
+  };
+  const addHoloMemory=async()=>{
+    if(!holoSelected||!session?.user?.id||!holoMemoryDraft.trim())return;
+    setHoloSaving(true);
+    try{await holoClient.addMemory({roomId:holoSelected.id,authorId:session.user.id,body:holoMemoryDraft});setHoloMemoryDraft('');setHoloMemories(await holoClient.listMemories(holoSelected.id));}
+    catch(error:any){Alert.alert('Memory not saved',error?.message||'Please try again.');}
+    finally{setHoloSaving(false);}
+  };
+  const chooseHoloTheme=async(themeKey:string)=>{
+    if(!holoSelected||!session?.user?.id)return;
+    try{await holoClient.saveTheme({roomId:holoSelected.id,userId:session.user.id,themeKey,accentColor:themeKey==='ocean'?'#2476D2':themeKey==='sunset'?'#D45B42':themeKey==='forest'?'#16845D':'#0B9B72'});Alert.alert('Theme saved','Room appearance has been updated.');}
+    catch(error:any){Alert.alert('Theme not saved',error?.message||'Only the room owner can change the theme.');}
+  };
+  const saveHoloAvatar=async(avatarKey:string)=>{
+    if(!holoSelected||!session?.user?.id)return;
+    try{await holoClient.saveAvatar(holoSelected.id,session.user.id,avatarKey,'emerald');Alert.alert('Avatar saved','Your room avatar preference is saved.');}
+    catch(error:any){Alert.alert('Avatar not saved',error?.message||'Please try again.');}
+  };
+  const pageTitle=tab==='Chats'?'Guftin':tab==='HoloSpace'?'HoloSpace':tab==='AI'?'Karaboz AI':tab==='Updates'?'Updates':tab==='Channels'?'Channels':tab==='Hub'?'Business & Communities':tab==='Calls'?'Calls':'You';
   const totalUnread=chats.reduce((sum:any,item:any)=>sum+(Number(item.unread)||0),0);
 
   if(authRestoring){
@@ -5232,6 +5300,55 @@ function GuftinApp() {
           </Btn>}/>
       }
     </>:null}
+    {tab==='HoloSpace'?<ScrollView contentContainerStyle={{padding:16,paddingBottom:30}}>
+      <View style={{backgroundColor:C.mint,borderRadius:20,padding:17,marginBottom:14}}>
+        <Text style={{fontSize:21,fontWeight:'900',color:C.green}}>◎ Guftin HoloSpace</Text>
+        <Text style={{fontSize:12,color:C.ink,marginTop:5}}>Your Friends. Your Memories. Your Own Universe.</Text>
+        <Text style={{fontSize:10,color:C.muted,marginTop:7}}>Create private rooms and keep shared memories together.</Text>
+      </View>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{gap:7,paddingBottom:13}}>
+        {([['home','Home'],['mine','My Spaces'],['invited','Invited'],['recent','Recent'],['create','＋ Create']] as const).map(([key,label])=><Btn key={key} onPress={()=>setHoloView(key)} style={{paddingHorizontal:13,paddingVertical:9,borderRadius:18,backgroundColor:holoView===key?C.green:C.white,borderWidth:1,borderColor:holoView===key?C.green:C.line}}><Text style={{fontSize:11,fontWeight:'900',color:holoView===key?'#fff':C.ink}}>{label}</Text></Btn>)}
+      </ScrollView>
+      {holoView==='create'?<View style={{backgroundColor:C.white,borderRadius:17,padding:15,borderWidth:1,borderColor:C.line}}>
+        <Text style={{fontSize:17,fontWeight:'900',color:C.ink}}>Create a new HoloSpace</Text>
+        <TextInput value={holoName} onChangeText={setHoloName} placeholder="Room name" maxLength={80} style={{backgroundColor:C.paper,borderRadius:12,padding:13,color:C.ink,marginTop:12}}/>
+        <TextInput value={holoDescription} onChangeText={setHoloDescription} placeholder="Description (optional)" maxLength={600} multiline style={{backgroundColor:C.paper,borderRadius:12,padding:13,color:C.ink,marginTop:9,minHeight:75,textAlignVertical:'top'}}/>
+        <View style={{flexDirection:'row',gap:8,marginTop:12}}>
+          {(['private','public'] as const).map(value=><Btn key={value} onPress={()=>setHoloPrivacy(value)} style={{flex:1,padding:12,borderRadius:12,backgroundColor:holoPrivacy===value?C.green:C.paper,alignItems:'center'}}><Text style={{color:holoPrivacy===value?'#fff':C.ink,fontWeight:'900'}}>{value==='private'?'Private':'Public'}</Text></Btn>)}
+        </View>
+        <Btn disabled={holoSaving||!holoName.trim()} onPress={()=>void createHoloRoom()} style={{backgroundColor:C.green,padding:14,borderRadius:13,alignItems:'center',marginTop:13}}>{holoSaving?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Create HoloSpace</Text>}</Btn>
+      </View>:null}
+      {holoView==='room'&&holoSelected?<View style={{backgroundColor:C.white,borderRadius:17,padding:15,borderWidth:1,borderColor:C.line}}>
+        <Btn onPress={()=>{setHoloSelected(null);setHoloView('mine');}} style={{alignSelf:'flex-start',paddingVertical:7,paddingHorizontal:10,backgroundColor:C.paper,borderRadius:10}}><Text style={{color:C.green,fontWeight:'900'}}>‹ Back to spaces</Text></Btn>
+        <Text style={{fontSize:20,fontWeight:'900',color:C.ink,marginTop:12}}>{holoSelected.name}</Text>
+        <Text style={{fontSize:11,color:C.muted,marginTop:4}}>{holoSelected.privacy} room · {holoMembers.filter(x=>x.invitation_status==='active').length} members</Text>
+        <Text style={{fontSize:15,fontWeight:'900',color:C.ink,marginTop:18}}>Memory Wall</Text>
+        <TextInput value={holoMemoryDraft} onChangeText={setHoloMemoryDraft} placeholder="Write a memory to share…" multiline maxLength={5000} style={{backgroundColor:C.paper,borderRadius:12,padding:12,minHeight:75,textAlignVertical:'top',color:C.ink,marginTop:8}}/>
+        <Btn disabled={holoSaving||!holoMemoryDraft.trim()} onPress={()=>void addHoloMemory()} style={{backgroundColor:C.green,padding:11,borderRadius:11,alignItems:'center',marginTop:8}}><Text style={{color:'#fff',fontWeight:'900'}}>＋ Save memory</Text></Btn>
+        {holoMemories.map(memory=><View key={memory.id} style={{padding:11,borderBottomWidth:1,borderColor:C.line}}><Text style={{color:C.ink,lineHeight:20}}>{memory.body}</Text><Text style={{color:C.muted,fontSize:10,marginTop:5}}>{timeLabel(memory.created_at)}</Text></View>)}
+        <Text style={{fontSize:15,fontWeight:'900',color:C.ink,marginTop:17}}>Room themes</Text>
+        <View style={{flexDirection:'row',flexWrap:'wrap',gap:7,marginTop:8}}>{['aurora','midnight','ocean','sunset','forest','starlight'].map(theme=><Btn key={theme} onPress={()=>void chooseHoloTheme(theme)} style={{padding:10,borderRadius:10,backgroundColor:C.mint}}><Text style={{color:C.green,fontWeight:'800',fontSize:10}}>{theme}</Text></Btn>)}</View>
+        <Text style={{fontSize:15,fontWeight:'900',color:C.ink,marginTop:17}}>Your room avatar</Text>
+        <View style={{flexDirection:'row',flexWrap:'wrap',gap:7,marginTop:8}}>{['orbit','comet','nova','planet','moon','star','nebula','rocket','flower','spark'].map(avatar=><Btn key={avatar} onPress={()=>void saveHoloAvatar(avatar)} style={{padding:10,borderRadius:10,backgroundColor:C.paper}}><Text style={{color:C.ink,fontWeight:'800',fontSize:10}}>{avatar}</Text></Btn>)}</View>
+        <Text style={{fontSize:15,fontWeight:'900',color:C.ink,marginTop:17}}>Shared Gallery</Text>
+        <Text style={{fontSize:11,color:C.muted,marginTop:5}}>{holoGallery.length} media items saved. Gallery upload and viewer are still being integrated.</Text>
+        <Text style={{fontSize:15,fontWeight:'900',color:C.ink,marginTop:17}}>Special Moments</Text>
+        {holoEvents.map(event=><Text key={event.id} style={{color:C.ink,fontSize:12,paddingVertical:6}}>{event.title} · {timeLabel(event.starts_at)}</Text>)}
+        {holoLoading?<GuftinLoader color={C.green}/>:null}
+      </View>:null}
+      {holoView==='home'||holoView==='mine'||holoView==='recent'?<View>
+        <Text style={{fontSize:16,fontWeight:'900',color:C.ink,marginBottom:9}}>{holoView==='recent'?'Recent HoloSpaces':holoView==='mine'?'My HoloSpaces':'Your HoloSpaces'}</Text>
+        {holoLoading&&holoRooms.length===0?<GuftinLoader color={C.green}/>:holoRooms.length===0?<Text style={{color:C.muted,textAlign:'center',padding:22}}>No HoloSpaces yet. Create a room to start sharing memories.</Text>:holoRooms.map(room=><Btn key={room.id} onPress={()=>void openHoloRoom(room)} style={{backgroundColor:C.white,borderRadius:15,padding:14,marginBottom:9,borderWidth:1,borderColor:C.line,alignItems:'stretch'}}>
+          <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}><Text style={{fontSize:14,fontWeight:'900',color:C.ink,flex:1}}>{room.name}</Text><Text style={{fontSize:9,fontWeight:'900',color:C.green}}>{room.privacy.toUpperCase()}</Text></View>
+          <Text numberOfLines={2} style={{fontSize:11,color:C.muted,marginTop:5}}>{room.description||'A shared Guftin room'}</Text>
+          <Text style={{fontSize:10,color:C.green,fontWeight:'900',marginTop:8}}>Open room ›</Text>
+        </Btn>)}
+      </View>:null}
+      {holoView==='invited'?<View>
+        <Text style={{fontSize:16,fontWeight:'900',color:C.ink,marginBottom:9}}>Invited Spaces</Text>
+        {holoInvites.length===0?<Text style={{color:C.muted,textAlign:'center',padding:22}}>You have no pending room invitations.</Text>:holoInvites.map((invite:any)=><View key={invite.room_id} style={{backgroundColor:C.white,borderRadius:14,padding:13,marginBottom:8,borderWidth:1,borderColor:C.line}}><Text style={{fontWeight:'900',color:C.ink}}>{invite.holospace_rooms?.name||'HoloSpace invitation'}</Text><Text style={{fontSize:10,color:C.muted,marginTop:4}}>Invited to join a shared room</Text><Btn onPress={()=>void acceptHoloInvite(invite.room_id)} style={{backgroundColor:C.green,padding:10,borderRadius:10,alignItems:'center',marginTop:9}}><Text style={{color:'#fff',fontWeight:'900'}}>Accept invitation</Text></Btn></View>)}
+      </View>:null}
+    </ScrollView>:null}
     {tab==='Updates'?<ScrollView contentContainerStyle={{padding:20,paddingBottom:30}}>
       <View style={{backgroundColor:C.paper,borderRadius:20,padding:18,marginBottom:18}}>
         <Text style={{fontSize:18,fontWeight:'900',color:C.ink}}>Your status</Text>
@@ -5391,7 +5508,7 @@ function GuftinApp() {
       />
     </View>:null}
     <View style={{marginHorizontal:7,marginBottom:Math.max(insets.bottom,5),height:66,paddingTop:5,paddingBottom:5,borderRadius:27,borderWidth:1,borderColor:C.line,flexDirection:'row',alignItems:'center',justifyContent:'space-around',backgroundColor:C.white,elevation:10,shadowColor:'#123d2d',shadowOpacity:.09,shadowRadius:12,shadowOffset:{width:0,height:4}}}>
-      {([['Chats','▤'],['AI','✦'],['Updates','◉'],['Hub','⌂'],['Calls','☎'],['You','●']] as string[][]).map(([t,icon])=><Btn key={t} onPress={()=>setTab(t)} style={{alignItems:'center',justifyContent:'center',minWidth:48,paddingHorizontal:2,paddingVertical:4}}>
+      {([['Chats','▤'],['HoloSpace','◎'],['AI','✦'],['Updates','◉'],['Hub','⌂'],['Calls','☎'],['You','●']] as string[][]).map(([t,icon])=><Btn key={t} onPress={()=>setTab(t)} style={{alignItems:'center',justifyContent:'center',minWidth:48,paddingHorizontal:2,paddingVertical:4}}>
         <Text style={{fontSize:20,color:tab===t?C.green:C.muted,fontWeight:'900'}}>{icon}</Text>
         <Text style={{fontSize:10,fontWeight:tab===t?'900':'600',color:tab===t?C.green:C.muted,marginTop:3}}>{t==='Hub'?'Business':t}</Text>
         {tab===t?<View style={{height:3,width:24,borderRadius:3,backgroundColor:C.green,marginTop:3}}/>:null}
