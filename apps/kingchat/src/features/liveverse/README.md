@@ -10,13 +10,13 @@ This directory is the isolated implementation area for Liveverse. It is delibera
 - [x] Database migration foundation for spaces, members, notes, tasks, canvas state, media metadata and idempotent events.
 - [x] Membership-scoped RLS and a private media bucket with object policies; membership role escalation is restricted.
 - [x] Realtime publication for persisted collaboration data.
-- [ ] Chat and group entry points wired into the existing navigation.
-- [x] Initial Supabase client operations for versioned Canvas persistence; drawing UI and reconnect/restore experience remain incomplete.
-- [x] Initial Notes persistence client with optimistic version checks; editor UI and conflict merge remain incomplete.
-- [x] Presence/Broadcast client primitives for live pointer payloads; rendered pointer UI remains incomplete.
-- [ ] Media picker/viewer and synchronized playback.
-- [x] Initial task create/list/update/delete Supabase client operations; task UI remains incomplete.
-- [ ] Real device-to-device Voice Room and call lifecycle.
+- [x] Liveverse main navigation tab plus direct/group chat header entry points.
+- [x] Cross-platform SVG drawing surface; strokes persist with optimistic version checks and refresh through Realtime. Concurrent stroke merge is not yet implemented.
+- [x] Shared Notes editor with optimistic version checks; stale saves show a conflict and require reload.
+- [x] Presence and pointer broadcast primitives; live pointer cursor rendering remains incomplete.
+- [x] Shared image/video picker, private upload, signed-URL viewer and authorized deletion. Synchronized playback remains incomplete.
+- [x] Shared Tasks UI for create, complete/reopen and delete with persistent Supabase state.
+- [x] LiveKit membership-authorized token endpoint and actual audio-room join/mute/leave UI added; deployment and two-device audio validation remain pending.
 - [ ] Two-account authorization and collaboration tests.
 - [ ] Android and web production builds plus regression tests.
 
@@ -57,3 +57,27 @@ The SQL foundation is not proof that the six user-facing modules are complete. E
 ## Current client-library limits
 
 The client library is an initial backend integration layer, not a finished user-facing feature. The app does not yet expose Liveverse entry points, canvas drawing, notes editor, task board, media picker/viewer, or voice room UI. The SQL migration and client operations have not yet been applied/tested against two real accounts. The database migration remains a source file until explicitly applied to a Supabase test project.
+
+
+## App integration added
+
+The Liveverse tab is now wired into the main navigation. Direct and group chat headers open a room-creation flow linked to the originating conversation. The workspace includes persistent notes, tasks, a collaborative SVG canvas document, shared media upload/view/delete, Realtime refresh/presence and a LiveKit voice-room join screen. Chat-member invitation uses the linked conversation membership list.
+
+## LiveKit voice deployment
+
+The token endpoint is at `supabase/functions/liveverse-livekit-token/index.ts` relative to `apps/kingchat`. Deploy it using:
+
+```sh
+supabase functions deploy liveverse-livekit-token --project-ref oyjemlbsmffvofefgxvd
+```
+
+Configure server-side Edge Function secrets `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET`. Do not put these in Expo public environment variables. The endpoint checks authenticated Liveverse membership before issuing a short-lived token.
+
+## Remaining verification and implementation
+
+- The canvas uses saved SVG strokes and refreshes remote changes; it does not yet implement conflict-free concurrent drawing merge or visible cursor overlays.
+- Notes use optimistic versioning; a conflict requires reload rather than automatic merge.
+- Voice is not verified until the Edge Function is deployed and two real devices successfully join, mute/unmute and leave.
+- SQL migration and tests have not been applied/run against a disposable Supabase branch; two-account authorization tests remain outstanding.
+- The current Liveverse workspace UI does not yet include a fully polished member role manager or synchronized video playback.
+- Android/web builds must pass on the final feature commit; iOS still needs a device build/test.
