@@ -956,6 +956,9 @@ function GuftinApp() {
   const [holoDescription,setHoloDescription]=useState('');
   const [holoPrivacy,setHoloPrivacy]=useState<'private'|'public'>('private');
   const [holoMemoryDraft,setHoloMemoryDraft]=useState('');
+  const [holoRoomNameDraft,setHoloRoomNameDraft]=useState('');
+  const [holoRoomDescriptionDraft,setHoloRoomDescriptionDraft]=useState('');
+  const [holoRoomPrivacyDraft,setHoloRoomPrivacyDraft]=useState<'private'|'public'>('private');
   const activeTabRef=useRef(tab);
   activeTabRef.current=tab;
   const [session,setSession]=useState<any>(null);
@@ -4854,7 +4857,7 @@ function GuftinApp() {
   },[session?.user?.id,holoClient]);
   useEffect(()=>{if(tab==='HoloSpace')void loadHoloSpaces();},[tab,loadHoloSpaces]);
   const openHoloRoom=async(room:any)=>{
-    setHoloSelected(room);setHoloView('room');setHoloLoading(true);
+    setHoloSelected(room);setHoloRoomNameDraft(room.name||'');setHoloRoomDescriptionDraft(room.description||'');setHoloRoomPrivacyDraft(room.privacy||'private');setHoloView('room');setHoloLoading(true);
     try{
       const [memories,gallery,events,members]=await Promise.all([
         holoClient.listMemories(room.id),holoClient.listGallery(room.id),
@@ -4889,6 +4892,53 @@ function GuftinApp() {
     if(!holoSelected||!session?.user?.id)return;
     try{await holoClient.saveTheme({roomId:holoSelected.id,userId:session.user.id,themeKey,accentColor:themeKey==='ocean'?'#2476D2':themeKey==='sunset'?'#D45B42':themeKey==='forest'?'#16845D':'#0B9B72'});Alert.alert('Theme saved','Room appearance has been updated.');}
     catch(error:any){Alert.alert('Theme not saved',error?.message||'Only the room owner can change the theme.');}
+  };
+  const inviteHoloChatParticipants=async()=>{
+    if(!holoSelected||!session?.user?.id||holoSelected.owner_id!==session.user.id){Alert.alert('Owner access required','Only the room owner can invite members.');return;}
+    if(!holoSelected.source_chat_id){Alert.alert('No linked chat','This room was not created from a Guftin chat.');return;}
+    setHoloSaving(true);
+    try{
+      const {data,error}=await supabase.from('kc_conversation_members').select('user_id').eq('conversation_id',holoSelected.source_chat_id);
+      if(error)throw error;
+      const invitees=[...new Set((data||[]).map((x:any)=>x.user_id).filter((id:string)=>id&&id!==session.user.id))];
+      if(!invitees.length){Alert.alert('No invitees','No other members were found in the linked chat.');return;}
+      for(const userId of invitees)await holoClient.invite(holoSelected.id,userId,session.user.id);
+      setHoloMembers(await holoClient.listMembers(holoSelected.id));
+      Alert.alert('Invitations sent',invitees.length+' linked chat participant(s) have been invited.');
+    }catch(error:any){Alert.alert('Invitations failed',error?.message||'Check room owner permissions and try again.');}
+    finally{setHoloSaving(false);}
+  };
+  const saveHoloRoomSettings=async()=>{
+    if(!holoSelected||holoSelected.owner_id!==session?.user?.id)return;
+    setHoloSaving(true);
+    try{
+      const updated=await holoClient.updateRoom(holoSelected.id,{name:holoRoomNameDraft,description:holoRoomDescriptionDraft,privacy:holoRoomPrivacyDraft});
+      setHoloSelected(updated);Alert.alert('Room settings saved','Your room details and privacy have been updated.');
+    }catch(error:any){Alert.alert('Settings not saved',error?.message||'Please try again.');}
+    finally{setHoloSaving(false);}
+  };
+  const removeHoloMember=async(userId:string)=>{
+    if(!holoSelected||holoSelected.owner_id!==session?.user?.id||userId===session.user.id)return;
+    Alert.alert('Remove member?','This person will lose access to this private room.',[
+      {text:'Cancel',style:'cancel'},
+      {text:'Remove',style:'destructive',onPress:async()=>{
+        try{await holoClient.removeMember(holoSelected.id,userId);setHoloMembers(await holoClient.listMembers(holoSelected.id));}
+        catch(error:any){Alert.alert('Could not remove member',error?.message||'Please try again.');}
+      }}
+    ]);
+  };
+  const leaveOrDeleteHoloRoom=()=>{
+    if(!holoSelected||!session?.user?.id)return;
+    const isOwner=holoSelected.owner_id===session.user.id;
+    Alert.alert(isOwner?'Delete HoloSpace?':'Leave HoloSpace?',isOwner?'This permanently deletes the room and its shared content.':'You will lose access until invited again.',[
+      {text:'Cancel',style:'cancel'},
+      {text:isOwner?'Delete':'Leave',style:'destructive',onPress:async()=>{
+        try{
+          if(isOwner)await holoClient.deleteRoom(holoSelected.id);else await holoClient.leaveRoom(holoSelected.id,session.user.id);
+          setHoloSelected(null);setHoloView('mine');await loadHoloSpaces();
+        }catch(error:any){Alert.alert('Action failed',error?.message||'Please try again.');}
+      }}
+    ]);
   };
   const addHoloGalleryMedia=async()=>{
     if(!holoSelected||!session?.user?.id||holoSaving)return;
@@ -5355,6 +5405,21 @@ function GuftinApp() {
         <Btn onPress={()=>{setHoloSelected(null);setHoloView('mine');}} style={{alignSelf:'flex-start',paddingVertical:7,paddingHorizontal:10,backgroundColor:C.paper,borderRadius:10}}><Text style={{color:C.green,fontWeight:'900'}}>‹ Back to spaces</Text></Btn>
         <Text style={{fontSize:20,fontWeight:'900',color:C.ink,marginTop:12}}>{holoSelected.name}</Text>
         <Text style={{fontSize:11,color:C.muted,marginTop:4}}>{holoSelected.privacy} room · {holoMembers.filter(x=>x.invitation_status==='active').length} members</Text>
+        <Text style={{fontSize:15,fontWeight:'900',color:C.ink,marginTop:16}}>Members & invitations</Text>
+        <Text style={{fontSize:10,color:C.muted,marginTop:4}}>Active: {holoMembers.filter((x:any)=>x.invitation_status==='active').length} · Pending: {holoMembers.filter((x:any)=>x.invitation_status==='invited').length}</Text>
+        {holoSelected.owner_id===session?.user?.id?<Btn disabled={holoSaving} onPress={()=>void inviteHoloChatParticipants()} style={{backgroundColor:C.green,padding:10,borderRadius:10,alignItems:'center',marginTop:8}}><Text style={{color:'#fff',fontWeight:'900'}}>Invite linked chat participants</Text></Btn>:null}
+        {holoMembers.map((member:any)=><View key={member.user_id} style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingVertical:7,borderBottomWidth:1,borderColor:C.line}}>
+          <View style={{flex:1}}><Text style={{fontSize:11,color:C.ink,fontWeight:'800'}}>{member.user_id===session?.user?.id?'You':member.user_id.slice(0,8)+'…'} · {member.role}</Text><Text style={{fontSize:9,color:C.muted}}>{member.invitation_status==='invited'?'Invitation pending':'Joined member'}</Text></View>
+          {holoSelected.owner_id===session?.user?.id&&member.role!=='owner'?<Btn onPress={()=>void removeHoloMember(member.user_id)} style={{padding:7,backgroundColor:C.paper,borderRadius:8}}><Text style={{fontSize:10,color:C.red,fontWeight:'800'}}>Remove</Text></Btn>:null}
+        </View>)}
+        <Text style={{fontSize:15,fontWeight:'900',color:C.ink,marginTop:16}}>Room settings</Text>
+        {holoSelected.owner_id===session?.user?.id?<View style={{gap:7,marginTop:7}}>
+          <TextInput value={holoRoomNameDraft} onChangeText={setHoloRoomNameDraft} placeholder="Room name" maxLength={80} style={{backgroundColor:C.paper,borderRadius:10,padding:10,color:C.ink}}/>
+          <TextInput value={holoRoomDescriptionDraft} onChangeText={setHoloRoomDescriptionDraft} placeholder="Description" maxLength={600} multiline style={{backgroundColor:C.paper,borderRadius:10,padding:10,color:C.ink}}/>
+          <View style={{flexDirection:'row',gap:8}}>{(['private','public'] as const).map(value=><Btn key={value} onPress={()=>setHoloRoomPrivacyDraft(value)} style={{padding:9,borderRadius:9,backgroundColor:holoRoomPrivacyDraft===value?C.green:C.paper}}><Text style={{fontSize:10,fontWeight:'900',color:holoRoomPrivacyDraft===value?'#fff':C.ink}}>{value.toUpperCase()}</Text></Btn>)}</View>
+          <Btn disabled={holoSaving} onPress={()=>void saveHoloRoomSettings()} style={{backgroundColor:C.green,padding:10,borderRadius:10,alignItems:'center'}}><Text style={{color:'#fff',fontWeight:'900'}}>Save room settings</Text></Btn>
+        </View>:<Text style={{fontSize:10,color:C.muted,marginTop:5}}>Only the room owner can change room details and privacy.</Text>}
+        <Btn onPress={leaveOrDeleteHoloRoom} style={{alignSelf:'flex-start',marginTop:12,padding:8,backgroundColor:C.paper,borderRadius:9}}><Text style={{fontSize:10,color:C.red,fontWeight:'900'}}>{holoSelected.owner_id===session?.user?.id?'Delete room':'Leave room'}</Text></Btn>
         <Text style={{fontSize:15,fontWeight:'900',color:C.ink,marginTop:18}}>Memory Wall</Text>
         <TextInput value={holoMemoryDraft} onChangeText={setHoloMemoryDraft} placeholder="Write a memory to share…" multiline maxLength={5000} style={{backgroundColor:C.paper,borderRadius:12,padding:12,minHeight:75,textAlignVertical:'top',color:C.ink,marginTop:8}}/>
         <Btn disabled={holoSaving||!holoMemoryDraft.trim()} onPress={()=>void addHoloMemory()} style={{backgroundColor:C.green,padding:11,borderRadius:11,alignItems:'center',marginTop:8}}><Text style={{color:'#fff',fontWeight:'900'}}>＋ Save memory</Text></Btn>
