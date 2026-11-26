@@ -47,6 +47,42 @@ export function createHoloSpaceClient(db:SupabaseClient){
       .is('archived_at',null).order('updated_at',{ascending:false}).limit(100);
     if(error)throw error; return (data||[]) as HoloRoom[];
   }
+  async function listPublicRooms():Promise<HoloRoom[]>{
+    const {data,error}=await db.from('holospace_rooms').select('*')
+      .eq('privacy','public').is('archived_at',null)
+      .order('updated_at',{ascending:false}).limit(100);
+    if(error)throw error;return (data||[]) as HoloRoom[];
+  }
+  async function listRoomsForChat(chatId:string):Promise<HoloRoom[]>{
+    id(chatId,'chat');
+    const {data,error}=await db.from('holospace_rooms').select('*')
+      .eq('source_chat_id',chatId).is('archived_at',null)
+      .order('updated_at',{ascending:false}).limit(20);
+    if(error)throw error;return (data||[]) as HoloRoom[];
+  }
+  async function joinPublicRoom(roomId:string,userId:string){
+    id(roomId,'room');id(userId,'user');
+    const {error}=await db.from('holospace_members').upsert({
+      room_id:roomId,user_id:userId,role:'member',invitation_status:'active',joined_at:new Date().toISOString()
+    },{onConflict:'room_id,user_id'});
+    if(error)throw error;
+  }
+  async function getAvatar(roomId:string,userId:string){
+    id(roomId,'room');id(userId,'user');
+    const {data,error}=await db.from('holospace_avatars').select('*').eq('room_id',roomId).eq('user_id',userId).maybeSingle();
+    if(error)throw error;return data;
+  }
+  async function getTheme(roomId:string){
+    id(roomId,'room');
+    const {data,error}=await db.from('holospace_themes').select('*').eq('room_id',roomId).maybeSingle();
+    if(error)throw error;return data;
+  }
+  async function listRecentActivity(roomId:string){
+    id(roomId,'room');
+    const {data,error}=await db.from('holospace_activity').select('id,actor_id,activity_type,payload,created_at')
+      .eq('room_id',roomId).order('created_at',{ascending:false}).limit(40);
+    if(error)throw error;return data||[];
+  }
   async function listInvitations(){
     const {data:{user},error:userError}=await db.auth.getUser();
     if(userError)throw userError;
@@ -211,7 +247,7 @@ export function createHoloSpaceClient(db:SupabaseClient){
   async function trackPresence(channel:RealtimeChannel,userId:string,displayName:string,avatarKey:string){
     id(userId,'user');return channel.track({user_id:userId,display_name:displayName.slice(0,60),avatar_key:avatarKey,online_at:new Date().toISOString()});
   }
-  return {createRoom,listMyRooms,listInvitations,invite,acceptInvitation,leaveRoom,removeMember,listMembers,updateRoom,deleteRoom,
+  return {createRoom,listMyRooms,listPublicRooms,listRoomsForChat,joinPublicRoom,getAvatar,getTheme,listRecentActivity,listInvitations,invite,acceptInvitation,leaveRoom,removeMember,listMembers,updateRoom,deleteRoom,
     addMemory,editMemory,deleteMemory,listMemories,uploadGallery,listGallery,gallerySignedUrl,deleteGalleryItem,
     saveAvatar,saveTheme,createEvent,updateEvent,deleteEvent,listEvents,subscribeRoom,trackPresence};
 }
