@@ -8,6 +8,8 @@ on:
       - release/guftin-v1.5.8-no-email-verification
       - release/guftin-v1.5.7-no-email-verification
       - feature/guftin-20-feature-upgrade
+      - feature/guftin-liveverse
+      - feature/guftin-holospace
     paths:
       - "apps/kingchat/**"
       - ".github/workflows/guftin-android-apk.yml"
