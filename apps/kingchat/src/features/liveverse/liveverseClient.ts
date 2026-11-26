@@ -1,4 +1,5 @@
 import type { SupabaseClient, RealtimeChannel } from '@supabase/supabase-js';
+import * as ExpoCrypto from 'expo-crypto';
 
 export type LiveverseScope = 'chat' | 'group';
 export type LiveverseTaskStatus = 'open' | 'completed';
@@ -172,7 +173,7 @@ export function createLiveverseClient(db: SupabaseClient) {
     if (!MEDIA_MIME_TYPES.has(input.mimeType)) throw new Error('This media format is not supported.');
     if (input.bytes < 1 || input.bytes > MAX_MEDIA_BYTES) throw new Error('Media must be smaller than 100 MB.');
     const safeName = input.fileName.replace(/[^a-zA-Z0-9._-]/g, '_').slice(-100) || 'upload';
-    const path = `${input.spaceId}/${input.userId}/${crypto.randomUUID()}-${safeName}`;
+    const path = `${input.spaceId}/${input.userId}/${ExpoCrypto.randomUUID()}-${safeName}`;
     const { error: uploadError } = await db.storage.from(MEDIA_BUCKET).upload(path, input.body, {
       contentType: input.mimeType, upsert: false
     });
