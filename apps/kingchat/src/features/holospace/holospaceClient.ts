@@ -178,6 +178,19 @@ export function createHoloSpaceClient(db:SupabaseClient){
     }).select('*').single();
     if(error)throw error;return data as HoloEvent;
   }
+  async function updateEvent(eventId:string,patch:{title?:string;description?:string;startsAt?:string;timezone?:string}){
+    id(eventId,'event');const update:Record<string,unknown>={updated_at:new Date().toISOString()};
+    if(patch.title!==undefined)update.title=clean(patch.title,120,'Event title');
+    if(patch.description!==undefined)update.description=patch.description.trim().slice(0,1000);
+    if(patch.startsAt!==undefined){if(!Number.isFinite(Date.parse(patch.startsAt)))throw new Error('Invalid event date.');update.starts_at=new Date(patch.startsAt).toISOString();}
+    if(patch.timezone!==undefined)update.timezone=clean(patch.timezone,64,'Timezone');
+    const {data,error}=await db.from('holospace_events').update(update).eq('id',eventId).select('*').single();
+    if(error)throw error;return data as HoloEvent;
+  }
+  async function deleteEvent(eventId:string){
+    id(eventId,'event');const {error}=await db.from('holospace_events').delete().eq('id',eventId);
+    if(error)throw error;
+  }
   async function listEvents(roomId:string){
     id(roomId,'room');const {data,error}=await db.from('holospace_events').select('*').eq('room_id',roomId).order('starts_at').limit(100);
     if(error)throw error;return (data||[]) as HoloEvent[];
@@ -200,5 +213,5 @@ export function createHoloSpaceClient(db:SupabaseClient){
   }
   return {createRoom,listMyRooms,listInvitations,invite,acceptInvitation,leaveRoom,removeMember,listMembers,updateRoom,deleteRoom,
     addMemory,editMemory,deleteMemory,listMemories,uploadGallery,listGallery,gallerySignedUrl,deleteGalleryItem,
-    saveAvatar,saveTheme,createEvent,listEvents,subscribeRoom,trackPresence};
+    saveAvatar,saveTheme,createEvent,updateEvent,deleteEvent,listEvents,subscribeRoom,trackPresence};
 }
