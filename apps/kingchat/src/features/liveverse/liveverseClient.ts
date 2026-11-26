@@ -37,13 +37,14 @@ export function createLiveverseClient(db: SupabaseClient) {
   const requireSpace = (spaceId: string) => assertUuid(spaceId, 'space ID');
 
   async function createSpace(input: {
-    name: string; description?: string; scope: LiveverseScope; sourceChatId?: string | null;
+    name: string; description?: string; scope: LiveverseScope; ownerId: string; sourceChatId?: string | null;
   }): Promise<LiveverseSpace> {
     const name = assertText(input.name, 80, 'Space name');
+    assertUuid(input.ownerId, 'owner ID');
     if (input.sourceChatId) assertUuid(input.sourceChatId, 'chat ID');
     const { data, error } = await db.from('liveverse_spaces').insert({
       name, description: (input.description || '').trim().slice(0, 500),
-      scope: input.scope, source_chat_id: input.sourceChatId || null
+      scope: input.scope, owner_id: input.ownerId, source_chat_id: input.sourceChatId || null
     }).select('*').single();
     if (error) throw error;
     return data as LiveverseSpace;
@@ -56,6 +57,17 @@ export function createLiveverseClient(db: SupabaseClient) {
       { onConflict: 'space_id,user_id', ignoreDuplicates: true }
     );
     if (error) throw error;
+  }
+
+  async function listMembers(spaceId:string){
+    requireSpace(spaceId);
+    const {data,error}=await db.from('liveverse_members').select('space_id,user_id,role,joined_at').eq('space_id',spaceId).order('joined_at',{ascending:true}).limit(200);
+    if(error)throw error;return data||[];
+  }
+  async function removeMember(spaceId:string,userId:string){
+    requireSpace(spaceId);assertUuid(userId,'user ID');
+    const {error}=await db.from('liveverse_members').delete().eq('space_id',spaceId).eq('user_id',userId);
+    if(error)throw error;
   }
 
   async function leaveSpace(spaceId: string, userId: string) {
@@ -71,6 +83,34 @@ export function createLiveverseClient(db: SupabaseClient) {
       .is('archived_at', null).order('updated_at', { ascending: false }).limit(100);
     if (error) throw error;
     return (data || []) as LiveverseSpace[];
+  }
+
+  async function listNotes(spaceId:string):Promise<LiveverseNote[]>{
+    requireSpace(spaceId);
+    const {data,error}=await db.from('liveverse_notes').select('*').eq('space_id',spaceId).order('updated_at',{ascending:false}).limit(100);
+    if(error)throw error;return (data||[]) as LiveverseNote[];
+  }
+  async function loadCanvas(spaceId:string){
+    requireSpace(spaceId);
+    const {data,error}=await db.from('liveverse_canvas').select('*').eq('space_id',spaceId).maybeSingle();
+    if(error)throw error;return data;
+  }
+  async function listMedia(spaceId:string){
+    requireSpace(spaceId);
+    const {data,error}=await db.from('liveverse_media').select('*').eq('space_id',spaceId).order('created_at',{ascending:false}).limit(100);
+    if(error)throw error;
+    return await Promise.all((data||[]).map(async(item:any)=>{
+      const {data:link,error:linkError}=await db.storage.from(MEDIA_BUCKET).createSignedUrl(item.object_path,300);
+      if(linkError)throw linkError;
+      return {...item,url:link.signedUrl};
+    }));
+  }
+  async function deleteMedia(mediaId:string,spaceId:string,path:string){
+    assertUuid(mediaId,'media ID');requireSpace(spaceId);
+    const {error}=await db.from('liveverse_media').delete().eq('id',mediaId).eq('space_id',spaceId);
+    if(error)throw error;
+    const {error:storageError}=await db.storage.from(MEDIA_BUCKET).remove([path]);
+    if(storageError)throw storageError;
   }
 
   async function createNote(spaceId: string, userId: string, title = 'Untitled note') {
@@ -189,17 +229,20 @@ export function createLiveverseClient(db: SupabaseClient) {
     return data;
   }
 
-  async function createSpaceChannel(spaceId: string, onDatabaseChange: (payload: any) => void,
-    onPresenceChange: (state: Record<string, unknown[]>) => void): Promise<RealtimeChannel> {
-    requireSpace(spaceId);
+  async function createSpaceChannel(spaceId: string, userId: string, onDatabaseChange: (payload: any) => void,
+    onPresenceChange: (state: Record<string, unknown[]>) => void,
+    onPointerChange: (payload: any) => void = () => undefined): Promise<RealtimeChannel> {
+    requireSpace(spaceId); assertUuid(userId, 'user ID');
     const channel = db.channel(`liveverse:${spaceId}`, {
-      config: { presence: { key: 'member' }, broadcast: { self: false, ack: true } }
+      config: { presence: { key: userId }, broadcast: { self: false, ack: true } }
     });
+    channel.on('postgres_changes', { event: '*', schema: 'public', table: 'liveverse_members', filter: `space_id=eq.${spaceId}` }, onDatabaseChange);
     channel.on('postgres_changes', { event: '*', schema: 'public', table: 'liveverse_notes', filter: `space_id=eq.${spaceId}` }, onDatabaseChange);
     channel.on('postgres_changes', { event: '*', schema: 'public', table: 'liveverse_tasks', filter: `space_id=eq.${spaceId}` }, onDatabaseChange);
     channel.on('postgres_changes', { event: '*', schema: 'public', table: 'liveverse_canvas', filter: `space_id=eq.${spaceId}` }, onDatabaseChange);
     channel.on('postgres_changes', { event: '*', schema: 'public', table: 'liveverse_media', filter: `space_id=eq.${spaceId}` }, onDatabaseChange);
     channel.on('presence', { event: 'sync' }, () => onPresenceChange(channel.presenceState()));
+    channel.on('broadcast', { event: 'pointer' }, (message: any) => onPointerChange(message?.payload || {}));
     const status = await new Promise<string>((resolve) => {
       channel.subscribe((s) => { if (s === 'SUBSCRIBED' || s === 'CHANNEL_ERROR' || s === 'TIMED_OUT' || s === 'CLOSED') resolve(s); });
     });
@@ -227,7 +270,7 @@ export function createLiveverseClient(db: SupabaseClient) {
     }});
   }
 
-  return { createSpace, inviteMember, leaveSpace, listSpaces, createNote, saveNote,
+  return { createSpace, inviteMember, leaveSpace, listMembers, removeMember, listSpaces, listNotes, loadCanvas, listMedia, deleteMedia, createNote, saveNote,
     listTasks, createTask, updateTask, deleteTask, saveCanvas, uploadMedia,
     createSpaceChannel, trackPresence, broadcastPointer };
 }
