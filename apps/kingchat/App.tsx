@@ -944,6 +944,7 @@ function GuftinApp() {
   const [liveverseView,setLiveverseView]=useState<'home'|'create'|'room'>('home');
   const [liveverseSpaces,setLiveverseSpaces]=useState<any[]>([]);
   const [liveverseSelected,setLiveverseSelected]=useState<any>(null);
+  const [liveverseSourceChat,setLiveverseSourceChat]=useState<any>(null);
   const [liveverseNotes,setLiveverseNotes]=useState<any[]>([]);
   const [liveverseTasks,setLiveverseTasks]=useState<any[]>([]);
   const [liveverseMedia,setLiveverseMedia]=useState<any[]>([]);
@@ -4854,8 +4855,8 @@ function GuftinApp() {
     if(!session?.user?.id||!liveverseName.trim())return;
     setLiveverseBusy(true);
     try{
-      const space=await liveverseClient.createSpace({name:liveverseName.trim(),description:liveverseDescription,scope:'chat',ownerId:session.user.id});
-      setLiveverseName('');setLiveverseDescription('');setLiveverseSpaces(items=>[space,...items]);setLiveverseSelected(space);setLiveverseView('room');
+      const space=await liveverseClient.createSpace({name:liveverseName.trim(),description:liveverseDescription,scope:liveverseSourceChat?.kind==='group'?'group':'chat',ownerId:session.user.id,sourceChatId:liveverseSourceChat?.id||null});
+      setLiveverseName('');setLiveverseDescription('');setLiveverseSourceChat(null);setLiveverseSpaces(items=>[space,...items]);setLiveverseSelected(space);setLiveverseView('room');
       setLiveverseNotes([]);setLiveverseTasks([]);setLiveverseMedia([]);setLiveverseRoomTab('notes');
     }catch(error:any){Alert.alert('Space not created',error?.message||'Please try again.');}
     finally{setLiveverseBusy(false);}
@@ -5104,6 +5105,7 @@ function GuftinApp() {
           <View style={{flexDirection:'row',alignItems:'center',gap:5}}><Text numberOfLines={1} style={{fontWeight:'900',fontSize:16,color:'#fff'}}>{active.name}</Text>{active.isVerified?<VerifiedBadge label={active.isOfficial?'Verified Guftin Official account':'Verified channel'}/>:null}</View>
           <Text style={{fontSize:11,color:'#e4fff1',marginTop:2}}>{active.kind==='channel'?(active.isOfficial?'Official Guftin announcements':active.isChannelOwner?'Your channel · publish updates':'Channel · read-only'):active.kind==='group'?'Tap for group info':outgoingCall?'Calling…':active.online?'● online':'Tap for contact info'}</Text>
         </Btn>
+        {active.kind!=='channel'?<Btn onPress={()=>{setLiveverseSourceChat({id:active.id,kind:active.kind,name:active.name});setLiveverseName(active.name+' Liveverse');setLiveverseView('create');setTab('Liveverse');}} style={{backgroundColor:'#ffffff20',borderRadius:22,width:43,height:48,alignItems:'center',justifyContent:'center',marginRight:3}}><Text style={{fontSize:20,color:'#fff',fontWeight:'900'}}>◎</Text><Text style={{fontSize:8,color:'#fff',fontWeight:'900'}}>LIVE</Text></Btn>:null}
         {active.kind!=='channel'?(outgoingCall?<Btn onPress={()=>void endCall(outgoingCall.id)} style={{backgroundColor:'#fde8e8',borderRadius:15,width:62,height:58,alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:'#f3c6c6'}}><Text style={{fontSize:11,fontWeight:'900',color:C.red}}>Cancel</Text><Text style={{fontSize:9,color:C.red}}>call</Text></Btn>:<>
           <Btn disabled={callBusy} onPress={()=>void startCall('voice')} style={{backgroundColor:'#087b4c',borderRadius:28,width:48,height:48,alignItems:'center',justifyContent:'center',opacity:callBusy?0.5:1,borderWidth:1,borderColor:'#42bf83'}}><Text style={{fontSize:20,color:C.green}}>☎</Text><Text style={{fontSize:10,fontWeight:'900',color:C.green}}>{active.kind==='group'?'Group call':'Call'}</Text></Btn>
           <Btn disabled={callBusy} onPress={()=>void startCall('video')} style={{backgroundColor:'#087b4c',borderRadius:28,width:48,height:48,alignItems:'center',justifyContent:'center',opacity:callBusy?0.5:1,borderWidth:1,borderColor:'#42bf83'}}><Text style={{fontSize:19,color:C.green}}>▣</Text><Text style={{fontSize:10,fontWeight:'900',color:C.green}}>Video</Text></Btn>
@@ -5391,7 +5393,7 @@ function GuftinApp() {
         <Btn onPress={()=>setLiveverseView('create')} style={{backgroundColor:'#7764e8',padding:12,borderRadius:12,alignItems:'center',marginTop:14}}><Text style={{color:'#fff',fontWeight:'900'}}>＋ Create shared space</Text></Btn>
       </View>
       {liveverseView==='create'?<View style={{backgroundColor:C.white,borderRadius:16,padding:14,borderWidth:1,borderColor:C.line,marginBottom:12}}>
-        <Text style={{fontSize:16,color:C.ink,fontWeight:'900'}}>Create Liveverse space</Text>
+        <Text style={{fontSize:16,color:C.ink,fontWeight:'900'}}>Create Liveverse space</Text>\n        {liveverseSourceChat?<Text style={{fontSize:10,color:C.green,fontWeight:'800',marginTop:6}}>Linked to {liveverseSourceChat.name}</Text>:null}
         <TextInput value={liveverseName} onChangeText={setLiveverseName} placeholder="Space name" maxLength={80} style={{backgroundColor:C.paper,padding:11,borderRadius:10,color:C.ink,marginTop:9}}/>
         <TextInput value={liveverseDescription} onChangeText={setLiveverseDescription} placeholder="Description (optional)" maxLength={500} style={{backgroundColor:C.paper,padding:11,borderRadius:10,color:C.ink,marginTop:7}}/>
         <Btn disabled={liveverseBusy||!liveverseName.trim()} onPress={()=>void createLiveverseSpace()} style={{backgroundColor:C.green,padding:11,borderRadius:10,alignItems:'center',marginTop:9}}><Text style={{color:'#fff',fontWeight:'900'}}>Create space</Text></Btn>
