@@ -23,5 +23,13 @@ Deno.serve(async(req:Request)=>{
  const bodyText="Open Guftin to accept the invitation and view shared memories.";
  const {error:notifyError}=await admin.from("magic_moment_notifications").insert({recipient_id:targetId,moment_id:momentId,notification_type:"invite",title,body:bodyText,safe_payload:{moment_id:momentId}});
  if(notifyError)return json({error:"Invitation notification could not be saved"},500);
+ try {
+  const pushResponse=await fetch(url+"/functions/v1/guftin-push",{
+   method:"POST",
+   headers:{"Authorization":auth,"apikey":anon,"Content-Type":"application/json"},
+   body:JSON.stringify({kind:"magic_moment",moment_id:momentId,notification_type:"invite"})
+  });
+  if(!pushResponse.ok)console.warn("Magic Moment invite push returned",pushResponse.status);
+ } catch(pushError) { console.warn("Magic Moment invite push unavailable",String(pushError)); }
  return json({ok:true});
 });
