@@ -6,6 +6,8 @@ create table if not exists public.holospace_rooms (
   name text not null check (char_length(btrim(name)) between 1 and 80),
   description text not null default '' check (char_length(description) <= 600),
   privacy text not null default 'private' check (privacy in ('private','public')),
+  source_chat_id uuid,
+  source_chat_kind text check (source_chat_kind in ('direct','group')),
   owner_id uuid not null references auth.users(id) on delete cascade,
   timezone text not null default 'UTC' check (char_length(timezone) between 1 and 64),
   created_at timestamptz not null default now(),
