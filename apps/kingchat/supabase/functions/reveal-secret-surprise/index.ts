@@ -27,9 +27,16 @@ Deno.serve(async(req:Request)=>{
  const {data:updated,error:updateError}=await admin.from("magic_moments").update({status:"revealed",revealed_at:now,updated_at:now}).eq("id",momentId).neq("status","revealed").select("id").maybeSingle();
  if(updateError)return json({error:"Could not reveal moment"},500);
  if(updated){
-  const {data:members}=await admin.from("magic_moment_members").select("user_id").eq("moment_id",momentId);
-  const recipients=[...new Set([moment.recipient_id,...(members||[]).map((m:any)=>m.user_id)].filter(Boolean))];
-  if(recipients.length)await admin.from("magic_moment_notifications").insert(recipients.map(recipient_id=>({recipient_id,moment_id:momentId,notification_type:"reveal",title:"A Magic Moment is ready",body:"Open Guftin to see the moment shared with you.",safe_payload:{moment_id:momentId}})));
+  // The database trigger creates one idempotent in-app notification per member.
+  // Dispatch the same event to registered devices without exposing the surprise payload.
+  try {
+   const pushResponse=await fetch(url+"/functions/v1/guftin-push",{
+    method:"POST",
+    headers:{"Authorization":auth,"apikey":anon,"Content-Type":"application/json"},
+    body:JSON.stringify({kind:"magic_moment",moment_id:momentId,notification_type:"reveal"})
+   });
+   if(!pushResponse.ok)console.warn("Magic Moment reveal push returned",pushResponse.status);
+  } catch(pushError) { console.warn("Magic Moment reveal push unavailable",String(pushError)); }
  }
  return json({revealed:true});
 });
