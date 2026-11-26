@@ -57,6 +57,7 @@ type PushBody = {
   status_id?: string;
   moment_id?: string;
   notification_type?: string;
+  recipient_id?: string;
 };
 
 Deno.serve(async (req: Request) => {
@@ -245,6 +246,7 @@ Deno.serve(async (req: Request) => {
       .select("recipient_id,title,body,notification_type")
       .eq("moment_id", moment.id);
     if (body.notification_type) query = query.eq("notification_type", body.notification_type);
+    if (body.recipient_id) query = query.eq("recipient_id", body.recipient_id);
     const { data: rows, error: notificationError } = await query.order("created_at", { ascending: false }).limit(100);
     if (notificationError) return json({ error: "Could not load Magic Moment recipients." }, 500);
     recipientIds = [...new Set((rows || []).map((row: any) => row.recipient_id).filter(Boolean))];
