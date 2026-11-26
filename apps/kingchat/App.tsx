@@ -5057,7 +5057,7 @@ function GuftinApp() {
           </>}
       </View>
       {attachmentTrayOpen&&active.kind!=='channel'?<View style={{flexDirection:'row',justifyContent:'space-around',alignItems:'center',paddingVertical:13,paddingHorizontal:5,backgroundColor:'#fff',borderTopWidth:1,borderColor:'#f0eee9',borderBottomLeftRadius:24,borderBottomRightRadius:24}}>{[{label:'Gallery',icon:'▧',color:'#7650d8',action:()=>void sendPhotosVideos()},{label:'Camera',icon:'◉',color:'#1878d8',action:()=>void (async()=>{const p=await ImagePicker.requestCameraPermissionsAsync();if(!p.granted){Alert.alert('Permission needed','Allow camera access to take a photo.');return;}const r=await ImagePicker.launchCameraAsync({mediaTypes:['images'],quality:.85});if(!r.canceled&&r.assets?.[0])await sendPhotosVideos(r.assets[0]);})()},{label:'Video',icon:'▶',color:'#dc4773',action:()=>void (async()=>{const p=await ImagePicker.requestCameraPermissionsAsync();if(!p.granted){Alert.alert('Permission needed','Allow camera access to record video.');return;}const r=await ImagePicker.launchCameraAsync({mediaTypes:['videos'],videoMaxDuration:60});if(!r.canceled&&r.assets?.[0])await sendPhotosVideos(r.assets[0]);})()},{label:'Voice',icon:'♩',color:'#12936b',action:()=>{setAttachmentTrayOpen(false);void (recording?stopVoiceRecording():startVoiceRecording());}},{label:'Stickers',icon:'☻',color:'#e88b16',action:()=>Alert.alert('Stickers','Choose an emoji sticker to send.',[{text:'😊',onPress:()=>{setDraft(v=>v+'😊');setAttachmentTrayOpen(false);}},{text:'❤️',onPress:()=>{setDraft(v=>v+'❤️');setAttachmentTrayOpen(false);}},{text:'😂',onPress:()=>{setDraft(v=>v+'😂');setAttachmentTrayOpen(false);}},{text:'Cancel',style:'cancel'}])}].map(item=><Btn key={item.label} onPress={()=>{setAttachmentTrayOpen(false);item.action();}} style={{alignItems:'center',minWidth:55}}><View style={{width:48,height:48,borderRadius:17,backgroundColor:item.color+'18',alignItems:'center',justifyContent:'center',marginBottom:5}}><Text style={{fontSize:23,color:item.color}}>{item.icon}</Text></View><Text style={{fontSize:11,color:C.ink,fontWeight:'700'}}>{item.label}</Text></Btn>)}</View>:null}
-    <Modal visible={chatDetailsOpen} animationType="slide" onRequestClose={()=>setChatDetailsOpen(false)}>
+    {chatDetailsOpen?<View style={{position:'absolute',left:0,right:0,top:0,bottom:0,zIndex:1200,elevation:30,backgroundColor:C.paper}}>setChatDetailsOpen(false)}>
       <SafeAreaView style={{flex:1,backgroundColor:C.paper}}>
         <StatusBar barStyle="dark-content"/>
         <View style={{height:58,backgroundColor:C.white,flexDirection:'row',alignItems:'center',paddingHorizontal:14,borderBottomWidth:1,borderColor:C.line}}>
@@ -5117,7 +5117,7 @@ function GuftinApp() {
           })()}
         </ScrollView>:<View style={{flex:1,alignItems:'center',justifyContent:'center',padding:30}}><Text style={{color:C.muted}}>No contact information available.</Text></View>}
       </SafeAreaView>
-    </Modal>
+    </View>:null}
 
       <ChatOptionsPopover visible={chatOptionsOpen} onClose={()=>setChatOptionsOpen(false)} topInset={insets.top}>
 
@@ -5140,7 +5140,7 @@ function GuftinApp() {
       {scheduleComposerOpen?<View style={{position:'absolute',left:0,right:0,top:0,bottom:0,zIndex:1000,elevation:30,backgroundColor:'#0009',justifyContent:'center',padding:18}}>
         <View style={{backgroundColor:C.white,borderRadius:22,padding:18,maxHeight:'88%'}}>
           <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}>
-            <View><Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>Schedule message</Text><Text style={{fontSize:11,color:C.muted,marginTop:4}}>This chat · Encrypted · Server scheduled</Text></View>
+            <View><Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>Schedule message</Text><Text style={{fontSize:11,color:C.muted,marginTop:4}}>This chat · Encrypted · Server scheduled</Text><Text style={{fontSize:10,color:C.muted,marginTop:3}}>Tap ➤ in the composer to send now, or schedule below.</Text></View>
             <Btn onPress={()=>{if(!scheduleBusy)setScheduleComposerOpen(false);}} style={{padding:7}}><Text style={{fontSize:24,color:C.muted}}>×</Text></Btn>
           </View>
           <TextInput value={scheduleDraft} onChangeText={setScheduleDraft} placeholder="Write your message…" multiline maxLength={4000} style={{minHeight:105,maxHeight:180,backgroundColor:C.paper,borderRadius:13,padding:12,color:C.ink,textAlignVertical:'top',marginTop:14}}/>
@@ -5472,7 +5472,7 @@ function GuftinApp() {
       </View>
     </Modal>
 
-    <Modal visible={editModalVisible} transparent animationType="fade" onRequestClose={()=>{if(!editBusy)setEditModalVisible(false);}}>
+    {editModalVisible?<View style={{position:'absolute',left:0,right:0,top:0,bottom:0,zIndex:1201,elevation:30,backgroundColor:C.paper}}>{if(!editBusy)setEditModalVisible(false);}}>
       <View style={{flex:1,backgroundColor:'#0009',justifyContent:'center',padding:22}}>
         <View style={{backgroundColor:C.white,borderRadius:20,padding:18}}>
           <Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>Edit message</Text>
@@ -5484,9 +5484,9 @@ function GuftinApp() {
           </View>
         </View>
       </View>
-    </Modal>
+    </View>:null}
 
-    <Modal visible={editHistoryVisible} animationType="slide" onRequestClose={()=>setEditHistoryVisible(false)}>
+    {editHistoryVisible?<View style={{position:'absolute',left:0,right:0,top:0,bottom:0,zIndex:1202,elevation:30,backgroundColor:C.paper}}>setEditHistoryVisible(false)}>
       <SafeAreaView style={{flex:1,backgroundColor:C.paper}}>
         <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',padding:18,backgroundColor:C.white,borderBottomWidth:1,borderColor:C.line}}>
           <Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>Message edit history</Text>
@@ -5504,9 +5504,9 @@ function GuftinApp() {
           </View>)}
         </ScrollView>
       </SafeAreaView>
-    </Modal>
+    </View>:null}
 
-    <Modal visible={pollCreateVisible} transparent animationType="fade" onRequestClose={()=>{if(!pollBusy)setPollCreateVisible(false);}}>
+    {pollCreateVisible?<View style={{position:'absolute',left:0,right:0,top:0,bottom:0,zIndex:1203,elevation:30,backgroundColor:C.paper}}>{if(!pollBusy)setPollCreateVisible(false);}}>
       <View style={{flex:1,backgroundColor:'#0009',justifyContent:'center',padding:22}}>
         <View style={{backgroundColor:C.white,borderRadius:20,padding:18}}>
           <Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>Create group poll</Text>
@@ -5517,9 +5517,9 @@ function GuftinApp() {
           <View style={{flexDirection:'row',justifyContent:'flex-end',gap:10,marginTop:8}}><Btn disabled={pollBusy} onPress={()=>setPollCreateVisible(false)} style={{padding:12}}><Text style={{color:C.muted,fontWeight:'800'}}>Cancel</Text></Btn><Btn disabled={pollBusy||!pollQuestion.trim()||pollOptionsText.split('\n').filter(x=>x.trim()).length<2} onPress={()=>void createGroupPoll()} style={{backgroundColor:C.green,paddingHorizontal:16,paddingVertical:12,borderRadius:11}}>{pollBusy?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Create poll</Text>}</Btn></View>
         </View>
       </View>
-    </Modal>
+    </View>:null}
 
-    <Modal visible={eventCreateVisible} transparent animationType="fade" onRequestClose={()=>{if(!eventBusy)setEventCreateVisible(false);}}>
+    {eventCreateVisible?<View style={{position:'absolute',left:0,right:0,top:0,bottom:0,zIndex:1204,elevation:30,backgroundColor:C.paper}}>{if(!eventBusy)setEventCreateVisible(false);}}>
       <View style={{flex:1,backgroundColor:'#0009',justifyContent:'center',padding:22}}>
         <View style={{backgroundColor:C.white,borderRadius:20,padding:18}}>
           <Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>Create group event</Text>
@@ -5532,9 +5532,9 @@ function GuftinApp() {
           <View style={{flexDirection:'row',justifyContent:'flex-end',gap:10,marginTop:14}}><Btn disabled={eventBusy} onPress={()=>setEventCreateVisible(false)} style={{padding:12}}><Text style={{color:C.muted,fontWeight:'800'}}>Cancel</Text></Btn><Btn disabled={eventBusy||!eventTitle.trim()||!eventStartsAt.trim()} onPress={()=>void createGroupEvent()} style={{backgroundColor:C.green,paddingHorizontal:16,paddingVertical:12,borderRadius:11}}>{eventBusy?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Create event</Text>}</Btn></View>
         </View>
       </View>
-    </Modal>
+    </View>:null}
 
-    <Modal visible={scheduleComposerOpen} transparent animationType="fade" onRequestClose={()=>{if(!scheduleBusy)setScheduleComposerOpen(false);}}>
+    {scheduleComposerOpen?<View style={{position:'absolute',left:0,right:0,top:0,bottom:0,zIndex:1205,elevation:30,backgroundColor:C.paper}}>{if(!scheduleBusy)setScheduleComposerOpen(false);}}>
       <View style={{flex:1,backgroundColor:'#0009',justifyContent:'center',padding:18}}><View style={{backgroundColor:C.white,borderRadius:22,padding:18,maxHeight:'88%'}}>
         <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}>
           <View><Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>Schedule message</Text><Text style={{fontSize:11,color:C.muted,marginTop:4}}>Encrypted · Sent automatically by Guftin</Text></View>
@@ -5565,9 +5565,9 @@ function GuftinApp() {
           </View>
         </View>
       </View></View>
-    </Modal>
+    </View>:null}
 
-    <Modal visible={scheduledMessagesOpen} animationType="slide" onRequestClose={()=>setScheduledMessagesOpen(false)}>
+    {scheduledMessagesOpen?<View style={{position:'absolute',left:0,right:0,top:0,bottom:0,zIndex:1206,elevation:30,backgroundColor:C.paper}}>setScheduledMessagesOpen(false)}>
       <SafeAreaView style={{flex:1,backgroundColor:C.paper}}>
         <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',padding:18,backgroundColor:C.white,borderBottomWidth:1,borderColor:C.line}}><View><Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>Scheduled messages</Text><Text style={{fontSize:11,color:C.muted,marginTop:3}}>Encrypted messages waiting for delivery</Text></View><Btn onPress={()=>setScheduledMessagesOpen(false)} style={{padding:8}}><Text style={{fontSize:25,color:C.ink}}>×</Text></Btn></View>
         <Btn onPress={()=>void loadScheduledMessages()} disabled={scheduledMessagesLoading} style={{margin:14,backgroundColor:C.green,padding:12,borderRadius:11,alignItems:'center'}}>{scheduledMessagesLoading?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Refresh</Text>}</Btn>
@@ -5576,7 +5576,7 @@ function GuftinApp() {
           {scheduledMessages.map(item=><View key={item.id} style={{backgroundColor:C.white,borderRadius:14,borderWidth:1,borderColor:C.line,padding:14}}><Text style={{color:C.ink,fontWeight:'900'}}>{new Date(item.scheduled_at).toLocaleString()}</Text><Text style={{color:item.delivery_status==='failed'?C.red:C.green,fontSize:11,fontWeight:'900',marginTop:5}}>{String(item.delivery_status).toUpperCase()}</Text>{item.last_error?<Text style={{color:C.red,fontSize:11,marginTop:5}}>{item.last_error}</Text>:null}{item.delivery_status==='queued'||item.delivery_status==='failed'?<Btn onPress={()=>void cancelScheduledMessage(item.id)} style={{alignSelf:'flex-end',paddingHorizontal:12,paddingVertical:8,backgroundColor:'#fde8e8',borderRadius:9,marginTop:8}}><Text style={{color:C.red,fontWeight:'900',fontSize:11}}>Cancel</Text></Btn>:null}</View>)}
         </ScrollView>
       </SafeAreaView>
-    </Modal>
+    </View>:null}
 
     <Modal visible={advancedCenterOpen} animationType="slide" onRequestClose={()=>setAdvancedCenterOpen(false)}>
       <SafeAreaView style={{flex:1,backgroundColor:C.paper}}>
