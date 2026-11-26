@@ -5057,7 +5057,7 @@ function GuftinApp() {
       {text:'Cancel',style:'cancel'},
       {text:isOwner?'Delete':'Leave',style:'destructive',onPress:async()=>{
         try{
-          if(isOwner)await holoClient.deleteRoom(holoSelected.id);else await holoClient.leaveRoom(holoSelected.id,session.user.id);
+          if(isOwner){const gallery=await holoClient.listGallery(holoSelected.id);for(const item of gallery)await holoClient.deleteGalleryItem(item.id,item.object_path);await holoClient.deleteRoom(holoSelected.id);}else await holoClient.leaveRoom(holoSelected.id,session.user.id);
           setHoloSelected(null);setHoloView('mine');await loadHoloSpaces();
         }catch(error:any){Alert.alert('Action failed',error?.message||'Please try again.');}
       }}
