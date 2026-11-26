@@ -185,8 +185,11 @@ using (private.liveverse_is_member(space_id) or user_id = (select auth.uid()));
 drop policy if exists liveverse_members_add_manager_or_owner on public.liveverse_members;
 create policy liveverse_members_add_manager_or_owner on public.liveverse_members for insert to authenticated
 with check (
-  exists (select 1 from public.liveverse_spaces s where s.id = space_id and s.owner_id = (select auth.uid()))
-  or private.liveverse_is_manager(space_id)
+  (role = 'owner' and private.liveverse_is_owner(space_id))
+  or (role <> 'owner' and (
+    exists (select 1 from public.liveverse_spaces s where s.id = space_id and s.owner_id = (select auth.uid()))
+    or private.liveverse_is_manager(space_id)
+  ))
 );
 drop policy if exists liveverse_members_remove_manager_or_self on public.liveverse_members;
 create policy liveverse_members_remove_manager_or_self on public.liveverse_members for delete to authenticated
