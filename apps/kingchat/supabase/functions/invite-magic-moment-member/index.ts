@@ -27,7 +27,7 @@ Deno.serve(async(req:Request)=>{
   const pushResponse=await fetch(url+"/functions/v1/guftin-push",{
    method:"POST",
    headers:{"Authorization":auth,"apikey":anon,"Content-Type":"application/json"},
-   body:JSON.stringify({kind:"magic_moment",moment_id:momentId,notification_type:"invite"})
+   body:JSON.stringify({kind:"magic_moment",moment_id:momentId,notification_type:"invite",recipient_id:targetId})
   });
   if(!pushResponse.ok)console.warn("Magic Moment invite push returned",pushResponse.status);
  } catch(pushError) { console.warn("Magic Moment invite push unavailable",String(pushError)); }
