@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - feature/guftin-20-feature-upgrade
+      - feature/guftin-liveverse
+      - feature/guftin-holospace
     paths:
       - "apps/kingchat/**"
       - ".github/workflows/guftin-typecheck.yml"
@@ -22,7 +24,7 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v4
         with:
-          ref: feature/guftin-20-feature-upgrade
+          ref: ${{ github.ref }}
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
