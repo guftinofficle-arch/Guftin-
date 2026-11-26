@@ -38,7 +38,13 @@ export function createHoloSpaceClient(db:SupabaseClient){
     if(error)throw error; return data as HoloRoom;
   }
   async function listMyRooms():Promise<HoloRoom[]>{
-    const {data,error}=await db.from('holospace_rooms').select('*').is('archived_at',null).order('updated_at',{ascending:false}).limit(100);
+    const {data:members,error:memberError}=await db.from('holospace_members')
+      .select('room_id').eq('invitation_status','active').limit(300);
+    if(memberError)throw memberError;
+    const ids=(members||[]).map((row:any)=>row.room_id);
+    if(!ids.length)return [];
+    const {data,error}=await db.from('holospace_rooms').select('*').in('id',ids)
+      .is('archived_at',null).order('updated_at',{ascending:false}).limit(100);
     if(error)throw error; return (data||[]) as HoloRoom[];
   }
   async function listInvitations(){
