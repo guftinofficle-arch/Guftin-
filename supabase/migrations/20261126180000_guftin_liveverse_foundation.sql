@@ -28,7 +28,7 @@ returns trigger
 language plpgsql
 security definer
 set search_path = ''
-as $
+as $$
 begin
   if (select auth.uid()) is distinct from new.owner_id then
     raise exception 'Liveverse space owner must match the authenticated user';
@@ -38,7 +38,7 @@ begin
   on conflict (space_id, user_id) do nothing;
   return new;
 end;
-$;
+$$;
 revoke all on function private.liveverse_add_owner_member() from public, anon, authenticated;
 drop trigger if exists liveverse_space_owner_membership on public.liveverse_spaces;
 create trigger liveverse_space_owner_membership
@@ -127,12 +127,12 @@ language sql
 stable
 security definer
 set search_path = ''
-as $
+as $$
   select exists (
     select 1 from public.liveverse_spaces s
     where s.id = p_space_id and s.owner_id = (select auth.uid())
   );
-$;
+$$;
 
 create or replace function private.liveverse_is_manager(p_space_id uuid)
 returns boolean
