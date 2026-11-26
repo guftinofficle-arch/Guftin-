@@ -5063,6 +5063,11 @@ function GuftinApp() {
     if(!holoSelected||!session?.user?.id)return;
     setHoloSaving(true);
     try{
+      const permission=await Audio.getPermissionsAsync();
+      if(!permission.granted){
+        const requested=await Audio.requestPermissionsAsync();
+        if(!requested.granted)throw new Error('HoloSpace needs microphone permission to join a voice hangout.');
+      }
       const {data,error}=await supabase.functions.invoke('holospace-livekit-token',{body:{room_id:holoSelected.id}});
       if(error)throw error;
       if(!data?.server_url||!data?.participant_token)throw new Error(data?.error||'The HoloSpace voice service is not configured.');
