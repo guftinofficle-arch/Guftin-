@@ -1,13 +1,13 @@
 # Guftin Magic Moments
 
-Feature branch: `feature/guftin-magic-moments`
+Integrated branch: `feature/guftin-all-three-features`
 
 ## Included experiences
 - **Birthday Surprise** — private birthday moment with a server-enforced reveal date.
 - **Memory Capsule** — a shared, member-only collection of messages and media.
 - **Future Message** — an end-to-end encrypted message queued in Guftin's existing `kc_scheduled_messages` pipeline and delivered by the existing Postgres cron worker.
 - **Secret Surprise** — creator-only content until its scheduled reveal; reveal is enforced by RLS and a server-side minute scheduler.
-- **Together Moments** — shared text, photo/video contributions, comments and reactions.
+- **Together Moments** — shared text, photo/video and voice-note contributions, comments and reactions.
 - **Friendship Anniversary** — a dedicated moment type for a shared milestone and memory collection.
 
 ## App behavior
@@ -29,6 +29,6 @@ Feature branch: `feature/guftin-magic-moments`
 
 ## Still to verify
 - Two-account RLS checks for invite acceptance and pre-reveal secrecy.
-- Actual Android media picker/upload and notification display.
+- Actual Android media picker/upload, voice-note recording/playback and notification display.
 - End-to-end scheduled delivery with real registered E2EE devices.
 - Combined Android APK startup and two-phone tests after all three features are integrated.
