@@ -37,6 +37,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Guftin-Web-${{ github.run_number }}
-          path: .expo-web-export
+          path: apps/kingchat/.expo-web-export
           if-no-files-found: error
           retention-days: 14
