@@ -4329,8 +4329,6 @@ function GuftinApp() {
             if(metadataError)console.warn('Google profile defaults could not be saved:',metadataError.message);
           }
         }
-      }else if(result.type==='error'){
-        throw new Error('Google sign-in was cancelled or could not be completed. Please try again.');
       }
     }catch(e:any){
       setAuthError(e?.message||'Google sign-in failed. Check your connection and try again.');
