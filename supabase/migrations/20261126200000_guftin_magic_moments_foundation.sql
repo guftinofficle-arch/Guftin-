@@ -149,7 +149,7 @@ drop policy if exists magic_moments_member_read on public.magic_moments;
 create policy magic_moments_member_read on public.magic_moments for select to authenticated using (
  creator_id=(select auth.uid()) or (
   private.magic_moment_is_member(id) and (
-   kind not in ('secret_surprise') or recipient_id is distinct from (select auth.uid()) or reveal_at is null or reveal_at<=now() or status='revealed'
+   kind not in ('secret_surprise','birthday','future_message') or recipient_id is distinct from (select auth.uid()) or (kind='future_message' and status not in ('scheduled','draft')) or (kind<>'future_message' and (reveal_at is null or reveal_at<=now() or status='revealed'))
   )
  )
 );
@@ -175,7 +175,7 @@ drop policy if exists magic_items_read_member on public.magic_moment_items;
 create policy magic_items_read_member on public.magic_moment_items for select to authenticated using (
  private.magic_moment_is_member(moment_id) and exists(
   select 1 from public.magic_moments mm where mm.id=moment_id and (
-   mm.kind<>'secret_surprise' or mm.recipient_id is distinct from (select auth.uid()) or mm.reveal_at is null or mm.reveal_at<=now() or mm.status='revealed'
+   mm.kind not in ('secret_surprise','birthday','future_message') or mm.recipient_id is distinct from (select auth.uid()) or (mm.kind='future_message' and mm.status not in ('scheduled','draft')) or (mm.kind<>'future_message' and (mm.reveal_at is null or mm.reveal_at<=now() or mm.status='revealed'))
   )
  )
 );
