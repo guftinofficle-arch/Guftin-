@@ -182,9 +182,9 @@ export function createHoloSpaceClient(db:SupabaseClient){
     id(roomId,'room');const {data,error}=await db.from('holospace_events').select('*').eq('room_id',roomId).order('starts_at').limit(100);
     if(error)throw error;return (data||[]) as HoloEvent[];
   }
-  async function subscribeRoom(roomId:string,onChange:(payload:any)=>void,onPresence:(state:Record<string,unknown[]>)=>void){
-    id(roomId,'room');
-    const channel=db.channel('holospace:'+roomId,{config:{presence:{key:'member'},broadcast:{self:false,ack:true}}});
+  async function subscribeRoom(roomId:string,userId:string,onChange:(payload:any)=>void,onPresence:(state:Record<string,unknown[]>)=>void){
+    id(roomId,'room');id(userId,'user');
+    const channel=db.channel('holospace:'+roomId,{config:{presence:{key:userId},broadcast:{self:false,ack:true}}});
     for(const table of ['holospace_rooms','holospace_members','holospace_memories','holospace_gallery','holospace_avatars','holospace_themes','holospace_events','holospace_activity']){
       channel.on('postgres_changes',{event:'*',schema:'public',table,filter:'room_id=eq.'+roomId},onChange);
     }
