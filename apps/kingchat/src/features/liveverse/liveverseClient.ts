@@ -236,6 +236,7 @@ export function createLiveverseClient(db: SupabaseClient) {
     const channel = db.channel(`liveverse:${spaceId}`, {
       config: { presence: { key: userId }, broadcast: { self: false, ack: true } }
     });
+    channel.on('postgres_changes', { event: '*', schema: 'public', table: 'liveverse_members', filter: `space_id=eq.${spaceId}` }, onDatabaseChange);
     channel.on('postgres_changes', { event: '*', schema: 'public', table: 'liveverse_notes', filter: `space_id=eq.${spaceId}` }, onDatabaseChange);
     channel.on('postgres_changes', { event: '*', schema: 'public', table: 'liveverse_tasks', filter: `space_id=eq.${spaceId}` }, onDatabaseChange);
     channel.on('postgres_changes', { event: '*', schema: 'public', table: 'liveverse_canvas', filter: `space_id=eq.${spaceId}` }, onDatabaseChange);
