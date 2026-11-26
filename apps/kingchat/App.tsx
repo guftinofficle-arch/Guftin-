@@ -937,6 +937,36 @@ function VerifiedBadge({label='Verified account'}:{label?:string}) {
   return <Text accessibilityRole="image" accessibilityLabel={label} style={{color:'#2387e8',fontWeight:'900',fontSize:14,marginLeft:3}}>✓</Text>;
 }
 
+function HoloVoiceControls({onLeave,onConnected}:any){
+  const participants=useParticipants();
+  const {localParticipant,isMicrophoneEnabled}=useLocalParticipant();
+  const room=useRoomContext();
+  const [busy,setBusy]=useState(false);
+  const [connected,setConnected]=useState(false);
+  useEffect(()=>{
+    let active=true;
+    void startGuftinCallAudioSession().then(()=>{if(active)setConnected(true);}).catch((error:any)=>Alert.alert('Audio unavailable',error?.message||'Could not start the microphone audio session.'));
+    return ()=>{active=false;void stopGuftinCallAudioSession();};
+  },[]);
+  const toggleMic=async()=>{
+    if(busy)return;setBusy(true);
+    try{await localParticipant.setMicrophoneEnabled(!isMicrophoneEnabled);}
+    catch(error:any){Alert.alert('Microphone unavailable',error?.message||'Check microphone permission.');}
+    finally{setBusy(false);}
+  };
+  const leave=async()=>{try{await room.disconnect();}finally{await stopGuftinCallAudioSession();onLeave?.();}};
+  return <View style={{flex:1,backgroundColor:'#090d24',padding:24,justifyContent:'center',alignItems:'center'}}>
+    <Text style={{fontSize:22,fontWeight:'900',color:'#fff'}}>HoloSpace Voice Hangout</Text>
+    <Text style={{fontSize:12,color:'#aab5d8',marginTop:7}}>{connected?'Connected audio room':'Connecting audio…'} · {participants.length} participant(s)</Text>
+    <View style={{width:'100%',backgroundColor:'#151b3a',borderRadius:18,padding:16,marginTop:24}}>
+      {participants.map((p:any)=><Text key={p.identity} style={{color:'#fff',paddingVertical:7}}>● {p.name||p.identity}{p.isLocal?' (You)':''}</Text>)}
+    </View>
+    <View style={{flexDirection:'row',gap:12,marginTop:25}}>
+      <Btn disabled={busy||!connected} onPress={()=>void toggleMic()} style={{padding:15,borderRadius:14,backgroundColor:isMicrophoneEnabled?'#2b9a75':'#8b344b'}}><Text style={{color:'#fff',fontWeight:'900'}}>{isMicrophoneEnabled?'Mute microphone':'Unmute microphone'}</Text></Btn>
+      <Btn onPress={()=>void leave()} style={{padding:15,borderRadius:14,backgroundColor:'#bd4055'}}><Text style={{color:'#fff',fontWeight:'900'}}>Leave</Text></Btn>
+    </View>
+  </View>;
+}
 function GuftinApp() {
   const insets=useSafeAreaInsets();
   const [tab,setTab]=useState('Chats');
@@ -945,6 +975,7 @@ function GuftinApp() {
   const [holoRooms,setHoloRooms]=useState<any[]>([]);
   const [holoInvites,setHoloInvites]=useState<any[]>([]);
   const [holoSelected,setHoloSelected]=useState<any>(null);
+  const [holoVoiceSession,setHoloVoiceSession]=useState<any>(null);
   const [holoSourceChat,setHoloSourceChat]=useState<any>(null);
   const [holoMemories,setHoloMemories]=useState<any[]>([]);
   const [holoGallery,setHoloGallery]=useState<any[]>([]);
@@ -4893,6 +4924,17 @@ function GuftinApp() {
     try{await holoClient.saveTheme({roomId:holoSelected.id,userId:session.user.id,themeKey,accentColor:themeKey==='ocean'?'#2476D2':themeKey==='sunset'?'#D45B42':themeKey==='forest'?'#16845D':'#0B9B72'});Alert.alert('Theme saved','Room appearance has been updated.');}
     catch(error:any){Alert.alert('Theme not saved',error?.message||'Only the room owner can change the theme.');}
   };
+  const joinHoloVoiceRoom=async()=>{
+    if(!holoSelected||!session?.user?.id)return;
+    setHoloSaving(true);
+    try{
+      const {data,error}=await supabase.functions.invoke('holospace-livekit-token',{body:{room_id:holoSelected.id}});
+      if(error)throw error;
+      if(!data?.server_url||!data?.participant_token)throw new Error(data?.error||'The HoloSpace voice service is not configured.');
+      setHoloVoiceSession({serverUrl:data.server_url,token:data.participant_token});
+    }catch(error:any){Alert.alert('Voice room unavailable',error?.message||'Deploy the HoloSpace token function and configure LiveKit secrets.');}
+    finally{setHoloSaving(false);}
+  };
   const inviteHoloChatParticipants=async()=>{
     if(!holoSelected||!session?.user?.id||holoSelected.owner_id!==session.user.id){Alert.alert('Owner access required','Only the room owner can invite members.');return;}
     if(!holoSelected.source_chat_id){Alert.alert('No linked chat','This room was not created from a Guftin chat.');return;}
@@ -5420,6 +5462,9 @@ function GuftinApp() {
           <Btn disabled={holoSaving} onPress={()=>void saveHoloRoomSettings()} style={{backgroundColor:C.green,padding:10,borderRadius:10,alignItems:'center'}}><Text style={{color:'#fff',fontWeight:'900'}}>Save room settings</Text></Btn>
         </View>:<Text style={{fontSize:10,color:C.muted,marginTop:5}}>Only the room owner can change room details and privacy.</Text>}
         <Btn onPress={leaveOrDeleteHoloRoom} style={{alignSelf:'flex-start',marginTop:12,padding:8,backgroundColor:C.paper,borderRadius:9}}><Text style={{fontSize:10,color:C.red,fontWeight:'900'}}>{holoSelected.owner_id===session?.user?.id?'Delete room':'Leave room'}</Text></Btn>
+        <Btn disabled={holoSaving} onPress={()=>void joinHoloVoiceRoom()} style={{backgroundColor:'#17105c',padding:13,borderRadius:12,alignItems:'center',marginTop:12}}>
+          <Text style={{color:'#fff',fontWeight:'900'}}>Join Live Voice Hangout</Text>
+        </Btn>
         <Text style={{fontSize:15,fontWeight:'900',color:C.ink,marginTop:18}}>Memory Wall</Text>
         <TextInput value={holoMemoryDraft} onChangeText={setHoloMemoryDraft} placeholder="Write a memory to share…" multiline maxLength={5000} style={{backgroundColor:C.paper,borderRadius:12,padding:12,minHeight:75,textAlignVertical:'top',color:C.ink,marginTop:8}}/>
         <Btn disabled={holoSaving||!holoMemoryDraft.trim()} onPress={()=>void addHoloMemory()} style={{backgroundColor:C.green,padding:11,borderRadius:11,alignItems:'center',marginTop:8}}><Text style={{color:'#fff',fontWeight:'900'}}>＋ Save memory</Text></Btn>
@@ -5456,6 +5501,14 @@ function GuftinApp() {
         {holoInvites.length===0?<Text style={{color:C.muted,textAlign:'center',padding:22}}>You have no pending room invitations.</Text>:holoInvites.map((invite:any)=><View key={invite.room_id} style={{backgroundColor:C.white,borderRadius:14,padding:13,marginBottom:8,borderWidth:1,borderColor:C.line}}><Text style={{fontWeight:'900',color:C.ink}}>{invite.holospace_rooms?.name||'HoloSpace invitation'}</Text><Text style={{fontSize:10,color:C.muted,marginTop:4}}>Invited to join a shared room</Text><Btn onPress={()=>void acceptHoloInvite(invite.room_id)} style={{backgroundColor:C.green,padding:10,borderRadius:10,alignItems:'center',marginTop:9}}><Text style={{color:'#fff',fontWeight:'900'}}>Accept invitation</Text></Btn></View>)}
       </View>:null}
     </ScrollView>:null}
+    <Modal visible={!!holoVoiceSession} animationType="slide" presentationStyle="fullScreen" onRequestClose={()=>setHoloVoiceSession(null)}>
+      {holoVoiceSession?<LiveKitRoom serverUrl={holoVoiceSession.serverUrl} token={holoVoiceSession.token} connect={true} audio={true} video={false}
+        onConnected={()=>console.info('HoloSpace voice connected')}
+        onDisconnected={()=>{void stopGuftinCallAudioSession();setHoloVoiceSession(null);}}
+        onError={(error:any)=>{Alert.alert('Voice connection failed',error?.message||'Could not connect to the room.');setHoloVoiceSession(null);}}>
+        <HoloVoiceControls onLeave={()=>setHoloVoiceSession(null)}/>
+      </LiveKitRoom>:null}
+    </Modal>
     {tab==='Updates'?<ScrollView contentContainerStyle={{padding:20,paddingBottom:30}}>
       <View style={{backgroundColor:C.paper,borderRadius:20,padding:18,marginBottom:18}}>
         <Text style={{fontSize:18,fontWeight:'900',color:C.ink}}>Your status</Text>
