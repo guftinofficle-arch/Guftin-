@@ -23,6 +23,28 @@ create table if not exists public.liveverse_members (
   primary key (space_id, user_id)
 );
 
+create or replace function private.liveverse_add_owner_member()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $
+begin
+  if (select auth.uid()) is distinct from new.owner_id then
+    raise exception 'Liveverse space owner must match the authenticated user';
+  end if;
+  insert into public.liveverse_members(space_id, user_id, role)
+  values (new.id, new.owner_id, 'owner')
+  on conflict (space_id, user_id) do nothing;
+  return new;
+end;
+$;
+revoke all on function private.liveverse_add_owner_member() from public, anon, authenticated;
+drop trigger if exists liveverse_space_owner_membership on public.liveverse_spaces;
+create trigger liveverse_space_owner_membership
+after insert on public.liveverse_spaces
+for each row execute function private.liveverse_add_owner_member();
+
 create table if not exists public.liveverse_notes (
   id uuid primary key default gen_random_uuid(),
   space_id uuid not null references public.liveverse_spaces(id) on delete cascade,
@@ -168,7 +190,10 @@ with check (
 );
 drop policy if exists liveverse_members_remove_manager_or_self on public.liveverse_members;
 create policy liveverse_members_remove_manager_or_self on public.liveverse_members for delete to authenticated
-using (user_id = (select auth.uid()) or private.liveverse_is_manager(space_id));
+using (
+  (user_id = (select auth.uid()) and role <> 'owner')
+  or (private.liveverse_is_manager(space_id) and user_id <> (select owner_id from public.liveverse_spaces s where s.id = space_id))
+);
 drop policy if exists liveverse_members_update_manager on public.liveverse_members;
 create policy liveverse_members_update_manager on public.liveverse_members for update to authenticated
 using (private.liveverse_is_owner(space_id))
