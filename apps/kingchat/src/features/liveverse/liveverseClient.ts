@@ -59,6 +59,17 @@ export function createLiveverseClient(db: SupabaseClient) {
     if (error) throw error;
   }
 
+  async function listMembers(spaceId:string){
+    requireSpace(spaceId);
+    const {data,error}=await db.from('liveverse_members').select('space_id,user_id,role,joined_at').eq('space_id',spaceId).order('joined_at',{ascending:true}).limit(200);
+    if(error)throw error;return data||[];
+  }
+  async function removeMember(spaceId:string,userId:string){
+    requireSpace(spaceId);assertUuid(userId,'user ID');
+    const {error}=await db.from('liveverse_members').delete().eq('space_id',spaceId).eq('user_id',userId);
+    if(error)throw error;
+  }
+
   async function leaveSpace(spaceId: string, userId: string) {
     requireSpace(spaceId); assertUuid(userId, 'user ID');
     const { error } = await db.from('liveverse_members')
@@ -258,7 +269,7 @@ export function createLiveverseClient(db: SupabaseClient) {
     }});
   }
 
-  return { createSpace, inviteMember, leaveSpace, listSpaces, listNotes, loadCanvas, listMedia, deleteMedia, createNote, saveNote,
+  return { createSpace, inviteMember, leaveSpace, listMembers, removeMember, listSpaces, listNotes, loadCanvas, listMedia, deleteMedia, createNote, saveNote,
     listTasks, createTask, updateTask, deleteTask, saveCanvas, uploadMedia,
     createSpaceChannel, trackPresence, broadcastPointer };
 }
