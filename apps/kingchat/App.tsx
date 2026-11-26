@@ -4973,11 +4973,16 @@ function GuftinApp() {
     if(!liveverseSelected)return;
     setLiveverseBusy(true);setLiveverseVoiceConnected(false);
     try{
+      if(Platform.OS!=='web'){
+        const permission=await Audio.requestPermissionsAsync();
+        if(!permission.granted)throw new Error('Microphone permission is required to join the voice room.');
+      }
       const {data,error}=await supabase.functions.invoke('liveverse-livekit-token',{body:{space_id:liveverseSelected.id}});
       if(error)throw error;
       if(!data?.server_url||!data?.participant_token)throw new Error(data?.error||'The Liveverse voice service is not configured.');
+      await startGuftinCallAudioSession();
       setLiveverseVoiceSession({serverUrl:data.server_url,token:data.participant_token});
-    }catch(error:any){Alert.alert('Voice room unavailable',error?.message||'Deploy the Liveverse token function and configure LiveKit secrets.');}
+    }catch(error:any){await stopGuftinCallAudioSession();Alert.alert('Voice room unavailable',error?.message||'Check microphone permission, Liveverse deployment and LiveKit settings.');}
     finally{setLiveverseBusy(false);}
   };
   const inviteLiveverseChatMembers=async()=>{
