@@ -984,6 +984,9 @@ function GuftinApp() {
   const liveverseCurrentStrokeRef=useRef('');
   const [liveverseBusy,setLiveverseBusy]=useState(false);
   const [liveversePresence,setLiveversePresence]=useState<any[]>([]);
+  const [liveversePointers,setLiveversePointers]=useState<any[]>([]);
+  const liveverseChannelRef=useRef<any>(null);
+  const liveverseLastPointerSentRef=useRef(0);
   const [liveverseVoiceSession,setLiveverseVoiceSession]=useState<any>(null);
   const activeTabRef=useRef(tab);
   activeTabRef.current=tab;
@@ -4989,10 +4992,15 @@ function GuftinApp() {
         if(!active)return;setLiveverseNotes(notes);setLiveverseTasks(tasks);setLiveverseMedia(media);if(canvas?.document){setLiveverseCanvasDraft(JSON.stringify(canvas.document,null,2));if(Array.isArray(canvas.document.strokes)){liveverseCanvasStrokesRef.current=canvas.document.strokes;setLiveverseCanvasStrokes(canvas.document.strokes);}}
       }catch(error:any){if(active)console.warn('Liveverse refresh failed:',error?.message||error);}
     };
-    void liveverseClient.createSpaceChannel(liveverseSelected.id,session.user.id,()=>{void refresh();},state=>{if(active)setLiveversePresence(Object.values(state).flat() as any[]);})
-      .then(async joined=>{if(!active){await supabase.removeChannel(joined);return;}channel=joined;await liveverseClient.trackPresence(joined,session.user.id,profile?.display_name||profile?.username||'Guftin member');})
+    void liveverseClient.createSpaceChannel(liveverseSelected.id,session.user.id,()=>{void refresh();},state=>{if(active)setLiveversePresence(Object.values(state).flat() as any[]);},pointer=>{
+      if(!active||pointer?.user_id===session.user.id||!Number.isFinite(pointer?.x)||!Number.isFinite(pointer?.y))return;
+      const point={user_id:String(pointer.user_id),display_name:String(pointer.display_name||'Guftin member').slice(0,60),x:Math.max(0,Math.min(1,pointer.x)),y:Math.max(0,Math.min(1,pointer.y)),sent_at:Number(pointer.sent_at)||Date.now()};
+      setLiveversePointers(items=>[...items.filter(item=>item.user_id!==point.user_id),point]);
+      setTimeout(()=>{if(active)setLiveversePointers(items=>items.filter(item=>item.user_id!==point.user_id||Date.now()-item.sent_at<2500));},2600);
+    })
+      .then(async joined=>{if(!active){await supabase.removeChannel(joined);return;}channel=joined;liveverseChannelRef.current=joined;await liveverseClient.trackPresence(joined,session.user.id,profile?.display_name||profile?.username||'Guftin member');})
       .catch((error:any)=>{if(active)console.warn('Liveverse realtime unavailable:',error?.message||error);});
-    return ()=>{active=false;setLiveversePresence([]);if(channel)void supabase.removeChannel(channel);};
+    return ()=>{active=false;liveverseChannelRef.current=null;setLiveversePresence([]);setLiveversePointers([]);if(channel)void supabase.removeChannel(channel);};
   },[tab,liveverseView,liveverseSelected?.id,session?.user?.id,liveverseClient,profile?.display_name,profile?.username]);
   const persistLiveverseCanvas=async(strokes:any[]=liveverseCanvasStrokesRef.current)=>{
     if(!liveverseSelected||!session?.user?.id)return;
@@ -5006,12 +5014,20 @@ function GuftinApp() {
     liveverseCanvasStrokesRef.current=[];setLiveverseCanvasStrokes([]);
     await persistLiveverseCanvas([]);
   };
+  const broadcastLiveversePointer=(x:number,y:number)=>{
+    const channel=liveverseChannelRef.current;
+    if(!channel||!session?.user?.id)return;
+    const now=Date.now();if(now-liveverseLastPointerSentRef.current<80)return;
+    liveverseLastPointerSentRef.current=now;
+    void liveverseClient.broadcastPointer(channel,{userId:session.user.id,displayName:profile?.display_name||profile?.username||'Guftin member',x:Math.max(0,Math.min(1,x/liveverseCanvasWidth)),y:Math.max(0,Math.min(1,y/200))}).catch((error:any)=>console.warn('Liveverse pointer broadcast failed:',error?.message||error));
+  };
   const liveverseCanvasPanResponder=useMemo(()=>PanResponder.create({
     onStartShouldSetPanResponder:()=>true,
     onMoveShouldSetPanResponder:()=>true,
     onPanResponderGrant:(event:any)=>{
       const x=Math.max(0,Math.min(300,event.nativeEvent.locationX*300/liveverseCanvasWidth));
       const y=Math.max(0,Math.min(200,event.nativeEvent.locationY));
+      broadcastLiveversePointer(x,y);
       const d='M '+x.toFixed(1)+' '+y.toFixed(1);
       liveverseCurrentStrokeRef.current=d;
       const next=[...liveverseCanvasStrokesRef.current,{d,color:liveverseCanvasColor}];
@@ -5021,6 +5037,7 @@ function GuftinApp() {
       if(!liveverseCurrentStrokeRef.current)return;
       const x=Math.max(0,Math.min(300,event.nativeEvent.locationX*300/liveverseCanvasWidth));
       const y=Math.max(0,Math.min(200,event.nativeEvent.locationY));
+      broadcastLiveversePointer(x,y);
       liveverseCurrentStrokeRef.current+=' L '+x.toFixed(1)+' '+y.toFixed(1);
       const next=liveverseCanvasStrokesRef.current.slice();
       if(next.length)next[next.length-1]={...next[next.length-1],d:liveverseCurrentStrokeRef.current};
@@ -5028,7 +5045,7 @@ function GuftinApp() {
     },
     onPanResponderRelease:()=>{liveverseCurrentStrokeRef.current='';void persistLiveverseCanvas();},
     onPanResponderTerminate:()=>{liveverseCurrentStrokeRef.current='';void persistLiveverseCanvas();}
-  }),[liveverseCanvasWidth,liveverseCanvasColor,liveverseSelected?.id,session?.user?.id]);
+  }),[liveverseCanvasWidth,liveverseCanvasColor,liveverseSelected?.id,session?.user?.id,liveverseClient,profile?.display_name,profile?.username]);
   const saveLiveverseCanvas=async()=>{
     if(!liveverseSelected||!session?.user?.id)return;
     try{
@@ -5558,6 +5575,10 @@ function GuftinApp() {
             <Svg width="100%" height="200" viewBox="0 0 300 200">
               {liveverseCanvasStrokes.map((stroke:any,index:number)=><Path key={index} d={stroke.d} stroke={stroke.color||'#19223d'} strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" fill="none"/>)}
             </Svg>
+            {liveversePointers.map((pointer:any)=><View key={pointer.user_id} pointerEvents="none" style={{position:'absolute',left:(pointer.x*100)+'%',top:pointer.y*200,transform:[{translateX:-3},{translateY:-3}],zIndex:5}}>
+              <View style={{width:9,height:9,borderRadius:5,backgroundColor:'#e14d5a',borderWidth:1,borderColor:'#fff'}}/>
+              <Text numberOfLines={1} style={{maxWidth:110,backgroundColor:'#17105c',color:'#fff',fontSize:9,fontWeight:'800',paddingHorizontal:5,paddingVertical:2,borderRadius:5,marginTop:2}}>{pointer.display_name}</Text>
+            </View>)}
           </View>
           <View style={{flexDirection:'row',flexWrap:'wrap',gap:7,marginTop:9,alignItems:'center'}}>
             {['#19223d','#e14d5a','#2476d2','#16845d','#d99b24','#ffffff'].map(color=><Btn key={color} onPress={()=>setLiveverseCanvasColor(color)} style={{width:30,height:30,borderRadius:15,backgroundColor:color,borderWidth:2,borderColor:liveverseCanvasColor===color?C.green:C.line}}/>)}
