@@ -143,10 +143,10 @@ export function createHoloSpaceClient(db:SupabaseClient){
   }
   async function deleteGalleryItem(itemId:string,path:string){
     id(itemId,'gallery item');
-    const {error}=await db.from('holospace_gallery').delete().eq('id',itemId);
-    if(error)throw error;
     const {error:storageError}=await db.storage.from(GALLERY).remove([path]);
     if(storageError)throw storageError;
+    const {error}=await db.from('holospace_gallery').delete().eq('id',itemId);
+    if(error)throw error;
   }
   async function saveAvatar(roomId:string,userId:string,avatarKey:string,colorKey:string){
     id(roomId,'room');id(userId,'user');
