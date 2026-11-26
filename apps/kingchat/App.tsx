@@ -4860,7 +4860,7 @@ function GuftinApp() {
         holoClient.listMemories(room.id),holoClient.listGallery(room.id),
         holoClient.listEvents(room.id),holoClient.listMembers(room.id)
       ]);
-      setHoloMemories(memories);setHoloGallery(gallery);setHoloEvents(events);setHoloMembers(members);
+      setHoloMemories(memories);setHoloGallery(await Promise.all(gallery.map(async(item:any)=>({...item,url:await holoClient.gallerySignedUrl(item.object_path)}))));setHoloEvents(events);setHoloMembers(members);
     }catch(error:any){Alert.alert('Room could not open',error?.message||'Check your membership and try again.');}
     finally{setHoloLoading(false);}
   };
@@ -4889,6 +4889,36 @@ function GuftinApp() {
     if(!holoSelected||!session?.user?.id)return;
     try{await holoClient.saveTheme({roomId:holoSelected.id,userId:session.user.id,themeKey,accentColor:themeKey==='ocean'?'#2476D2':themeKey==='sunset'?'#D45B42':themeKey==='forest'?'#16845D':'#0B9B72'});Alert.alert('Theme saved','Room appearance has been updated.');}
     catch(error:any){Alert.alert('Theme not saved',error?.message||'Only the room owner can change the theme.');}
+  };
+  const addHoloGalleryMedia=async()=>{
+    if(!holoSelected||!session?.user?.id||holoSaving)return;
+    const permission=await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if(!permission.granted){Alert.alert('Permission needed','Allow photo and video access to add media to this private room.');return;}
+    const result=await ImagePicker.launchImageLibraryAsync({mediaTypes:['images','videos'],allowsEditing:false,quality:0.85,videoMaxDuration:90});
+    if(result.canceled||!result.assets?.[0])return;
+    const asset=result.assets[0];setHoloSaving(true);
+    try{
+      const file=new File(asset.uri);const bytes=file.size||0;
+      const mime=asset.mimeType||(asset.type==='video'?'video/mp4':'image/jpeg');
+      const mediaType=asset.type==='video'?'video':'image';
+      if(bytes>100*1024*1024)throw new Error('Choose a file smaller than 100 MB.');
+      const blob=new Blob([await file.arrayBuffer()],{type:mime});
+      await holoClient.uploadGallery({roomId:holoSelected.id,userId:session.user.id,fileName:asset.fileName||('moment.'+(mime.split('/')[1]||'jpg')),mimeType:mime,bytes,mediaType,body:blob,caption:''});
+      const items=await holoClient.listGallery(holoSelected.id);
+      const hydrated=await Promise.all(items.map(async(item:any)=>({...item,url:await holoClient.gallerySignedUrl(item.object_path)})));
+      setHoloGallery(hydrated);Alert.alert('Media added','Your selected media is now available to authorized room members.');
+    }catch(error:any){Alert.alert('Upload failed',error?.message||'Please try again.');}
+    finally{setHoloSaving(false);}
+  };
+  const removeHoloGalleryMedia=async(item:any)=>{
+    if(!holoSelected||!session?.user?.id)return;
+    Alert.alert('Remove media?','This removes the selected item from the shared room.',[
+      {text:'Cancel',style:'cancel'},
+      {text:'Remove',style:'destructive',onPress:async()=>{
+        try{await holoClient.deleteGalleryItem(item.id,item.object_path);setHoloGallery((items:any[])=>items.filter(x=>x.id!==item.id));}
+        catch(error:any){Alert.alert('Could not remove media',error?.message||'Please try again.');}
+      }}
+    ]);
   };
   const saveHoloAvatar=async(avatarKey:string)=>{
     if(!holoSelected||!session?.user?.id)return;
@@ -5333,8 +5363,17 @@ function GuftinApp() {
         <View style={{flexDirection:'row',flexWrap:'wrap',gap:7,marginTop:8}}>{['aurora','midnight','ocean','sunset','forest','starlight'].map(theme=><Btn key={theme} onPress={()=>void chooseHoloTheme(theme)} style={{padding:10,borderRadius:10,backgroundColor:C.mint}}><Text style={{color:C.green,fontWeight:'800',fontSize:10}}>{theme}</Text></Btn>)}</View>
         <Text style={{fontSize:15,fontWeight:'900',color:C.ink,marginTop:17}}>Your room avatar</Text>
         <View style={{flexDirection:'row',flexWrap:'wrap',gap:7,marginTop:8}}>{['orbit','comet','nova','planet','moon','star','nebula','rocket','flower','spark'].map(avatar=><Btn key={avatar} onPress={()=>void saveHoloAvatar(avatar)} style={{padding:10,borderRadius:10,backgroundColor:C.paper}}><Text style={{color:C.ink,fontWeight:'800',fontSize:10}}>{avatar}</Text></Btn>)}</View>
-        <Text style={{fontSize:15,fontWeight:'900',color:C.ink,marginTop:17}}>Shared Gallery</Text>
-        <Text style={{fontSize:11,color:C.muted,marginTop:5}}>{holoGallery.length} media items saved. Gallery upload and viewer are still being integrated.</Text>
+        <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginTop:17}}>
+          <Text style={{fontSize:15,fontWeight:'900',color:C.ink}}>Shared Gallery</Text>
+          <Btn disabled={holoSaving} onPress={()=>void addHoloGalleryMedia()} style={{backgroundColor:C.green,paddingHorizontal:12,paddingVertical:8,borderRadius:10}}><Text style={{color:'#fff',fontSize:11,fontWeight:'900'}}>＋ Add media</Text></Btn>
+        </View>
+        {holoGallery.length===0?<Text style={{fontSize:11,color:C.muted,marginTop:7}}>No shared media yet. Add a photo or supported video for room members.</Text>:<View style={{flexDirection:'row',flexWrap:'wrap',gap:8,marginTop:9}}>
+          {holoGallery.map((item:any)=><View key={item.id} style={{width:'47%',backgroundColor:C.paper,borderRadius:12,padding:7}}>
+            {item.media_type==='image'?<Image source={{uri:item.url}} resizeMode="cover" style={{height:112,borderRadius:9,backgroundColor:C.line}}/>:<VideoBubble uri={item.url}/>}
+            <Text numberOfLines={1} style={{fontSize:10,color:C.muted,marginTop:5}}>{item.caption||item.mime_type}</Text>
+            {item.uploaded_by===session?.user?.id||holoSelected.owner_id===session?.user?.id?<Btn onPress={()=>void removeHoloGalleryMedia(item)} style={{alignSelf:'flex-start',padding:5,backgroundColor:C.paper}}><Text style={{fontSize:10,color:C.red,fontWeight:'800'}}>Remove</Text></Btn>:null}
+          </View>)}
+        </View>}
         <Text style={{fontSize:15,fontWeight:'900',color:C.ink,marginTop:17}}>Special Moments</Text>
         {holoEvents.map(event=><Text key={event.id} style={{color:C.ink,fontSize:12,paddingVertical:6}}>{event.title} · {timeLabel(event.starts_at)}</Text>)}
         {holoLoading?<GuftinLoader color={C.green}/>:null}
