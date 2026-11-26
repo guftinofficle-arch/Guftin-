@@ -14,18 +14,18 @@ This is an isolated feature module on `feature/guftin-holospace`; it does not re
 
 ## Implementation status
 - [x] Separate HoloSpace source directory and database migration foundation.
-- [ ] HoloSpace home / my rooms / invitations / recent / create screens.
-- [ ] Main navigation tab and chat/group entry points.
+- [x] Initial HoloSpace home / my rooms / invitations / recent / create screens in the main app navigation.
+- [x] Main navigation tab and a direct/group chat header entry that creates a room linked to its originating chat ID.
 - [ ] Real invitation cards through the current Guftin messaging send path.
-- [ ] Memory Wall editor and media attachments.
+- [x] Basic persistent text Memory Wall create/list flow; edit/delete controls and memory media attachments remain incomplete.
 - [ ] Shared Gallery picker, progress, viewer and deletion.
-- [ ] Predefined avatar picker and saved room avatar preferences.
-- [ ] Room designer with persisted themes and wallpaper.
+- [x] Predefined avatar choices and saved per-room avatar preferences (UI currently saves a selected key).
+- [x] Predefined room themes persist through Supabase; custom wallpaper upload/preview remains incomplete.
 - [ ] Special Moments with timezone-aware countdown/event editing.
 - [ ] Members/room settings, privacy, leave and delete flows.
 - [ ] Live Hangout with real WebRTC, permissions, reconnect and tested ICE/TURN.
 - [ ] Realtime subscription lifecycle and offline recovery.
-- [ ] Two-account RLS/integration tests and Android/Web builds.
+- [x] Initial pgTAP schema/RLS-flag/private-bucket/Realtime smoke test file added (not yet executed); two-account authorization tests and Android/Web builds remain incomplete.
 
 ## Database migration
 `supabase/migrations/20261126190000_guftin_holospace_foundation.sql`
@@ -42,3 +42,8 @@ No paid provider is silently introduced. Live Hangout needs microphone permissio
 - Owner-only room/theme administration is enforced in RLS.
 - Gallery/avatar/background objects are stored in private buckets with room-scoped object paths.
 - Never put a Supabase service-role key in mobile/web code.
+
+
+## Current app wiring limits
+
+The current navigation entry creates a room associated with the active direct/group conversation. The existing chat invitation-card send path has not yet been wired, so chat participants are not automatically invited. The room detail currently exposes persistent text memories, predefined theme choices and avatar preferences. Gallery upload/view, member management, event creation, room settings and voice are not complete yet.
