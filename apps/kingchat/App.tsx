@@ -18,6 +18,7 @@ import { ChatOptionsPopover } from './src/features/chat-menu/ChatOptionsPopover'
 import { getChannelAnalytics, recordChannelAnalyticsEvent } from './src/features/channels/channelAnalytics';
 import { createHoloSpaceClient } from './src/features/holospace/holospaceClient';
 import { createLiveverseClient } from './src/features/liveverse/liveverseClient';
+import { LiveverseScreen } from './src/features/liveverse/LiveverseScreen';
 import { createMagicMomentsClient, MagicMomentKind } from './src/features/magic-moments/magicMomentsClient';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
@@ -1073,6 +1074,7 @@ function GuftinApp() {
   const [profileReady,setProfileReady]=useState(false);
   const [chats,setChats]=useState<Chat[]>([]);
   const [active,setActive]=useState<Chat|null>(null);
+  const [liveverseOpen,setLiveverseOpen]=useState(false);
   const [pendingNotificationConversation,setPendingNotificationConversation]=useState<string|null>(null);
   const [messages,setMessages]=useState<Record<string,Message[]>>({});
   const [peerLastReadAt,setPeerLastReadAt]=useState<string|null>(null);
@@ -5634,19 +5636,27 @@ function GuftinApp() {
     />;
   }
 
+  if(active&&liveverseOpen){
+    return <SafeAreaView edges={['top','left','right','bottom']} style={{flex:1,backgroundColor:'#07131f'}}>
+      <StatusBar barStyle="light-content" backgroundColor="#07131f"/>
+      <LiveverseScreen chatId={active.id} chatTitle={active.name} chatKind={active.kind}
+        userId={session.user.id} onClose={()=>setLiveverseOpen(false)}/>
+    </SafeAreaView>;
+  }
+
   if(active){
     const list=messages[active.id]||[];
     return <KeyboardAvoidingView style={{flex:1}} behavior={Platform.OS==='ios'?'padding':'height'} keyboardVerticalOffset={Platform.OS==='ios'?insets.top:0}>
       <SafeAreaView style={{flex:1,backgroundColor:'#fbf5eb'}}>
       <StatusBar barStyle="light-content" backgroundColor="#078b55"/>
       <View style={{minHeight:92,backgroundColor:'#079b5b',flexDirection:'row',alignItems:'center',paddingHorizontal:12,paddingVertical:10,borderBottomLeftRadius:25,borderBottomRightRadius:25,elevation:8,shadowColor:'#075b3b',shadowOpacity:.22,shadowRadius:10,shadowOffset:{width:0,height:4}}}>
-        <Btn onPress={()=>setActive(null)} style={{padding:9,width:42,height:46,alignItems:'center',justifyContent:'center',borderRadius:23,backgroundColor:'#ffffff20'}}><Text style={{fontSize:29,color:'#fff'}}>‹</Text></Btn>
+        <Btn onPress={()=>{setLiveverseOpen(false);setActive(null);}} style={{padding:9,width:42,height:46,alignItems:'center',justifyContent:'center',borderRadius:23,backgroundColor:'#ffffff20'}}><Text style={{fontSize:29,color:'#fff'}}>‹</Text></Btn>
         <View style={{padding:3,borderRadius:28,borderWidth:2,borderColor:'#b8f1c6'}}><Avatar label={active.avatar} color={active.color} size={48} online={active.online} uri={active.avatarUrl}/></View>
         <Btn onPress={()=>active.kind==='channel'?showChannelOptions():void openChatDetails()} style={{flex:1,marginLeft:11,alignItems:'flex-start'}}>
           <View style={{flexDirection:'row',alignItems:'center',gap:5}}><Text numberOfLines={1} style={{fontWeight:'900',fontSize:16,color:'#fff'}}>{active.name}</Text>{active.isVerified?<VerifiedBadge label={active.isOfficial?'Verified Guftin Official account':'Verified channel'}/>:null}</View>
           <Text style={{fontSize:11,color:'#e4fff1',marginTop:2}}>{active.kind==='channel'?(active.isOfficial?'Official Guftin announcements':active.isChannelOwner?'Your channel · publish updates':'Channel · read-only'):active.kind==='group'?'Tap for group info':outgoingCall?'Calling…':active.online?'● online':'Tap for contact info'}</Text>
         </Btn>
-        {active.kind!=='channel'?<Btn onPress={()=>{setLiveverseSourceChat({id:active.id,kind:active.kind,name:active.name});setLiveverseName(active.name+' Liveverse');setLiveverseView('create');setTab('Liveverse');}} style={{backgroundColor:'#ffffff20',borderRadius:22,width:43,height:48,alignItems:'center',justifyContent:'center',marginRight:3}}><Text style={{fontSize:20,color:'#fff',fontWeight:'900'}}>◎</Text><Text style={{fontSize:8,color:'#fff',fontWeight:'900'}}>LIVE</Text></Btn>:null}{active.kind!=='channel'?<Btn onPress={()=>{setHoloSourceChat({id:active.id,kind:active.kind,name:active.name});setHoloName(active.name+' Space');setHoloView('create');setTab('HoloSpace');}} style={{backgroundColor:'#ffffff20',borderRadius:22,width:43,height:48,alignItems:'center',justifyContent:'center',marginRight:3}}><Text style={{fontSize:20,color:'#fff',fontWeight:'900'}}>◎</Text><Text style={{fontSize:8,color:'#fff',fontWeight:'900'}}>HOLO</Text></Btn>:null}
+        {active.kind!=='channel'?<Btn onPress={()=>setLiveverseOpen(true)} style={{backgroundColor:'#ffffff20',borderRadius:22,width:43,height:48,alignItems:'center',justifyContent:'center',marginRight:3}}><Text style={{fontSize:20,color:'#fff',fontWeight:'900'}}>♫</Text><Text style={{fontSize:8,color:'#fff',fontWeight:'900'}}>LIVE</Text></Btn>:null}{active.kind!=='channel'?<Btn onPress={()=>{setHoloSourceChat({id:active.id,kind:active.kind,name:active.name});setHoloName(active.name+' Space');setHoloView('create');setTab('HoloSpace');}} style={{backgroundColor:'#ffffff20',borderRadius:22,width:43,height:48,alignItems:'center',justifyContent:'center',marginRight:3}}><Text style={{fontSize:20,color:'#fff',fontWeight:'900'}}>◎</Text><Text style={{fontSize:8,color:'#fff',fontWeight:'900'}}>HOLO</Text></Btn>:null}
         {active.kind!=='channel'?(outgoingCall?<Btn onPress={()=>void endCall(outgoingCall.id)} style={{backgroundColor:'#fde8e8',borderRadius:15,width:62,height:58,alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:'#f3c6c6'}}><Text style={{fontSize:11,fontWeight:'900',color:C.red}}>Cancel</Text><Text style={{fontSize:9,color:C.red}}>call</Text></Btn>:<>
           <Btn disabled={callBusy} onPress={()=>void startCall('voice')} style={{backgroundColor:'#087b4c',borderRadius:28,width:48,height:48,alignItems:'center',justifyContent:'center',opacity:callBusy?0.5:1,borderWidth:1,borderColor:'#42bf83'}}><Text style={{fontSize:20,color:C.green}}>☎</Text><Text style={{fontSize:10,fontWeight:'900',color:C.green}}>{active.kind==='group'?'Group call':'Call'}</Text></Btn>
           <Btn disabled={callBusy} onPress={()=>void startCall('video')} style={{backgroundColor:'#087b4c',borderRadius:28,width:48,height:48,alignItems:'center',justifyContent:'center',opacity:callBusy?0.5:1,borderWidth:1,borderColor:'#42bf83'}}><Text style={{fontSize:19,color:C.green}}>▣</Text><Text style={{fontSize:10,fontWeight:'900',color:C.green}}>Video</Text></Btn>
