@@ -2627,7 +2627,7 @@ function GuftinApp() {
       maxAdContentRating: MaxAdContentRating.G
     }).then(()=>mobileAds().initialize()).then(()=>{
       if(mounted)setAdsReady(true);
-    }).catch(error=>console.warn('AdMob initialization failed:',error?.message||error));
+    }).catch((error:any)=>console.warn('AdMob initialization failed:',error?.message||error));
     return ()=>{mounted=false;};
   },[]);
 
@@ -5611,7 +5611,7 @@ function GuftinApp() {
         unitId={__DEV__?TestIds.BANNER:(process.env.EXPO_PUBLIC_ADMOB_BANNER_UNIT_ID||'ca-app-pub-3116820002792089/9054692427')}
         size={BannerAdSize.BANNER}
         requestOptions={{requestNonPersonalizedAdsOnly:true}}
-        onAdFailedToLoad={error=>console.warn('AdMob banner failed:',error?.message||error)}
+        onAdFailedToLoad={(error:any)=>console.warn('AdMob banner failed:',error?.message||error)}
       />
     </View>:null}
     <View style={{marginHorizontal:7,marginBottom:Math.max(insets.bottom,5),height:66,paddingTop:5,paddingBottom:5,borderRadius:27,borderWidth:1,borderColor:C.line,flexDirection:'row',alignItems:'center',justifyContent:'space-around',backgroundColor:C.white,elevation:10,shadowColor:'#123d2d',shadowOpacity:.09,shadowRadius:12,shadowOffset:{width:0,height:4}}}>
