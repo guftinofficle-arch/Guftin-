@@ -3,7 +3,7 @@
 -- expected schema, RLS flags, private buckets and Realtime publication.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(21);
+select plan(20);
 
 select has_table('public','holospace_rooms','rooms table exists');
 select has_table('public','holospace_members','members table exists');
