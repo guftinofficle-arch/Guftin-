@@ -35,14 +35,14 @@ create table if not exists public.magic_moment_members (
 
 create or replace function private.magic_moment_add_owner()
 returns trigger language plpgsql security definer set search_path = ''
-as $
+as $$
 begin
  insert into public.magic_moment_members(moment_id,user_id,role,invited_by,accepted_at)
  values(new.id,new.creator_id,'owner',new.creator_id,now())
  on conflict(moment_id,user_id) do nothing;
  return new;
 end;
-$;
+$$;
 revoke all on function private.magic_moment_add_owner() from public,anon,authenticated;
 drop trigger if exists magic_moment_owner_membership on public.magic_moments;
 create trigger magic_moment_owner_membership after insert on public.magic_moments
