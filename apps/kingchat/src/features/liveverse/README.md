@@ -8,14 +8,14 @@ This directory is the isolated implementation area for Liveverse. It is delibera
 
 - [x] Dedicated Liveverse feature area reserved in the native app source tree.
 - [x] Database migration foundation for spaces, members, notes, tasks, canvas state, media metadata and idempotent events.
-- [x] Membership-scoped RLS and a private media bucket with object policies.
+- [x] Membership-scoped RLS and a private media bucket with object policies; membership role escalation is restricted.
 - [x] Realtime publication for persisted collaboration data.
 - [ ] Chat and group entry points wired into the existing navigation.
-- [ ] Shared Canvas client and reconnect/restore behavior.
-- [ ] Live Notes editor with conflict/version handling.
-- [ ] Presence-backed Live Pointer (ephemeral, not stored per pointer frame).
+- [x] Initial Supabase client operations for versioned Canvas persistence; drawing UI and reconnect/restore experience remain incomplete.
+- [x] Initial Notes persistence client with optimistic version checks; editor UI and conflict merge remain incomplete.
+- [x] Presence/Broadcast client primitives for live pointer payloads; rendered pointer UI remains incomplete.
 - [ ] Media picker/viewer and synchronized playback.
-- [ ] Shared Tasks UI.
+- [x] Initial task create/list/update/delete Supabase client operations; task UI remains incomplete.
 - [ ] Real device-to-device Voice Room and call lifecycle.
 - [ ] Two-account authorization and collaboration tests.
 - [ ] Android and web production builds plus regression tests.
@@ -52,3 +52,8 @@ Voice Room will require microphone permission declarations and platform permissi
 8. Run native Android, iOS and web build checks plus existing Guftin regression tests.
 
 The SQL foundation is not proof that the six user-facing modules are complete. Each unchecked item requires implementation and real-device/two-account verification.
+
+
+## Current client-library limits
+
+The client library is an initial backend integration layer, not a finished user-facing feature. The app does not yet expose Liveverse entry points, canvas drawing, notes editor, task board, media picker/viewer, or voice room UI. The SQL migration and client operations have not yet been applied/tested against two real accounts. The database migration remains a source file until explicitly applied to a Supabase test project.
