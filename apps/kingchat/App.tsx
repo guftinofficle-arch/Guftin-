@@ -4291,6 +4291,54 @@ function GuftinApp() {
     }finally{setAccountEmailBusy(false);}
   };
 
+  const signInWithGoogle=async()=>{
+    setAuthBusy(true);setAuthError('');
+    try{
+      // Supabase owns the Google OAuth exchange; this deep link returns control to Guftin.
+      const redirectTo=Linking.createURL('auth/callback');
+      const {data,error}=await supabase.auth.signInWithOAuth({
+        provider:'google',
+        options:{redirectTo,skipBrowserRedirect:true,queryParams:{prompt:'select_account'}}
+      });
+      if(error)throw error;
+      if(!data?.url)throw new Error('Google sign-in could not start. Please try again.');
+      const result=await WebBrowser.openAuthSessionAsync(data.url,redirectTo);
+      if(result.type==='success'&&result.url){
+        await completeAuthUrl(result.url);
+        const {data:userData,error:userError}=await supabase.auth.getUser();
+        if(userError)throw userError;
+        const user=userData.user;
+        if(user){
+          const {data:existingProfile,error:profileError}=await supabase.from('kc_profiles').select('id,username').eq('id',user.id).maybeSingle();
+          if(profileError)console.warn('Google profile lookup:',profileError.message);
+          if(!existingProfile?.username){
+            const meta=user.user_metadata||{};
+            const displayName=String(meta.full_name||meta.name||[meta.given_name,meta.family_name].filter(Boolean).join(' ')||user.email?.split('@')[0]||'Guftin User').trim().slice(0,40);
+            const rawBase=String(meta.username||meta.preferred_username||displayName||user.email?.split('@')[0]||'guftin').toLowerCase().normalize('NFKD').replace(/[^a-z0-9_]+/g,'_').replace(/^_+|_+$/g,'').slice(0,17);
+            const base=rawBase.length>=3?rawBase:'guftin_user';
+            let suggested=base;
+            for(let attempt=0;attempt<6;attempt++){
+              const {data:available,error:availabilityError}=await supabase.rpc('kc_is_username_available',{p_username:suggested});
+              if(availabilityError)throw availabilityError;
+              if(available===true)break;
+              suggested=(base.slice(0,17)+'_'+String(Math.floor(Math.random()*9000)+1000)).slice(0,24);
+            }
+            setProfileName(displayName);
+            setProfileUsername(suggested);
+            const {error:metadataError}=await supabase.auth.updateUser({data:{display_name:displayName,username:suggested}});
+            if(metadataError)console.warn('Google profile defaults could not be saved:',metadataError.message);
+          }
+        }
+      }else if(result.type==='error'){
+        throw new Error('Google sign-in was cancelled or could not be completed. Please try again.');
+      }
+    }catch(e:any){
+      setAuthError(e?.message||'Google sign-in failed. Check your connection and try again.');
+    }finally{
+      setAuthBusy(false);
+    }
+  };
+
   const signInEmail=async()=>{
     const cleanEmail=email.trim().toLowerCase();
     if(!cleanEmail||!password){setAuthError('Enter your email and password.');return;}
@@ -4766,6 +4814,14 @@ function GuftinApp() {
         {authError?<Text style={{color:C.red,fontSize:12,lineHeight:18,marginBottom:12}}>{authError}</Text>:null}
         {authMode==='login'?<Btn disabled={authBusy} onPress={requestPasswordReset} style={{padding:10,alignItems:'center'}}><Text style={{color:C.green,fontWeight:'800'}}>Forgot password?</Text></Btn>:null}
         <Btn disabled={authBusy} onPress={()=>authMode==='signup'?void signUpEmail():void signInEmail()} style={{backgroundColor:C.green,padding:17,borderRadius:16,alignItems:'center'}}>{authBusy?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>{authMode==='signup'?'Create account':'Sign in'}</Text>}</Btn>
+        <View style={{flexDirection:'row',alignItems:'center',marginTop:18,marginBottom:4}}>
+          <View style={{flex:1,height:1,backgroundColor:C.line}}/>
+          <Text style={{color:C.muted,fontSize:11,fontWeight:'700',paddingHorizontal:12}}>OR CONTINUE WITH</Text>
+          <View style={{flex:1,height:1,backgroundColor:C.line}}/>
+        </View>
+        <Btn disabled={authBusy} onPress={()=>void signInWithGoogle()} style={{backgroundColor:C.white,borderWidth:1,borderColor:C.line,padding:16,borderRadius:16,alignItems:'center',marginTop:10,flexDirection:'row',justifyContent:'center'}}>
+          {authBusy?<GuftinLoader color={C.green}/>:<><Text style={{fontSize:18,fontWeight:'900',color:'#4285F4',marginRight:10}}>G</Text><Text style={{color:C.ink,fontWeight:'900'}}>Continue with Google</Text></>}
+        </Btn>
         <Btn onPress={()=>{setAuthMode(authMode==='signup'?'login':'signup');setAuthError('');setEmailOtpPending(false);}} style={{padding:16,alignItems:'center'}}><Text style={{color:C.green,fontWeight:'800'}}>{authMode==='signup'?'Already have an account? Sign in':'New to Guftin? Create account'}</Text></Btn>
         {authMode==='signup'?<Text style={{color:C.muted,fontSize:10,textAlign:'center',marginTop:8,lineHeight:16}}>Email verification is required for email signup. A mobile number is optional and is never used to sign in.</Text>:null}
 
