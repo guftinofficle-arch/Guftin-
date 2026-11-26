@@ -939,13 +939,12 @@ function VerifiedBadge({label='Verified account'}:{label?:string}) {
   return <Text accessibilityRole="image" accessibilityLabel={label} style={{color:'#2387e8',fontWeight:'900',fontSize:14,marginLeft:3}}>✓</Text>;
 }
 
-function LiveverseVoiceControls({onLeave}:any){
+function LiveverseVoiceControls({onLeave,connected}:any){
   const participants=useParticipants();
   const {localParticipant,isMicrophoneEnabled}=useLocalParticipant();
   const room=useRoomContext();
-  const [connected,setConnected]=useState(false);
-  const [busy,setBusy]=useState(false);
-  useEffect(()=>{let active=true;void startGuftinCallAudioSession().then(()=>{if(active)setConnected(true);}).catch((error:any)=>Alert.alert('Audio unavailable',error?.message||'Could not start audio.'));return()=>{active=false;void stopGuftinCallAudioSession();};},[]);
+    const [busy,setBusy]=useState(false);
+  useEffect(()=>{void startGuftinCallAudioSession().catch((error:any)=>Alert.alert('Audio unavailable',error?.message||'Could not start audio.'));return()=>{void stopGuftinCallAudioSession();};},[]);
   const toggle=async()=>{if(busy)return;setBusy(true);try{await localParticipant.setMicrophoneEnabled(!isMicrophoneEnabled);}catch(error:any){Alert.alert('Microphone unavailable',error?.message||'Check microphone permission.');}finally{setBusy(false);}};
   const leave=async()=>{try{await room.disconnect();}finally{await stopGuftinCallAudioSession();onLeave?.();}};
   return <View style={{flex:1,backgroundColor:'#090d24',padding:24,justifyContent:'center',alignItems:'center'}}>
@@ -989,6 +988,7 @@ function GuftinApp() {
   const liveverseChannelRef=useRef<any>(null);
   const liveverseLastPointerSentRef=useRef(0);
   const [liveverseVoiceSession,setLiveverseVoiceSession]=useState<any>(null);
+  const [liveverseVoiceConnected,setLiveverseVoiceConnected]=useState(false);
   const activeTabRef=useRef(tab);
   activeTabRef.current=tab;
   const [session,setSession]=useState<any>(null);
@@ -4971,7 +4971,7 @@ function GuftinApp() {
   };
   const joinLiveverseVoiceRoom=async()=>{
     if(!liveverseSelected)return;
-    setLiveverseBusy(true);
+    setLiveverseBusy(true);setLiveverseVoiceConnected(false);
     try{
       const {data,error}=await supabase.functions.invoke('liveverse-livekit-token',{body:{space_id:liveverseSelected.id}});
       if(error)throw error;
@@ -5613,10 +5613,10 @@ function GuftinApp() {
     </ScrollView>:null}
     <Modal visible={!!liveverseVoiceSession} animationType="slide" presentationStyle="fullScreen" onRequestClose={()=>setLiveverseVoiceSession(null)}>
       {liveverseVoiceSession?<LiveKitRoom serverUrl={liveverseVoiceSession.serverUrl} token={liveverseVoiceSession.token} connect={true} audio={true} video={false}
-        onConnected={()=>console.info('Liveverse voice connected')}
-        onDisconnected={()=>{void stopGuftinCallAudioSession();setLiveverseVoiceSession(null);}}
-        onError={(error:any)=>{Alert.alert('Voice connection failed',error?.message||'Could not connect to the room.');setLiveverseVoiceSession(null);}}>
-        <LiveverseVoiceControls onLeave={()=>setLiveverseVoiceSession(null)}/>
+        onConnected={()=>{setLiveverseVoiceConnected(true);console.info('Liveverse voice connected');}}
+        onDisconnected={()=>{setLiveverseVoiceConnected(false);void stopGuftinCallAudioSession();setLiveverseVoiceSession(null);}}
+        onError={(error:any)=>{setLiveverseVoiceConnected(false);void stopGuftinCallAudioSession();Alert.alert('Voice connection failed',error?.message||'Could not connect to the room.');setLiveverseVoiceSession(null);}}>
+        <LiveverseVoiceControls connected={liveverseVoiceConnected} onLeave={()=>{setLiveverseVoiceConnected(false);setLiveverseVoiceSession(null);}}/>
       </LiveKitRoom>:null}
     </Modal>
     {tab==='AI'?<View style={{flex:1,paddingHorizontal:14,paddingTop:14,paddingBottom:10}}>
