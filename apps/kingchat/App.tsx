@@ -939,6 +939,21 @@ function VerifiedBadge({label='Verified account'}:{label?:string}) {
 function GuftinApp() {
   const insets=useSafeAreaInsets();
   const [tab,setTab]=useState('Chats');
+  const liveverseClient=useMemo(()=>createLiveverseClient(supabase),[]);
+  const [liveverseView,setLiveverseView]=useState<'home'|'create'|'room'>('home');
+  const [liveverseSpaces,setLiveverseSpaces]=useState<any[]>([]);
+  const [liveverseSelected,setLiveverseSelected]=useState<any>(null);
+  const [liveverseNotes,setLiveverseNotes]=useState<any[]>([]);
+  const [liveverseTasks,setLiveverseTasks]=useState<any[]>([]);
+  const [liveverseMedia,setLiveverseMedia]=useState<any[]>([]);
+  const [liveverseRoomTab,setLiveverseRoomTab]=useState<'notes'|'tasks'|'media'|'canvas'>('notes');
+  const [liveverseName,setLiveverseName]=useState('');
+  const [liveverseDescription,setLiveverseDescription]=useState('');
+  const [liveverseNoteTitle,setLiveverseNoteTitle]=useState('Shared notes');
+  const [liveverseNoteDraft,setLiveverseNoteDraft]=useState('');
+  const [liveverseTaskDraft,setLiveverseTaskDraft]=useState('');
+  const [liveverseCanvasDraft,setLiveverseCanvasDraft]=useState('');
+  const [liveverseBusy,setLiveverseBusy]=useState(false);
   const activeTabRef=useRef(tab);
   activeTabRef.current=tab;
   const [session,setSession]=useState<any>(null);
@@ -4826,7 +4841,81 @@ function GuftinApp() {
     setAiHistoryOpen(false);
     setAiMode('chat');
   };
-  const pageTitle=tab==='Chats'?'Guftin':tab==='AI'?'Karaboz AI':tab==='Updates'?'Updates':tab==='Channels'?'Channels':tab==='Hub'?'Business & Communities':tab==='Calls'?'Calls':'You';
+  const loadLiveverseSpaces=useCallback(async()=>{
+    if(!session?.user?.id)return;
+    setLiveverseBusy(true);
+    try{setLiveverseSpaces(await liveverseClient.listSpaces());}
+    catch(error:any){Alert.alert('Liveverse unavailable',error?.message||'Could not load shared spaces.');}
+    finally{setLiveverseBusy(false);}
+  },[session?.user?.id,liveverseClient]);
+  useEffect(()=>{if(tab==='Liveverse')void loadLiveverseSpaces();},[tab,loadLiveverseSpaces]);
+  const createLiveverseSpace=async()=>{
+    if(!session?.user?.id||!liveverseName.trim())return;
+    setLiveverseBusy(true);
+    try{
+      const space=await liveverseClient.createSpace({name:liveverseName.trim(),description:liveverseDescription,scope:'chat',ownerId:session.user.id});
+      setLiveverseName('');setLiveverseDescription('');setLiveverseSpaces(items=>[space,...items]);setLiveverseSelected(space);setLiveverseView('room');
+      setLiveverseNotes([]);setLiveverseTasks([]);setLiveverseMedia([]);setLiveverseRoomTab('notes');
+    }catch(error:any){Alert.alert('Space not created',error?.message||'Please try again.');}
+    finally{setLiveverseBusy(false);}
+  };
+  const openLiveverseSpace=async(space:any)=>{
+    setLiveverseSelected(space);setLiveverseView('room');setLiveverseBusy(true);
+    try{
+      const [notes,tasks,media,canvas]=await Promise.all([liveverseClient.listNotes(space.id),liveverseClient.listTasks(space.id),liveverseClient.listMedia(space.id),liveverseClient.loadCanvas(space.id)]);
+      setLiveverseNotes(notes);setLiveverseTasks(tasks);setLiveverseMedia(media);setLiveverseCanvasDraft(canvas?.document?JSON.stringify(canvas.document,null,2):'{}');
+      setLiveverseNoteDraft(notes[0]?.content||'');setLiveverseNoteTitle(notes[0]?.title||'Shared notes');
+    }catch(error:any){Alert.alert('Space could not open',error?.message||'Check your membership and try again.');}
+    finally{setLiveverseBusy(false);}
+  };
+  const saveLiveverseNote=async()=>{
+    if(!liveverseSelected||!session?.user?.id||!liveverseNoteDraft.trim())return;
+    setLiveverseBusy(true);
+    try{
+      let note=liveverseNotes[0];
+      if(!note)note=await liveverseClient.createNote(liveverseSelected.id,session.user.id,liveverseNoteTitle||'Untitled note');
+      const saved=await liveverseClient.saveNote({id:note.id,spaceId:liveverseSelected.id,userId:session.user.id,title:liveverseNoteTitle||note.title,content:liveverseNoteDraft,expectedVersion:note.version});
+      setLiveverseNotes([saved,...liveverseNotes.filter(x=>x.id!==saved.id)]);
+      Alert.alert('Notes saved','Your shared note is saved to this space.');
+    }catch(error:any){Alert.alert('Note not saved',error?.message||'Reload the latest note and try again.');}
+    finally{setLiveverseBusy(false);}
+  };
+  const createLiveverseTask=async()=>{
+    if(!liveverseSelected||!session?.user?.id||!liveverseTaskDraft.trim())return;
+    setLiveverseBusy(true);
+    try{const task=await liveverseClient.createTask({spaceId:liveverseSelected.id,userId:session.user.id,title:liveverseTaskDraft});setLiveverseTasks([task,...liveverseTasks]);setLiveverseTaskDraft('');}
+    catch(error:any){Alert.alert('Task not created',error?.message||'Please try again.');}
+    finally{setLiveverseBusy(false);}
+  };
+  const toggleLiveverseTask=async(task:any)=>{
+    try{const updated=await liveverseClient.updateTask({taskId:task.id,spaceId:task.space_id,userId:session.user.id,patch:{status:task.status==='completed'?'open':'completed'}});setLiveverseTasks(items=>items.map(x=>x.id===updated.id?updated:x));}
+    catch(error:any){Alert.alert('Task not updated',error?.message||'Please try again.');}
+  };
+  const uploadLiveverseMedia=async()=>{
+    if(!liveverseSelected||!session?.user?.id)return;
+    const permission=await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if(!permission.granted){Alert.alert('Permission needed','Allow media access to share with this space.');return;}
+    const result=await ImagePicker.launchImageLibraryAsync({mediaTypes:['images','videos'],allowsEditing:false,quality:0.85,videoMaxDuration:90});
+    if(result.canceled||!result.assets?.[0])return;
+    const asset=result.assets[0];setLiveverseBusy(true);
+    try{
+      const file=new File(asset.uri),mime=asset.mimeType||(asset.type==='video'?'video/mp4':'image/jpeg');
+      const media=await liveverseClient.uploadMedia({spaceId:liveverseSelected.id,userId:session.user.id,uri:asset.uri,fileName:asset.fileName||'shared-media',mimeType:mime,bytes:file.size||0,mediaType:asset.type==='video'?'video':'image',body:new Blob([await file.arrayBuffer()],{type:mime})});
+      const {data,error}=await supabase.storage.from('liveverse-media').createSignedUrl(media.object_path,300);if(error)throw error;
+      setLiveverseMedia(items=>[{...media,url:data.signedUrl},...items]);
+    }catch(error:any){Alert.alert('Media upload failed',error?.message||'Please try again.');}
+    finally{setLiveverseBusy(false);}
+  };
+  const saveLiveverseCanvas=async()=>{
+    if(!liveverseSelected||!session?.user?.id)return;
+    try{
+      const current=await liveverseClient.loadCanvas(liveverseSelected.id);
+      const document={kind:'liveverse-canvas-draft',content:liveverseCanvasDraft.slice(0,20000)};
+      await liveverseClient.saveCanvas(liveverseSelected.id,session.user.id,document,current?.version||0);
+      Alert.alert('Canvas state saved','The current canvas document was saved. A drawing surface is still pending.');
+    }catch(error:any){Alert.alert('Canvas not saved',error?.message||'Please reload the current version.');}
+  };
+  const pageTitle=tab==='Chats'?'Guftin':tab==='Liveverse'?'Liveverse':tab==='AI'?'Karaboz AI':tab==='Updates'?'Updates':tab==='Channels'?'Channels':tab==='Hub'?'Business & Communities':tab==='Calls'?'Calls':'You';
   const totalUnread=chats.reduce((sum:any,item:any)=>sum+(Number(item.unread)||0),0);
 
   if(authRestoring){
@@ -5293,6 +5382,53 @@ function GuftinApp() {
       {hubCommunities.length?hubCommunities.map(x=><View key={x.id} style={{backgroundColor:C.white,borderRadius:14,padding:12,marginBottom:8}}><Text style={{fontWeight:'900',color:C.ink}}>{x.title}</Text><Text style={{fontSize:10,color:C.muted,marginTop:4}}>{x.role==='owner'?'Community owner':'Community member'} · {timeLabel(x.created_at)}</Text></View>):<Text style={{fontSize:11,color:C.muted}}>Your joined communities will appear here.</Text>}
 
     </ScrollView>:null}
+    {tab==='Liveverse'?<ScrollView contentContainerStyle={{padding:16,paddingBottom:30}}>
+      <View style={{backgroundColor:'#14163d',borderRadius:20,padding:18,marginBottom:14}}>
+        <Text style={{fontSize:10,color:'#b7a9ff',fontWeight:'900',letterSpacing:2}}>GUFTIN COLLABORATION</Text>
+        <Text style={{fontSize:23,color:'#fff',fontWeight:'900',marginTop:6}}>Liveverse</Text>
+        <Text style={{fontSize:12,color:'#d7d5f0',marginTop:5}}>One Chat. One Space. Infinite Possibilities.</Text>
+        <Btn onPress={()=>setLiveverseView('create')} style={{backgroundColor:'#7764e8',padding:12,borderRadius:12,alignItems:'center',marginTop:14}}><Text style={{color:'#fff',fontWeight:'900'}}>＋ Create shared space</Text></Btn>
+      </View>
+      {liveverseView==='create'?<View style={{backgroundColor:C.white,borderRadius:16,padding:14,borderWidth:1,borderColor:C.line,marginBottom:12}}>
+        <Text style={{fontSize:16,color:C.ink,fontWeight:'900'}}>Create Liveverse space</Text>
+        <TextInput value={liveverseName} onChangeText={setLiveverseName} placeholder="Space name" maxLength={80} style={{backgroundColor:C.paper,padding:11,borderRadius:10,color:C.ink,marginTop:9}}/>
+        <TextInput value={liveverseDescription} onChangeText={setLiveverseDescription} placeholder="Description (optional)" maxLength={500} style={{backgroundColor:C.paper,padding:11,borderRadius:10,color:C.ink,marginTop:7}}/>
+        <Btn disabled={liveverseBusy||!liveverseName.trim()} onPress={()=>void createLiveverseSpace()} style={{backgroundColor:C.green,padding:11,borderRadius:10,alignItems:'center',marginTop:9}}><Text style={{color:'#fff',fontWeight:'900'}}>Create space</Text></Btn>
+      </View>:null}
+      {liveverseView==='room'&&liveverseSelected?<View style={{backgroundColor:C.white,borderRadius:16,padding:14,borderWidth:1,borderColor:C.line}}>
+        <Btn onPress={()=>setLiveverseView('home')} style={{alignSelf:'flex-start',padding:7,backgroundColor:C.paper,borderRadius:8}}><Text style={{color:C.green,fontWeight:'900'}}>‹ All spaces</Text></Btn>
+        <Text style={{fontSize:19,fontWeight:'900',color:C.ink,marginTop:10}}>{liveverseSelected.name}</Text>
+        <Text style={{fontSize:11,color:C.muted,marginTop:4}}>{liveverseSelected.scope} · Shared workspace</Text>
+        <View style={{flexDirection:'row',flexWrap:'wrap',gap:6,marginTop:12}}>
+          {(['notes','tasks','media','canvas'] as const).map(key=><Btn key={key} onPress={()=>setLiveverseRoomTab(key)} style={{padding:9,borderRadius:9,backgroundColor:liveverseRoomTab===key?'#7764e8':C.paper}}><Text style={{fontSize:10,fontWeight:'900',color:liveverseRoomTab===key?'#fff':C.ink}}>{key.toUpperCase()}</Text></Btn>)}
+        </View>
+        {liveverseRoomTab==='notes'?<View style={{marginTop:13}}>
+          <TextInput value={liveverseNoteTitle} onChangeText={setLiveverseNoteTitle} placeholder="Note title" maxLength={120} style={{backgroundColor:C.paper,padding:10,borderRadius:9,color:C.ink}}/>
+          <TextInput value={liveverseNoteDraft} onChangeText={setLiveverseNoteDraft} placeholder="Write shared notes…" multiline style={{backgroundColor:C.paper,padding:12,borderRadius:10,color:C.ink,minHeight:150,textAlignVertical:'top',marginTop:8}}/>
+          <Btn disabled={liveverseBusy||!liveverseNoteDraft.trim()} onPress={()=>void saveLiveverseNote()} style={{backgroundColor:C.green,padding:11,borderRadius:10,alignItems:'center',marginTop:8}}><Text style={{color:'#fff',fontWeight:'900'}}>Save shared notes</Text></Btn>
+          <Text style={{fontSize:10,color:C.muted,marginTop:8}}>Versioned saves prevent stale edits from silently overwriting newer notes.</Text>
+        </View>:null}
+        {liveverseRoomTab==='tasks'?<View style={{marginTop:13}}>
+          <TextInput value={liveverseTaskDraft} onChangeText={setLiveverseTaskDraft} placeholder="New shared task" maxLength={240} style={{backgroundColor:C.paper,padding:10,borderRadius:9,color:C.ink}}/>
+          <Btn disabled={liveverseBusy||!liveverseTaskDraft.trim()} onPress={()=>void createLiveverseTask()} style={{backgroundColor:C.green,padding:10,borderRadius:9,alignItems:'center',marginTop:7}}><Text style={{color:'#fff',fontWeight:'900'}}>＋ Add task</Text></Btn>
+          {liveverseTasks.map(task=><Btn key={task.id} onPress={()=>void toggleLiveverseTask(task)} style={{padding:11,borderBottomWidth:1,borderColor:C.line,alignItems:'stretch',backgroundColor:'transparent'}}><Text style={{color:task.status==='completed'?C.muted:C.ink,textDecorationLine:task.status==='completed'?'line-through':'none',fontWeight:'800'}}>{task.status==='completed'?'✓':'○'} {task.title}</Text><Text style={{fontSize:9,color:C.muted,marginTop:3}}>Tap to {task.status==='completed'?'reopen':'complete'}</Text></Btn>)}
+        </View>:null}
+        {liveverseRoomTab==='media'?<View style={{marginTop:13}}>
+          <Btn disabled={liveverseBusy} onPress={()=>void uploadLiveverseMedia()} style={{backgroundColor:C.green,padding:11,borderRadius:10,alignItems:'center'}}><Text style={{color:'#fff',fontWeight:'900'}}>＋ Upload image/video</Text></Btn>
+          {liveverseMedia.map(item=><View key={item.id} style={{marginTop:10}}>{item.media_type==='image'?<Image source={{uri:item.url}} style={{width:'100%',height:170,borderRadius:12}} resizeMode="cover"/>:<VideoBubble uri={item.url}/>}</View>)}
+        </View>:null}
+        {liveverseRoomTab==='canvas'?<View style={{marginTop:13}}>
+          <Text style={{fontSize:11,color:C.muted}}>Canvas document storage is connected. The interactive drawing surface and synchronized strokes are not yet implemented.</Text>
+          <TextInput value={liveverseCanvasDraft} onChangeText={setLiveverseCanvasDraft} multiline style={{backgroundColor:C.paper,padding:10,borderRadius:10,color:C.ink,minHeight:120,marginTop:8}}/>
+          <Btn onPress={()=>void saveLiveverseCanvas()} style={{backgroundColor:C.green,padding:10,borderRadius:9,alignItems:'center',marginTop:8}}><Text style={{color:'#fff',fontWeight:'900'}}>Save canvas document</Text></Btn>
+        </View>:null}
+      </View>:null}
+      {liveverseView==='home'?<View>
+        <Text style={{fontSize:16,fontWeight:'900',color:C.ink,marginBottom:9}}>Your shared spaces</Text>
+        {liveverseBusy&&liveverseSpaces.length===0?<GuftinLoader color={C.green}/>:liveverseSpaces.length===0?<Text style={{textAlign:'center',color:C.muted,padding:24}}>No Liveverse spaces yet. Create one to begin collaborating.</Text>:liveverseSpaces.map(space=><Btn key={space.id} onPress={()=>void openLiveverseSpace(space)} style={{backgroundColor:C.white,borderRadius:14,padding:13,marginBottom:8,alignItems:'stretch',borderWidth:1,borderColor:C.line}}><Text style={{color:C.ink,fontWeight:'900'}}>{space.name}</Text><Text style={{fontSize:11,color:C.muted,marginTop:4}}>{space.description||'Shared collaboration space'}</Text><Text style={{fontSize:10,color:C.green,fontWeight:'900',marginTop:7}}>Open workspace ›</Text></Btn>)}
+      </View>:null}
+      {liveverseBusy&&liveverseView==='room'?<GuftinLoader color={C.green}/>:null}
+    </ScrollView>:null}
     {tab==='AI'?<View style={{flex:1,paddingHorizontal:14,paddingTop:14,paddingBottom:10}}>
       <View style={{backgroundColor:C.mint,borderRadius:18,padding:15,marginBottom:10}}>
         <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}>
@@ -5391,7 +5527,7 @@ function GuftinApp() {
       />
     </View>:null}
     <View style={{marginHorizontal:7,marginBottom:Math.max(insets.bottom,5),height:66,paddingTop:5,paddingBottom:5,borderRadius:27,borderWidth:1,borderColor:C.line,flexDirection:'row',alignItems:'center',justifyContent:'space-around',backgroundColor:C.white,elevation:10,shadowColor:'#123d2d',shadowOpacity:.09,shadowRadius:12,shadowOffset:{width:0,height:4}}}>
-      {([['Chats','▤'],['AI','✦'],['Updates','◉'],['Hub','⌂'],['Calls','☎'],['You','●']] as string[][]).map(([t,icon])=><Btn key={t} onPress={()=>setTab(t)} style={{alignItems:'center',justifyContent:'center',minWidth:48,paddingHorizontal:2,paddingVertical:4}}>
+      {([['Chats','▤'],['Liveverse','◎'],['AI','✦'],['Updates','◉'],['Hub','⌂'],['Calls','☎'],['You','●']] as string[][]).map(([t,icon])=><Btn key={t} onPress={()=>setTab(t)} style={{alignItems:'center',justifyContent:'center',minWidth:48,paddingHorizontal:2,paddingVertical:4}}>
         <Text style={{fontSize:20,color:tab===t?C.green:C.muted,fontWeight:'900'}}>{icon}</Text>
         <Text style={{fontSize:10,fontWeight:tab===t?'900':'600',color:tab===t?C.green:C.muted,marginTop:3}}>{t==='Hub'?'Business':t}</Text>
         {tab===t?<View style={{height:3,width:24,borderRadius:3,backgroundColor:C.green,marginTop:3}}/>:null}
