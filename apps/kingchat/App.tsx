@@ -945,6 +945,7 @@ function GuftinApp() {
   const [holoRooms,setHoloRooms]=useState<any[]>([]);
   const [holoInvites,setHoloInvites]=useState<any[]>([]);
   const [holoSelected,setHoloSelected]=useState<any>(null);
+  const [holoSourceChat,setHoloSourceChat]=useState<any>(null);
   const [holoMemories,setHoloMemories]=useState<any[]>([]);
   const [holoGallery,setHoloGallery]=useState<any[]>([]);
   const [holoEvents,setHoloEvents]=useState<any[]>([]);
@@ -4867,8 +4868,8 @@ function GuftinApp() {
     if(!session?.user?.id||!holoName.trim())return;
     setHoloSaving(true);
     try{
-      await holoClient.createRoom({name:holoName,description:holoDescription,privacy:holoPrivacy,ownerId:session.user.id,timezone:Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC'});
-      setHoloName('');setHoloDescription('');setHoloPrivacy('private');setHoloView('mine');
+      await holoClient.createRoom({name:holoName,description:holoDescription,privacy:holoPrivacy,ownerId:session.user.id,timezone:Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC',sourceChatId:holoSourceChat?.id||null,sourceChatKind:holoSourceChat?.kind==='group'?'group':holoSourceChat?'direct':null});
+      setHoloName('');setHoloDescription('');setHoloPrivacy('private');setHoloSourceChat(null);setHoloView('mine');
       await loadHoloSpaces();Alert.alert('HoloSpace created','Your private room has been saved.');
     }catch(error:any){Alert.alert('Room not created',error?.message||'Please try again.');}
     finally{setHoloSaving(false);}
@@ -5082,6 +5083,7 @@ function GuftinApp() {
           <View style={{flexDirection:'row',alignItems:'center',gap:5}}><Text numberOfLines={1} style={{fontWeight:'900',fontSize:16,color:'#fff'}}>{active.name}</Text>{active.isVerified?<VerifiedBadge label={active.isOfficial?'Verified Guftin Official account':'Verified channel'}/>:null}</View>
           <Text style={{fontSize:11,color:'#e4fff1',marginTop:2}}>{active.kind==='channel'?(active.isOfficial?'Official Guftin announcements':active.isChannelOwner?'Your channel · publish updates':'Channel · read-only'):active.kind==='group'?'Tap for group info':outgoingCall?'Calling…':active.online?'● online':'Tap for contact info'}</Text>
         </Btn>
+        {active.kind!=='channel'?<Btn onPress={()=>{setHoloSourceChat({id:active.id,kind:active.kind,name:active.name});setHoloName(active.name+' Space');setHoloView('create');setTab('HoloSpace');}} style={{backgroundColor:'#ffffff20',borderRadius:22,width:43,height:48,alignItems:'center',justifyContent:'center',marginRight:3}}><Text style={{fontSize:20,color:'#fff',fontWeight:'900'}}>◎</Text><Text style={{fontSize:8,color:'#fff',fontWeight:'900'}}>SPACE</Text></Btn>:null}
         {active.kind!=='channel'?(outgoingCall?<Btn onPress={()=>void endCall(outgoingCall.id)} style={{backgroundColor:'#fde8e8',borderRadius:15,width:62,height:58,alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:'#f3c6c6'}}><Text style={{fontSize:11,fontWeight:'900',color:C.red}}>Cancel</Text><Text style={{fontSize:9,color:C.red}}>call</Text></Btn>:<>
           <Btn disabled={callBusy} onPress={()=>void startCall('voice')} style={{backgroundColor:'#087b4c',borderRadius:28,width:48,height:48,alignItems:'center',justifyContent:'center',opacity:callBusy?0.5:1,borderWidth:1,borderColor:'#42bf83'}}><Text style={{fontSize:20,color:C.green}}>☎</Text><Text style={{fontSize:10,fontWeight:'900',color:C.green}}>{active.kind==='group'?'Group call':'Call'}</Text></Btn>
           <Btn disabled={callBusy} onPress={()=>void startCall('video')} style={{backgroundColor:'#087b4c',borderRadius:28,width:48,height:48,alignItems:'center',justifyContent:'center',opacity:callBusy?0.5:1,borderWidth:1,borderColor:'#42bf83'}}><Text style={{fontSize:19,color:C.green}}>▣</Text><Text style={{fontSize:10,fontWeight:'900',color:C.green}}>Video</Text></Btn>
@@ -5311,6 +5313,7 @@ function GuftinApp() {
       </ScrollView>
       {holoView==='create'?<View style={{backgroundColor:C.white,borderRadius:17,padding:15,borderWidth:1,borderColor:C.line}}>
         <Text style={{fontSize:17,fontWeight:'900',color:C.ink}}>Create a new HoloSpace</Text>
+        {holoSourceChat?<Text style={{fontSize:11,color:C.green,fontWeight:'800',marginTop:7}}>Linked to {holoSourceChat.name} · {holoSourceChat.kind==='group'?'Group chat':'Direct chat'}</Text>:null}
         <TextInput value={holoName} onChangeText={setHoloName} placeholder="Room name" maxLength={80} style={{backgroundColor:C.paper,borderRadius:12,padding:13,color:C.ink,marginTop:12}}/>
         <TextInput value={holoDescription} onChangeText={setHoloDescription} placeholder="Description (optional)" maxLength={600} multiline style={{backgroundColor:C.paper,borderRadius:12,padding:13,color:C.ink,marginTop:9,minHeight:75,textAlignVertical:'top'}}/>
         <View style={{flexDirection:'row',gap:8,marginTop:12}}>
