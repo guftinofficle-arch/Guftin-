@@ -16,6 +16,7 @@ import { isStatusActive } from './src/features/status/statusUtils';
 import { saveMediaToGallery } from './src/features/media/saveMediaToGallery';
 import { ChatOptionsPopover } from './src/features/chat-menu/ChatOptionsPopover';
 import { LiveverseScreen } from './src/features/liveverse/LiveverseScreen';
+import { MagicMomentsScreen } from './src/features/magic-moments/MagicMomentsScreen';
 import { getChannelAnalytics, recordChannelAnalyticsEvent } from './src/features/channels/channelAnalytics';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
@@ -4828,7 +4829,7 @@ function GuftinApp() {
     setAiHistoryOpen(false);
     setAiMode('chat');
   };
-  const pageTitle=tab==='Chats'?'Guftin':tab==='AI'?'Karaboz AI':tab==='Updates'?'Updates':tab==='Channels'?'Channels':tab==='Hub'?'Business & Communities':tab==='Calls'?'Calls':'You';
+  const pageTitle=tab==='Chats'?'Guftin':tab==='Magic'?'Magic Moments':tab==='AI'?'Karaboz AI':tab==='Updates'?'Updates':tab==='Channels'?'Channels':tab==='Hub'?'Business & Communities':tab==='Calls'?'Calls':'You';
   const totalUnread=chats.reduce((sum:any,item:any)=>sum+(Number(item.unread)||0),0);
 
   if(authRestoring){
@@ -5306,6 +5307,7 @@ function GuftinApp() {
       {hubCommunities.length?hubCommunities.map(x=><View key={x.id} style={{backgroundColor:C.white,borderRadius:14,padding:12,marginBottom:8}}><Text style={{fontWeight:'900',color:C.ink}}>{x.title}</Text><Text style={{fontSize:10,color:C.muted,marginTop:4}}>{x.role==='owner'?'Community owner':'Community member'} · {timeLabel(x.created_at)}</Text></View>):<Text style={{fontSize:11,color:C.muted}}>Your joined communities will appear here.</Text>}
 
     </ScrollView>:null}
+    {tab==='Magic'?<MagicMomentsScreen userId={session.user.id} chats={chats} getDeviceIdentity={ensureDeviceIdentity} onBack={()=>setTab('Chats')} onOpenChat={(chat:any)=>openChat(chat)}/>:null}
     {tab==='AI'?<View style={{flex:1,paddingHorizontal:14,paddingTop:14,paddingBottom:10}}>
       <View style={{backgroundColor:C.mint,borderRadius:18,padding:15,marginBottom:10}}>
         <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}>
@@ -5404,7 +5406,7 @@ function GuftinApp() {
       />
     </View>:null}
     <View style={{marginHorizontal:7,marginBottom:Math.max(insets.bottom,5),height:66,paddingTop:5,paddingBottom:5,borderRadius:27,borderWidth:1,borderColor:C.line,flexDirection:'row',alignItems:'center',justifyContent:'space-around',backgroundColor:C.white,elevation:10,shadowColor:'#123d2d',shadowOpacity:.09,shadowRadius:12,shadowOffset:{width:0,height:4}}}>
-      {([['Chats','▤'],['AI','✦'],['Updates','◉'],['Hub','⌂'],['Calls','☎'],['You','●']] as string[][]).map(([t,icon])=><Btn key={t} onPress={()=>setTab(t)} style={{alignItems:'center',justifyContent:'center',minWidth:48,paddingHorizontal:2,paddingVertical:4}}>
+      {([['Chats','▤'],['Magic','✧'],['AI','✦'],['Updates','◉'],['Hub','⌂'],['Calls','☎'],['You','●']] as string[][]).map(([t,icon])=><Btn key={t} onPress={()=>setTab(t)} style={{alignItems:'center',justifyContent:'center',minWidth:48,paddingHorizontal:2,paddingVertical:4}}>
         <Text style={{fontSize:20,color:tab===t?C.green:C.muted,fontWeight:'900'}}>{icon}</Text>
         <Text style={{fontSize:10,fontWeight:tab===t?'900':'600',color:tab===t?C.green:C.muted,marginTop:3}}>{t==='Hub'?'Business':t}</Text>
         {tab===t?<View style={{height:3,width:24,borderRadius:3,backgroundColor:C.green,marginTop:3}}/>:null}
