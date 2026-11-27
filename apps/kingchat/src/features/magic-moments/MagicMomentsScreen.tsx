@@ -45,6 +45,14 @@ export function MagicMomentsScreen({userId,chats=[],getDeviceIdentity,onBack,onO
  const [notifications,setNotifications]=useState<any[]>([]);
  const kindInfo=useMemo(()=>KINDS.find(k=>k.id===kind)!,[kind]);
 
+ const writeMomentNotification=async(payload:any)=>{
+  const {error}=await supabase.from('magic_moment_notifications').insert(payload);
+  if(error)throw error;
+  if(payload.moment_id&&payload.recipient_id&&payload.notification_type==='invite'){
+   const {error:pushError}=await supabase.functions.invoke('guftin-push',{body:{kind:'magic_moment',moment_id:payload.moment_id,notification_type:'invite',recipient_id:payload.recipient_id}});
+   if(pushError)console.warn('Magic Moments push notification:',pushError.message);
+  }
+ };
  const load=useCallback(async()=>{
   if(!userId)return;
   const {data:memberRows,error:memberError}=await supabase.from('magic_moment_members').select('moment_id,role,accepted_at').eq('user_id',userId).order('created_at',{ascending:false}).limit(250);
@@ -115,7 +123,7 @@ export function MagicMomentsScreen({userId,chats=[],getDeviceIdentity,onBack,onO
    if(recipientId){
     const {error:memberError}=await supabase.from('magic_moment_members').insert({moment_id:data.id,user_id:recipientId,role:'recipient',invited_by:userId});
     if(memberError&&memberError.code!=='23505')throw memberError;
-    await supabase.from('magic_moment_notifications').insert({recipient_id:recipientId,moment_id:data.id,notification_type:'invite',title:'A Magic Moment invitation',body:'You have been invited to share a memory in Guftin.',safe_payload:{moment_id:data.id}});
+    await writeMomentNotification({recipient_id:recipientId,moment_id:data.id,notification_type:'invite',title:'A Magic Moment invitation',body:'You have been invited to share a memory in Guftin.',safe_payload:{moment_id:data.id}});
    }
    setCreateOpen(false);setTitle('');setDescription('');setRevealAt('');setRecipient('');
    await load();await openMoment(data);
@@ -133,7 +141,7 @@ export function MagicMomentsScreen({userId,chats=[],getDeviceIdentity,onBack,onO
    if(profile.id===userId)throw new Error('You are already the owner of this moment.');
    const {error:insertError}=await supabase.from('magic_moment_members').insert({moment_id:selected.id,user_id:profile.id,role:selected.kind==='birthday'||selected.kind==='together'?'contributor':'recipient',invited_by:userId});
    if(insertError&&insertError.code!=='23505')throw insertError;
-   await supabase.from('magic_moment_notifications').insert({recipient_id:profile.id,moment_id:selected.id,notification_type:'invite',title:'A Magic Moment invitation',body:'You have been invited to contribute to a Guftin memory.',safe_payload:{moment_id:selected.id}});
+   await writeMomentNotification({recipient_id:profile.id,moment_id:selected.id,notification_type:'invite',title:'A Magic Moment invitation',body:'You have been invited to contribute to a Guftin memory.',safe_payload:{moment_id:selected.id}});
    setUsername('');await openMoment(selected);Alert.alert('Invitation sent','The member has been invited to this moment.');
   }catch(e:any){Alert.alert('Invitation failed',e.message||'Please try again.');}
   finally{setBusy(false);}
@@ -223,7 +231,7 @@ export function MagicMomentsScreen({userId,chats=[],getDeviceIdentity,onBack,onO
    const {error}=await supabase.from('magic_moment_members').update({accepted_at:new Date().toISOString()}).eq('moment_id',selected.id).eq('user_id',userId);
    if(error)throw error;
    setMyMembership({...myMembership,accepted_at:new Date().toISOString()});
-   await supabase.from('magic_moment_notifications').insert({recipient_id:selected.creator_id,moment_id:selected.id,notification_type:'contribution',title:'Magic Moment invitation accepted',body:'A member accepted your invitation.',safe_payload:{moment_id:selected.id}});
+   await writeMomentNotification({recipient_id:selected.creator_id,moment_id:selected.id,notification_type:'contribution',title:'Magic Moment invitation accepted',body:'A member accepted your invitation.',safe_payload:{moment_id:selected.id}});
   }catch(e:any){Alert.alert('Could not accept invitation',e.message||'Please try again.');}
   finally{setBusy(false);}
  };
