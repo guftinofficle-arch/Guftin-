@@ -41,6 +41,7 @@ export function MagicMomentsScreen({userId,chats=[],getDeviceIdentity,onBack,onO
  const [futureDate,setFutureDate]=useState('');
  const [mediaBusy,setMediaBusy]=useState(false);
  const [members,setMembers]=useState<any[]>([]);
+ const [myMembership,setMyMembership]=useState<any>(null);
  const [notifications,setNotifications]=useState<any[]>([]);
  const kindInfo=useMemo(()=>KINDS.find(k=>k.id===kind)!,[kind]);
 
@@ -84,7 +85,7 @@ export function MagicMomentsScreen({userId,chats=[],getDeviceIdentity,onBack,onO
     const {data}=await supabase.storage.from('magic-moments').createSignedUrl(item.object_path,3600);
     return {...item,signed_url:data?.signedUrl||null};
    }));
-   setItems(signed);setComments(commentResult.data||[]);setMembers(memberResult.data||[]);
+   setItems(signed);setComments(commentResult.data||[]);setMembers(memberResult.data||[]);setMyMembership((memberResult.data||[]).find((m:any)=>m.user_id===userId)||null);
   }catch(e:any){Alert.alert('Could not open memory',e.message||'Please try again.');}
   finally{setBusy(false);}
  };
@@ -96,14 +97,26 @@ export function MagicMomentsScreen({userId,chats=[],getDeviceIdentity,onBack,onO
    const date=revealAt.trim()?new Date(revealAt.trim()):null;
    if(revealAt.trim()&&(!date||Number.isNaN(date.getTime())))throw new Error('Enter reveal date/time in ISO format, e.g. 2027-01-01T09:00:00+05:00.');
    if(date&&date.getTime()<=Date.now())throw new Error('Reveal time must be in the future.');
+   let recipientId:string|null=null;
+   if(recipient.trim()){
+    const {data:recipientProfile,error:recipientError}=await supabase.from('kc_profiles').select('id').eq('username',recipient.trim().toLowerCase().replace(/^@/, '')).maybeSingle();
+    if(recipientError)throw recipientError;
+    if(!recipientProfile)throw new Error('No Guftin account was found for that recipient username.');
+    recipientId=recipientProfile.id;
+   }
    const {data,error}=await supabase.from('magic_moments').insert({
     creator_id:userId,kind,title:title.trim(),description:description.trim(),
-    recipient_id:recipient.trim()||null,reveal_at:date?.toISOString()||null,
+    recipient_id:recipientId,reveal_at:date?.toISOString()||null,
     timezone:Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC',
     status:date&&['secret_surprise','birthday','capsule','anniversary'].includes(kind)?'scheduled':'draft',
     settings:{reveal_requires_owner:true,created_from:'guftin_mobile'}
    }).select().single();
    if(error)throw error;
+   if(recipientId){
+    const {error:memberError}=await supabase.from('magic_moment_members').insert({moment_id:data.id,user_id:recipientId,role:'recipient',invited_by:userId});
+    if(memberError&&memberError.code!=='23505')throw memberError;
+    await supabase.from('magic_moment_notifications').insert({recipient_id:recipientId,moment_id:data.id,notification_type:'invite',title:'A Magic Moment invitation',body:'You have been invited to share a memory in Guftin.',safe_payload:{moment_id:data.id}});
+   }
    setCreateOpen(false);setTitle('');setDescription('');setRevealAt('');setRecipient('');
    await load();await openMoment(data);
   }catch(e:any){Alert.alert('Moment not created',e.message||'Please try again.');}
@@ -120,7 +133,8 @@ export function MagicMomentsScreen({userId,chats=[],getDeviceIdentity,onBack,onO
    if(profile.id===userId)throw new Error('You are already the owner of this moment.');
    const {error:insertError}=await supabase.from('magic_moment_members').insert({moment_id:selected.id,user_id:profile.id,role:selected.kind==='birthday'||selected.kind==='together'?'contributor':'recipient',invited_by:userId});
    if(insertError&&insertError.code!=='23505')throw insertError;
-   setUsername('');await openMoment(selected);Alert.alert('Invitation sent','The member has been added to this moment.');
+   await supabase.from('magic_moment_notifications').insert({recipient_id:profile.id,moment_id:selected.id,notification_type:'invite',title:'A Magic Moment invitation',body:'You have been invited to contribute to a Guftin memory.',safe_payload:{moment_id:selected.id}});
+   setUsername('');await openMoment(selected);Alert.alert('Invitation sent','The member has been invited to this moment.');
   }catch(e:any){Alert.alert('Invitation failed',e.message||'Please try again.');}
   finally{setBusy(false);}
  };
@@ -202,7 +216,18 @@ export function MagicMomentsScreen({userId,chats=[],getDeviceIdentity,onBack,onO
   void load();
  };
 
- const closeMoment=()=>{setSelected(null);setItems([]);setComments([]);setMembers([]);};
+ const acceptInvitation=async()=>{
+  if(!selected||!myMembership||myMembership.accepted_at)return;
+  setBusy(true);
+  try{
+   const {error}=await supabase.from('magic_moment_members').update({accepted_at:new Date().toISOString()}).eq('moment_id',selected.id).eq('user_id',userId);
+   if(error)throw error;
+   setMyMembership({...myMembership,accepted_at:new Date().toISOString()});
+   await supabase.from('magic_moment_notifications').insert({recipient_id:selected.creator_id,moment_id:selected.id,notification_type:'contribution',title:'Magic Moment invitation accepted',body:'A member accepted your invitation.',safe_payload:{moment_id:selected.id}});
+  }catch(e:any){Alert.alert('Could not accept invitation',e.message||'Please try again.');}
+  finally{setBusy(false);}
+ };
+ const closeMoment=()=>{setSelected(null);setItems([]);setComments([]);setMembers([]);setMyMembership(null);};
  const statusColor=(s:string)=>s==='revealed'?'#64d6a1':s==='scheduled'?'#e8c77a':s==='cancelled'?'#e58b99':colors.muted;
 
  return <View style={{flex:1,backgroundColor:colors.bg}}>
@@ -218,6 +243,7 @@ export function MagicMomentsScreen({userId,chats=[],getDeviceIdentity,onBack,onO
     {!!selected.description&&<Text style={{color:colors.muted,lineHeight:20,marginTop:8}}>{selected.description}</Text>}
     <Text style={{color:statusColor(selected.status),fontSize:11,fontWeight:'900',marginTop:12}}>{String(selected.status||'draft').toUpperCase()} {selected.reveal_at?'· Reveal '+new Date(selected.reveal_at).toLocaleString():''}</Text>
     <Text style={{color:colors.muted,fontSize:11,marginTop:6}}>{members.length} members · {items.length} memories</Text>
+    {myMembership&&!myMembership.accepted_at&&myMembership.role!=='owner'?<Button disabled={busy} onPress={()=>void acceptInvitation()} style={{backgroundColor:colors.purple,marginTop:12}}><Text style={{color:'#fff',fontWeight:'900'}}>Accept invitation</Text></Button>:null}
    </View>
    {selected.kind==='future_message'?<View style={{marginTop:15,backgroundColor:colors.panel,borderRadius:18,padding:15}}>
     <Label>ENCRYPTED FUTURE MESSAGE</Label><Field value={futureText} onChangeText={setFutureText} placeholder="Write the message to your future self or a friend…" multiline/>
@@ -261,7 +287,7 @@ export function MagicMomentsScreen({userId,chats=[],getDeviceIdentity,onBack,onO
      <View style={{height:14}}/><Label>TITLE</Label><Field value={title} onChangeText={setTitle} placeholder="Give this moment a title"/>
      <Label>DESCRIPTION / MESSAGE</Label><Field value={description} onChangeText={setDescription} placeholder="Add a description…" multiline/>
      {['birthday','capsule','secret_surprise','anniversary'].includes(kind)?<><Label>OPTIONAL REVEAL DATE & TIME</Label><Field value={revealAt} onChangeText={setRevealAt} placeholder="2027-01-01T09:00:00+05:00"/></>:null}
-     <Label>RECIPIENT USER ID (OPTIONAL)</Label><Field value={recipient} onChangeText={setRecipient} placeholder="Paste the recipient's Guftin user ID"/>
+     <Label>RECIPIENT USERNAME (OPTIONAL)</Label><Field value={recipient} onChangeText={setRecipient} placeholder="@username"/>
      <Button disabled={busy||!title.trim()} onPress={()=>void createMoment()} style={{backgroundColor:colors.purple,marginTop:5}}><Text style={{color:'#fff',fontWeight:'900'}}>{busy?'Creating…':'Create Magic Moment'}</Text></Button>
     </ScrollView>
    </View></View>
