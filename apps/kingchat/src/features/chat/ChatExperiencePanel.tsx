@@ -141,7 +141,10 @@ export function ChatExperiencePanel({
         setSavedIds(rows.filter(row => row.conversation_id === conversationId).map(row => row.message_id));
       }
       if (reminderResult.status === 'fulfilled' && !reminderResult.value.error) setReminders(reminderResult.value.data || []);
-      if (preferenceResult.status === 'fulfilled' && preferenceResult.value) setPreferences((p: any) => ({ ...p, ...preferenceResult.value }));
+      if (preferenceResult.status === 'fulfilled' && preferenceResult.value) {
+        const loadedPreferences = preferenceResult.value as Record<string, unknown>;
+        setPreferences((p: any) => ({ ...p, ...loadedPreferences }));
+      }
       if (reactionResult.status === 'fulfilled' && !reactionResult.value.error) setReactions(reactionResult.value.data || []);
       if (effectResult.status === 'fulfilled' && !effectResult.value.error) setEffects(effectResult.value.data || []);
       if (libraryResult.status === 'fulfilled') setLibraryRows(Array.isArray(libraryResult.value) ? libraryResult.value as any[] : []);
@@ -277,7 +280,7 @@ export function ChatExperiencePanel({
       return;
     }
     try {
-      const row = await upgrade20.saveMessageReminder(conversationId, reminderMessage, date.toISOString(), reminderNote);
+      const row = await upgrade20.saveMessageReminder(conversationId, reminderMessage, date.toISOString(), reminderNote) as Record<string, unknown>;
       const identifier = await Notifications.scheduleNotificationAsync({
         content: { title: 'Guftin · Reply reminder', body: reminderNote.trim() || 'A message is waiting for your reply.', data: { conversation_id: conversationId, message_id: reminderMessage } },
         trigger: date as any
