@@ -2092,11 +2092,31 @@ function GuftinApp() {
   useEffect(()=>{
     let mounted=true;
     if(!session?.user?.id){setPrivacySettingsLoaded(false);return;}
+    const cacheKey='guftin-cache-privacy-settings:'+session.user.id;
     void (async()=>{
+      try{
+        const cachedRaw=await AsyncStorage.getItem(cacheKey);
+        if(cachedRaw){
+          const cached=JSON.parse(cachedRaw);
+          if(cached&&mounted){
+            setLastSeenVisibility(cached.last_seen_visibility||'contacts');
+            setOnlineVisibility(cached.online_visibility!=='nobody');
+            setProfilePhotoVisibility(cached.profile_photo_visibility||'everyone');
+            setAboutVisibility(cached.about_visibility||'everyone');
+            setShowReadReceipts(cached.read_receipts_enabled!==false);
+            setPrivacySettingsLoaded(true);
+          }
+        }
+      }catch(error:any){console.warn('Privacy settings cache could not be read:',error?.message||error);}
+      if(!onlineRef.current){if(mounted)setPrivacySettingsLoaded(true);return;}
       const {data,error}=await supabase.from('kc_user_privacy_settings')
         .select('last_seen_visibility,online_visibility,profile_photo_visibility,about_visibility,read_receipts_enabled')
         .eq('user_id',session.user.id).maybeSingle();
-      if(error){console.warn('Privacy settings could not be loaded:',error.message);if(mounted)setPrivacySettingsLoaded(true);return;}
+      if(error){
+        console.warn('Privacy settings could not be refreshed:',error.message);
+        if(mounted)setPrivacySettingsLoaded(true);
+        return;
+      }
       if(data){
         if(mounted){
           setLastSeenVisibility(data.last_seen_visibility||'contacts');
@@ -2104,6 +2124,7 @@ function GuftinApp() {
           setProfilePhotoVisibility(data.profile_photo_visibility||'everyone');
           setAboutVisibility(data.about_visibility||'everyone');
           setShowReadReceipts(data.read_receipts_enabled!==false);
+          void AsyncStorage.setItem(cacheKey,JSON.stringify(data)).catch(()=>{});
         }
       }else{
         const {error:insertError}=await supabase.from('kc_user_privacy_settings').insert({user_id:session.user.id});
