@@ -1,0 +1,34 @@
+name: Guftin Chat and Memories Checks
+
+on:
+  push:
+    branches:
+      - feature/guftin-chat-memories-2026-11-28
+    paths:
+      - "apps/kingchat/**"
+      - ".github/workflows/guftin-chat-memories-check.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: apps/kingchat
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Feature tests
+        run: npm run test:features
+      - name: TypeScript validation
+        run: npm run typecheck
