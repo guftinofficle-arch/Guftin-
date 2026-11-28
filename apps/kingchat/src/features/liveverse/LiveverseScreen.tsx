@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, ActivityIndicator, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, ActivityIndicator, Animated, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Audio } from 'expo-av';
 import { LiveKitRoom, useLocalParticipant, useParticipants, useRoomContext } from '@livekit/react-native';
 import { supabase } from '../../lib/supabase';
+import { upgrade20 } from '../upgrade20';
 
 type VoiceRoom = {
   id: string;
@@ -39,6 +40,35 @@ function ConnectedRoom({ connection, onLeave, onEnd }: {
   const room = useRoomContext();
   const [busy, setBusy] = useState(false);
   const [micError, setMicError] = useState('');
+  const [reactions, setReactions] = useState<any[]>([]);
+  const [reactionBusy, setReactionBusy] = useState(false);
+  const reactionScale = React.useRef(new Animated.Value(1)).current;
+  const loadReactions = useCallback(async () => {
+    try { setReactions(await upgrade20.listLiveverseReactions(connection.roomId) as any[]); }
+    catch (error: any) { console.warn('LIVEVERSE reactions could not load:', error?.message || error); }
+  }, [connection.roomId]);
+  useEffect(() => {
+    void loadReactions();
+    const channel = supabase.channel('liveverse-reactions-' + connection.roomId)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'liveverse_reactions', filter: 'space_id=eq.' + connection.roomId }, payload => {
+        const row = payload.new as any;
+        setReactions(current => [row, ...current.filter(item => item.id !== row.id)].slice(0, 100));
+      }).subscribe();
+    return () => { void supabase.removeChannel(channel); };
+  }, [connection.roomId, loadReactions]);
+  const sendReaction = async (emoji: string) => {
+    if (reactionBusy) return;
+    setReactionBusy(true);
+    try {
+      const saved = await upgrade20.sendLiveverseReaction(connection.roomId, emoji);
+      setReactions(current => [saved, ...current].slice(0, 100));
+      reactionScale.setValue(0.72);
+      Animated.spring(reactionScale, { toValue: 1, useNativeDriver: true, friction: 4 }).start();
+    } catch (error: any) {
+      Alert.alert('LIVEVERSE reaction', error?.message || 'Could not send your reaction.');
+    } finally { setReactionBusy(false); }
+  };
+  const reactionEmojis = ['❤️','👏','🔥','🎉','😂','✨','🙌','💯'];
 
   const toggleMic = async () => {
     if (busy) return;
@@ -93,6 +123,14 @@ function ConnectedRoom({ connection, onLeave, onEnd }: {
           ))}
         </View>
         {micError ? <Text style={{ color: palette.red, marginTop: 14, textAlign: 'center' }}>{micError}</Text> : null}
+      </View>
+      <View style={{ paddingHorizontal: 4, marginBottom: 14 }}>
+        <Text style={{ color: palette.white, fontWeight: '900', fontSize: 13, marginBottom: 9 }}>Live reactions</Text>
+        <Animated.View style={{ transform: [{ scale: reactionScale }], flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+          {reactionEmojis.map(emoji => <TouchableOpacity key={emoji} disabled={reactionBusy} onPress={() => void sendReaction(emoji)} style={{ minWidth: 42, paddingHorizontal: 9, paddingVertical: 9, borderRadius: 14, backgroundColor: palette.panel2, borderWidth: 1, borderColor: palette.line, alignItems: 'center', opacity: reactionBusy ? 0.6 : 1 }}><Text style={{ fontSize: 19 }}>{emoji}</Text></TouchableOpacity>)}
+        </Animated.View>
+        <Text style={{ color: palette.muted, fontSize: 10, marginTop: 8 }}>Recent reactions · {reactions.length}</Text>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>{reactions.slice(0, 12).map((item:any,index:number)=><Text key={item.id||String(index)} style={{ backgroundColor: palette.panel2, borderRadius: 12, paddingHorizontal: 8, paddingVertical: 5, color: palette.white }}>{item.reaction}</Text>)}</View>
       </View>
       <View style={{ paddingBottom: 28, gap: 12 }}>
         <Action label={isMicrophoneEnabled ? '🎙  مائیک بند کریں' : '🎙  مائیک آن کریں'}
@@ -168,6 +206,8 @@ export function LiveverseScreen({ chatId, chatTitle, chatKind, userId, onClose }
         space_id: space.id, source_chat_id: chatId, title: roomTitle, host_id: userId, status: 'active'
       });
       if (roomError) throw roomError;
+      const { error: hostMemberError } = await supabase.from('liveverse_members').upsert({ space_id: space.id, user_id: userId, role: 'owner' }, { onConflict: 'space_id,user_id' });
+      if (hostMemberError) throw hostMemberError;
       await connectToSpace(space.id, true);
     } catch (error: any) {
       Alert.alert('LIVEVERSE room not started', error?.message || 'Please try again.');
