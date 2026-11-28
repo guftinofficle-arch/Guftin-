@@ -293,6 +293,12 @@ const normalizeGuftinPhone=(value:string):string|null=>{
   else return null;
   return /^\+[1-9][0-9]{7,14}$/.test(normalized)?normalized:null;
 };
+const extractCommunityInviteCode=(url:string)=>{
+  const parts=url.replace(/[?#].*$/, '').split('/').filter(Boolean);
+  const communityIndex=parts.findIndex(part=>part.toLowerCase()==='community');
+  if(communityIndex<0||!parts[communityIndex+1])return '';
+  try{return decodeURIComponent(parts[communityIndex+1]);}catch{return parts[communityIndex+1];}
+};
 const extractChannelInviteCode=(url:string)=>{
   const parts=url.replace(/[?#].*$/, '').split('/').filter(Boolean);
   const channelIndex=parts.findIndex(part=>part.toLowerCase()==='channel');
@@ -1178,6 +1184,17 @@ function GuftinApp() {
   const [businessDraftEmail,setBusinessDraftEmail]=useState('');
   const [businessBusy,setBusinessBusy]=useState(false);
   const [pendingChannelInvite,setPendingChannelInvite]=useState<string|null>(null);
+  const [pendingCommunityInvite,setPendingCommunityInvite]=useState<string|null>(null);
+  const [selectedCommunity,setSelectedCommunity]=useState<any>(null);
+  const [communityMembers,setCommunityMembers]=useState<any[]>([]);
+  const [communityGroups,setCommunityGroups]=useState<any[]>([]);
+  const [communityInviteCode,setCommunityInviteCode]=useState('');
+  const [communityMemberUsername,setCommunityMemberUsername]=useState('');
+  const [communityDetailsLoading,setCommunityDetailsLoading]=useState(false);
+  const [communityMemberBusy,setCommunityMemberBusy]=useState(false);
+  const [selectedBusinessStore,setSelectedBusinessStore]=useState<any>(null);
+  const [businessStoreProducts,setBusinessStoreProducts]=useState<any[]>([]);
+  const [businessStoreLoading,setBusinessStoreLoading]=useState(false);
   const [channelsLoading,setChannelsLoading]=useState(false);
   const [channelSearch,setChannelSearch]=useState('');
   const [channelCreateOpen,setChannelCreateOpen]=useState(false);
@@ -1303,6 +1320,8 @@ function GuftinApp() {
       void completeAuthUrl(url);
       const inviteCode=extractChannelInviteCode(url);
       if(inviteCode)setPendingChannelInvite(inviteCode);
+      const communityCode=extractCommunityInviteCode(url);
+      if(communityCode)setPendingCommunityInvite(communityCode);
     };
     const linkSub=Linking.addEventListener('url',({url})=>handleIncomingUrl(url));
     Linking.getInitialURL().then(url=>{if(url)handleIncomingUrl(url);});
@@ -2950,10 +2969,79 @@ function GuftinApp() {
       setHubBusinessProducts(pr.data||[]);setMyBusinessProfile(bp.data||null);
     }catch(e:any){console.warn('Updates hub load:',e?.message||e);}finally{setHubLoading(false);}
   },[session?.user?.id]);
+  const loadCommunityDetails=async(community:any)=>{
+    if(!community?.id||!session?.user?.id)return;
+    setSelectedCommunity(community);setCommunityDetailsLoading(true);setCommunityInviteCode('');
+    try{
+      const [membersResult,groupsResult]=await Promise.all([
+        supabase.rpc('kc_list_community_members',{p_community_id:community.id}),
+        supabase.from('kc_community_groups').select('conversation_id,kc_conversations!inner(id,kind,title,photo_url)').eq('community_id',community.id).order('created_at',{ascending:false})
+      ]);
+      if(membersResult.error)throw membersResult.error;
+      if(groupsResult.error)throw groupsResult.error;
+      setCommunityMembers(membersResult.data||[]);
+      setCommunityGroups((groupsResult.data||[]).map((row:any)=>Array.isArray(row.kc_conversations)?row.kc_conversations[0]:row.kc_conversations).filter(Boolean));
+      if(community.role==='owner'||community.role==='admin'){
+        const {data:existing,error:inviteReadError}=await supabase.from('kc_community_invites').select('invite_code').eq('community_id',community.id).is('revoked_at',null).order('created_at',{ascending:false}).limit(1).maybeSingle();
+        if(inviteReadError)throw inviteReadError;
+        if(existing?.invite_code)setCommunityInviteCode(existing.invite_code);
+        else{
+          const {data:created,error:createError}=await supabase.from('kc_community_invites').insert({community_id:community.id,created_by:session.user.id}).select('invite_code').single();
+          if(createError)throw createError;
+          setCommunityInviteCode(created.invite_code);
+        }
+      }
+    }catch(error:any){Alert.alert('Community could not open',error?.message||'Please try again.');}
+    finally{setCommunityDetailsLoading(false);}
+  };
+  const shareCommunityInvite=async()=>{
+    if(!selectedCommunity?.id||!communityInviteCode)return;
+    const inviteUrl=Linking.createURL('/community/'+communityInviteCode);
+    try{await Share.share({message:'Join my Guftin community “'+selectedCommunity.title+'”:\n'+inviteUrl});}
+    catch(error:any){Alert.alert('Invite could not be shared',error?.message||'Please try again.');}
+  };
+  const addCommunityMember=async()=>{
+    const username=communityMemberUsername.trim().replace(/^@/,'');
+    if(!selectedCommunity?.id||!username||communityMemberBusy)return;
+    setCommunityMemberBusy(true);
+    try{
+      const {error}=await supabase.rpc('kc_add_community_member_by_username',{p_community_id:selectedCommunity.id,p_username:username});
+      if(error)throw error;
+      setCommunityMemberUsername('');
+      await loadCommunityDetails(selectedCommunity);
+      Alert.alert('Member added','The Guftin account has been added to this community.');
+    }catch(error:any){Alert.alert('Member not added',error?.message||'Check the username and try again.');}
+    finally{setCommunityMemberBusy(false);}
+  };
+  const openCommunityGroup=async(group:any)=>{
+    if(!group?.id)return;
+    const title=group.title||'Community group';
+    const chat:Chat={id:group.id,name:title,avatar:initials(title),avatarUrl:group.photo_url||undefined,color:colorFor(title),last:'Community group',time:'',unread:0,online:false,kind:'group',lastAt:Date.now()};
+    setSelectedCommunity(null);setTab('Chats');
+    try{await openChat(chat);}catch(error:any){Alert.alert('Group could not open',error?.message||'Please try again.');}
+  };
+  const openBusinessStore=async(ownerId:string)=>{
+    if(!ownerId)return;
+    setSelectedBusinessStore({user_id:ownerId,store_name:'Business store'});setBusinessStoreLoading(true);setBusinessStoreProducts([]);
+    try{
+      const [profileResult,productsResult]=await Promise.all([
+        supabase.from('kc_business_profiles').select('user_id,store_name,description,contact_email,currency_code').eq('user_id',ownerId).maybeSingle(),
+        supabase.from('kc_business_products').select('id,owner_id,title,description,price,currency_code,availability,image_path,created_at').eq('owner_id',ownerId).eq('is_published',true).order('created_at',{ascending:false}).limit(80)
+      ]);
+      if(profileResult.error)throw profileResult.error;if(productsResult.error)throw productsResult.error;
+      setSelectedBusinessStore(profileResult.data||{user_id:ownerId,store_name:'Business store',description:'No public store profile has been added yet.'});
+      setBusinessStoreProducts(productsResult.data||[]);
+    }catch(error:any){Alert.alert('Business store could not open',error?.message||'Please try again.');setSelectedBusinessStore(null);}
+    finally{setBusinessStoreLoading(false);}
+  };
   const createHubCommunity=async()=>{
     if(!communityDraftTitle.trim()||communityBusy)return;setCommunityBusy(true);
-    try{await upgrade20.createCommunity(communityDraftTitle.trim());setCommunityDraftTitle('');setCommunityCreateOpen(false);await loadUpdatesHub();Alert.alert('Community created','Your community has been saved to Guftin.');}
-    catch(e:any){Alert.alert('Community not created',e?.message||'Please try again.');}finally{setCommunityBusy(false);}
+    try{
+      const created=await upgrade20.createCommunity(communityDraftTitle.trim());
+      setCommunityDraftTitle('');setCommunityCreateOpen(false);await loadUpdatesHub();
+      await loadCommunityDetails({...created,role:'owner'});
+      Alert.alert('Community created','Your community is ready. You can add members now or share its invite link.');
+    }catch(e:any){Alert.alert('Community not created',e?.message||'Please try again.');}finally{setCommunityBusy(false);}
   };
   const saveBusinessProfile=async()=>{
     if(!session?.user?.id||!businessDraftName.trim()||businessBusy)return;setBusinessBusy(true);
@@ -2963,6 +3051,28 @@ function GuftinApp() {
     }catch(e:any){Alert.alert('Business profile not saved',e?.message||'Please try again.');}finally{setBusinessBusy(false);}
   };
   useEffect(()=>{if(tab==='Hub'&&session?.user?.id)void loadUpdatesHub();},[tab,session?.user?.id,loadUpdatesHub]);
+  useEffect(()=>{
+    if(!session?.user?.id||!pendingCommunityInvite)return;
+    let active=true;
+    const join=async()=>{
+      try{
+        const {data,error}=await supabase.rpc('kc_join_community_by_invite',{p_invite_code:pendingCommunityInvite});
+        if(error)throw error;
+        if(!active)return;
+        setPendingCommunityInvite(null);setTab('Hub');
+        await loadUpdatesHub();
+        const communityId=typeof data==='string'?data:data?.community_id;
+        if(communityId){
+          const {data:community,error:communityError}=await supabase.from('kc_communities').select('id,title,owner_id,created_at').eq('id',communityId).single();
+          if(communityError)throw communityError;
+          await loadCommunityDetails({...community,role:'member'});
+        }
+        Alert.alert('Community joined','You are now a member of this Guftin community.');
+      }catch(error:any){if(active){setPendingCommunityInvite(null);Alert.alert('Could not join community',error?.message||'This invite link may be invalid or expired.');}}
+    };
+    void join();
+    return()=>{active=false;};
+  },[session?.user?.id,pendingCommunityInvite,loadUpdatesHub]);
 
   const loadChannels=useCallback(async()=>{
     if(!session)return;
@@ -5306,11 +5416,11 @@ function GuftinApp() {
         <Text style={{fontSize:11,color:C.muted,marginTop:4}}>Your stores, published products and communities</Text>
       </View>
       <View style={{marginTop:22,marginBottom:10,flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}><View style={{flex:1}}><Text style={{fontSize:18,fontWeight:'900',color:C.ink}}>Business</Text><Text style={{fontSize:11,color:C.muted}}>Stores and published products on Guftin</Text></View><Btn onPress={()=>{setBusinessDraftName(myBusinessProfile?.store_name||'');setBusinessDraftDescription(myBusinessProfile?.description||'');setBusinessDraftEmail(myBusinessProfile?.contact_email||'');setBusinessSetupOpen(true);}} style={{backgroundColor:C.green,padding:10,borderRadius:11}}><Text style={{color:'#fff',fontWeight:'900'}}>{myBusinessProfile?'Edit store':'Set up store'}</Text></Btn></View>
-      {myBusinessProfile?<View style={{backgroundColor:C.mint,borderRadius:15,padding:13,marginBottom:10}}><Text style={{fontWeight:'900',fontSize:14,color:C.green}}>{myBusinessProfile.store_name}</Text><Text style={{fontSize:11,color:C.ink,marginTop:4}}>{myBusinessProfile.description||'Your business profile'}</Text><Text style={{fontSize:10,color:C.muted,marginTop:5}}>{myBusinessProfile.contact_email||'No contact email added'}</Text></View>:<Text style={{fontSize:11,color:C.muted,marginBottom:10}}>Set up a business profile to start a Guftin store.</Text>}
-      {hubBusinessProducts.length?hubBusinessProducts.map(p=><View key={p.id} style={{backgroundColor:C.white,borderRadius:14,padding:12,marginBottom:8}}><Text style={{fontWeight:'900',color:C.ink}}>{p.title}</Text><Text style={{fontSize:11,color:C.muted,marginTop:4}}>{p.description||'Business listing'}</Text><Text style={{fontSize:12,color:C.green,fontWeight:'900',marginTop:6}}>{p.price==null?'Contact business':String(p.currency_code||'PKR')+' '+String(p.price)}</Text></View>):<Text style={{fontSize:11,color:C.muted}}>No published products are available yet.</Text>}
+      {myBusinessProfile?<View style={{backgroundColor:C.mint,borderRadius:15,padding:13,marginBottom:10}}><Text style={{fontWeight:'900',fontSize:14,color:C.green}}>{myBusinessProfile.store_name}</Text><Text style={{fontSize:11,color:C.ink,marginTop:4}}>{myBusinessProfile.description||'Your business profile'}</Text><Text style={{fontSize:10,color:C.muted,marginTop:5}}>{myBusinessProfile.contact_email||'No contact email added'}</Text><Btn onPress={()=>void openBusinessStore(session.user.id)} style={{backgroundColor:C.white,padding:9,borderRadius:10,alignSelf:'flex-start',marginTop:9}}><Text style={{color:C.green,fontWeight:'900'}}>Open my store</Text></Btn></View>:<Text style={{fontSize:11,color:C.muted,marginBottom:10}}>Set up a business profile to start a Guftin store.</Text>}
+      {hubBusinessProducts.length?hubBusinessProducts.map(p=><View key={p.id} style={{backgroundColor:C.white,borderRadius:14,padding:12,marginBottom:8}}><Text style={{fontWeight:'900',color:C.ink}}>{p.title}</Text><Text style={{fontSize:11,color:C.muted,marginTop:4}}>{p.description||'Business listing'}</Text><Text style={{fontSize:12,color:C.green,fontWeight:'900',marginTop:6}}>{p.price==null?'Contact business':String(p.currency_code||'PKR')+' '+String(p.price)}</Text><Btn onPress={()=>void openBusinessStore(p.owner_id)} style={{backgroundColor:C.mint,padding:8,borderRadius:10,alignSelf:'flex-start',marginTop:8}}><Text style={{color:C.green,fontWeight:'900'}}>Open business</Text></Btn></View>):<Text style={{fontSize:11,color:C.muted}}>No published products are available yet.</Text>}
       <View style={{marginTop:22,marginBottom:10,flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}><View style={{flex:1}}><Text style={{fontSize:18,fontWeight:'900',color:C.ink}}>Communities</Text><Text style={{fontSize:11,color:C.muted}}>Bring your Guftin groups together</Text></View><Btn onPress={()=>setCommunityCreateOpen(true)} style={{backgroundColor:C.green,padding:10,borderRadius:11}}><Text style={{color:'#fff',fontWeight:'900'}}>＋ Create</Text></Btn></View>
       {hubLoading?<Text style={{fontSize:11,color:C.muted,padding:8}}>Loading your business and communities…</Text>:null}
-      {hubCommunities.length?hubCommunities.map(x=><View key={x.id} style={{backgroundColor:C.white,borderRadius:14,padding:12,marginBottom:8}}><Text style={{fontWeight:'900',color:C.ink}}>{x.title}</Text><Text style={{fontSize:10,color:C.muted,marginTop:4}}>{x.role==='owner'?'Community owner':'Community member'} · {timeLabel(x.created_at)}</Text></View>):<Text style={{fontSize:11,color:C.muted}}>Your joined communities will appear here.</Text>}
+      {hubCommunities.length?hubCommunities.map(x=><View key={x.id} style={{backgroundColor:C.white,borderRadius:14,padding:12,marginBottom:8,borderWidth:1,borderColor:C.line}}><View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}><View style={{flex:1}}><Text style={{fontWeight:'900',color:C.ink}}>{x.title}</Text><Text style={{fontSize:10,color:C.muted,marginTop:4}}>{x.role==='owner'?'Community owner':x.role==='admin'?'Community admin':'Community member'} · {timeLabel(x.created_at)}</Text></View>{x.owner_id==='44d4fbd7-fec0-4d68-9643-32d3e95da162'?<Text style={{fontSize:9,color:C.green,fontWeight:'900',marginRight:8}}>OFFICIAL</Text>:null}<Btn onPress={()=>void loadCommunityDetails(x)} style={{backgroundColor:C.green,padding:9,borderRadius:10}}><Text style={{color:'#fff',fontWeight:'900'}}>Open</Text></Btn></View></View>):<Text style={{fontSize:11,color:C.muted}}>Your joined communities will appear here.</Text>}
 
     </ScrollView>:null}
     {tab==='Magic'?<MagicMomentsScreen userId={session.user.id} chats={chats} getDeviceIdentity={ensureDeviceIdentity} onBack={()=>setTab('Chats')} onOpenChat={(chat:any)=>openChat(chat)}/>:null}
@@ -5709,6 +5819,23 @@ function GuftinApp() {
     </Modal>
 
     <Modal visible={communityCreateOpen} transparent animationType="fade" onRequestClose={()=>setCommunityCreateOpen(false)}><View style={{flex:1,backgroundColor:'#0007',justifyContent:'center',padding:22}}><View style={{backgroundColor:C.white,borderRadius:20,padding:18}}><Text style={{fontSize:18,fontWeight:'900',color:C.ink}}>Create community</Text><TextInput value={communityDraftTitle} onChangeText={setCommunityDraftTitle} placeholder="Community name" maxLength={80} style={{backgroundColor:C.paper,borderRadius:12,padding:13,color:C.ink,marginTop:13}}/><View style={{flexDirection:'row',justifyContent:'flex-end',gap:10,marginTop:14}}><Btn onPress={()=>setCommunityCreateOpen(false)} style={{padding:12}}><Text style={{color:C.muted}}>Cancel</Text></Btn><Btn disabled={communityBusy||!communityDraftTitle.trim()} onPress={()=>void createHubCommunity()} style={{backgroundColor:C.green,padding:12,borderRadius:11}}><Text style={{color:'#fff',fontWeight:'900'}}>Create</Text></Btn></View></View></View></Modal>
+    <Modal visible={!!selectedCommunity} transparent animationType="slide" onRequestClose={()=>setSelectedCommunity(null)}>
+      <View style={{flex:1,backgroundColor:'#0009',justifyContent:'flex-end'}}><View style={{backgroundColor:C.white,borderTopLeftRadius:24,borderTopRightRadius:24,padding:18,maxHeight:'92%'}}>
+        <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginBottom:10}}><View style={{flex:1}}><Text style={{fontSize:19,fontWeight:'900',color:C.ink}}>{selectedCommunity?.title||'Community'}</Text><Text style={{fontSize:11,color:C.muted,marginTop:3}}>{communityMembers.length} members · {selectedCommunity?.role==='owner'?'Owner':selectedCommunity?.role==='admin'?'Admin':'Member'}</Text></View><Btn onPress={()=>setSelectedCommunity(null)} style={{padding:9}}><Text style={{fontSize:20,color:C.ink}}>✕</Text></Btn></View>
+        {(selectedCommunity?.role==='owner'||selectedCommunity?.role==='admin')?<View style={{backgroundColor:C.mint,borderRadius:14,padding:12,marginBottom:12}}><Text style={{fontWeight:'900',color:C.green}}>Invite people</Text><Text style={{fontSize:11,color:C.ink,marginTop:4}}>Share a link so someone can join this community directly.</Text><Btn disabled={!communityInviteCode} onPress={()=>void shareCommunityInvite()} style={{backgroundColor:C.green,padding:11,borderRadius:11,alignItems:'center',marginTop:9}}><Text style={{color:'#fff',fontWeight:'900'}}>Share invite link</Text></Btn><View style={{flexDirection:'row',gap:7,marginTop:10}}><TextInput value={communityMemberUsername} onChangeText={setCommunityMemberUsername} placeholder="Add by @username" autoCapitalize="none" style={{flex:1,backgroundColor:C.white,borderRadius:10,padding:11,color:C.ink}}/><Btn disabled={communityMemberBusy||!communityMemberUsername.trim()} onPress={()=>void addCommunityMember()} style={{backgroundColor:C.green,paddingHorizontal:13,justifyContent:'center',borderRadius:10}}><Text style={{color:'#fff',fontWeight:'900'}}>{communityMemberBusy?'…':'Add'}</Text></Btn></View></View>:null}
+        {communityDetailsLoading?<Text style={{color:C.muted,padding:10}}>Loading community…</Text>:null}
+        <ScrollView style={{flexGrow:0,maxHeight:250}}><Text style={{fontWeight:'900',color:C.ink,marginBottom:7}}>Members</Text>{communityMembers.map((member:any)=><View key={member.user_id} style={{flexDirection:'row',alignItems:'center',paddingVertical:8,borderBottomWidth:1,borderColor:C.line}}><Avatar label={initials(member.display_name||member.username||'G')} color={C.green} size={35} uri={member.avatar_url}/><View style={{marginLeft:9,flex:1}}><Text style={{fontWeight:'800',color:C.ink}}>{member.display_name||member.username||'Guftin member'}</Text><Text style={{fontSize:10,color:C.muted}}>{member.username?'@'+member.username:'Guftin account'} · {member.role}</Text></View></View>)}</ScrollView>
+        <Text style={{fontWeight:'900',color:C.ink,marginTop:14,marginBottom:7}}>Community groups</Text>
+        <ScrollView style={{maxHeight:170}}>{communityGroups.length?communityGroups.map((group:any)=><View key={group.id} style={{flexDirection:'row',alignItems:'center',backgroundColor:C.paper,borderRadius:11,padding:10,marginBottom:7}}><View style={{flex:1}}><Text style={{fontWeight:'800',color:C.ink}}>{group.title||'Community group'}</Text><Text style={{fontSize:10,color:C.muted}}>Open this group chat</Text></View><Btn onPress={()=>void openCommunityGroup(group)} style={{backgroundColor:C.green,padding:9,borderRadius:9}}><Text style={{color:'#fff',fontWeight:'900'}}>Open</Text></Btn></View>):<Text style={{fontSize:11,color:C.muted}}>No group chats have been added to this community yet.</Text>}</ScrollView>
+      </View></View>
+    </Modal>
+    <Modal visible={!!selectedBusinessStore} transparent animationType="slide" onRequestClose={()=>setSelectedBusinessStore(null)}>
+      <View style={{flex:1,backgroundColor:'#0009',justifyContent:'flex-end'}}><View style={{backgroundColor:C.white,borderTopLeftRadius:24,borderTopRightRadius:24,padding:18,maxHeight:'88%'}}>
+        <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginBottom:10}}><View style={{flex:1}}><Text style={{fontSize:19,fontWeight:'900',color:C.ink}}>{selectedBusinessStore?.store_name||'Business store'}</Text><Text style={{fontSize:11,color:C.muted,marginTop:3}}>Guftin business storefront</Text></View><Btn onPress={()=>setSelectedBusinessStore(null)} style={{padding:9}}><Text style={{fontSize:20,color:C.ink}}>✕</Text></Btn></View>
+        {businessStoreLoading?<Text style={{color:C.muted,padding:10}}>Loading store…</Text>:null}
+        <ScrollView><Text style={{fontSize:12,color:C.ink,lineHeight:19}}>{selectedBusinessStore?.description||'Welcome to this Guftin business store.'}</Text>{selectedBusinessStore?.contact_email?<Text style={{fontSize:11,color:C.green,marginTop:7}}>Contact: {selectedBusinessStore.contact_email}</Text>:null}<Text style={{fontWeight:'900',color:C.ink,marginTop:16,marginBottom:8}}>Published products</Text>{businessStoreProducts.length?businessStoreProducts.map((product:any)=><View key={product.id} style={{backgroundColor:C.paper,borderRadius:12,padding:12,marginBottom:8}}><Text style={{fontWeight:'900',color:C.ink}}>{product.title}</Text><Text style={{fontSize:11,color:C.muted,marginTop:4}}>{product.description||'Business listing'}</Text><Text style={{fontSize:12,color:C.green,fontWeight:'900',marginTop:6}}>{String(product.currency_code||'PKR')+' '+String(product.price)}</Text><Text style={{fontSize:10,color:C.muted,marginTop:3}}>{product.availability||'available'}</Text></View>):<Text style={{fontSize:11,color:C.muted}}>This store has no published products yet.</Text>}</ScrollView>
+      </View></View>
+    </Modal>
     <Modal visible={businessSetupOpen} transparent animationType="fade" onRequestClose={()=>setBusinessSetupOpen(false)}><KeyboardAvoidingView behavior={Platform.OS==='ios'?'padding':undefined} style={{flex:1,backgroundColor:'#0007',justifyContent:'center',padding:22}}><View style={{backgroundColor:C.white,borderRadius:20,padding:18}}><Text style={{fontSize:18,fontWeight:'900',color:C.ink}}>Business profile</Text><TextInput value={businessDraftName} onChangeText={setBusinessDraftName} placeholder="Store or business name" maxLength={80} style={{backgroundColor:C.paper,borderRadius:12,padding:13,color:C.ink,marginTop:12}}/><TextInput value={businessDraftDescription} onChangeText={setBusinessDraftDescription} placeholder="Describe your business" maxLength={700} multiline style={{backgroundColor:C.paper,borderRadius:12,padding:13,color:C.ink,marginTop:9,minHeight:82}}/><TextInput value={businessDraftEmail} onChangeText={setBusinessDraftEmail} placeholder="Business contact email (optional)" keyboardType="email-address" autoCapitalize="none" style={{backgroundColor:C.paper,borderRadius:12,padding:13,color:C.ink,marginTop:9}}/><View style={{flexDirection:'row',justifyContent:'flex-end',gap:10,marginTop:14}}><Btn onPress={()=>setBusinessSetupOpen(false)} style={{padding:12}}><Text style={{color:C.muted}}>Cancel</Text></Btn><Btn disabled={businessBusy||!businessDraftName.trim()} onPress={()=>void saveBusinessProfile()} style={{backgroundColor:C.green,padding:12,borderRadius:11}}><Text style={{color:'#fff',fontWeight:'900'}}>Save store</Text></Btn></View></View></KeyboardAvoidingView></Modal>
     <Modal visible={!!selectedStatus} transparent animationType="fade" onRequestClose={()=>setSelectedStatus(null)}>
       <View style={{flex:1,backgroundColor:'#000e',justifyContent:'center',padding:18}}>

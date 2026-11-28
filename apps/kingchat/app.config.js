@@ -91,6 +91,18 @@ module.exports = ({ config }) => ({
         autoVerify: false,
         data: [{ scheme: "kingchat", host: "channel" }],
         category: ["BROWSABLE", "DEFAULT"]
+      },
+      {
+        action: "VIEW",
+        autoVerify: true,
+        data: [{ scheme: "https", host: "guftin-official.pages.dev", pathPrefix: "/community/" }],
+        category: ["BROWSABLE", "DEFAULT"]
+      },
+      {
+        action: "VIEW",
+        autoVerify: false,
+        data: [{ scheme: "kingchat", host: "community" }],
+        category: ["BROWSABLE", "DEFAULT"]
       }
     ],
     adaptiveIcon: {
