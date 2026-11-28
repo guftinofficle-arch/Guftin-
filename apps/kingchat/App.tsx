@@ -3272,9 +3272,10 @@ function GuftinApp() {
       const contactValue=businessDraftPhone.trim();
       const usernameCandidate=contactValue.replace(/^@/,'').toLowerCase();
       const isUsername=!!contactValue&&/^[a-z0-9_]{3,24}$/.test(usernameCandidate)&&!/[+ ()-]/.test(contactValue)&&!/^\d{7,}$/.test(contactValue);
-      const contactPhone=contactValue&&!isUsername?contactValue:null;
+      const rawContactPhone=contactValue&&!isUsername?contactValue:null;
+      const contactPhone=rawContactPhone?normalizeGuftinPhone(rawContactPhone):null;
       const contactUsername=isUsername?usernameCandidate:null;
-      if(contactPhone&&!/^\+?[0-9 ()-]{7,24}$/.test(contactPhone))throw new Error('Enter a valid contact number with country code, or a Guftin username.');
+      if(rawContactPhone&&!contactPhone)throw new Error('Enter a valid Pakistan mobile number (03… or +92…) or a Guftin username.');
       const {data,error}=await supabase.from('kc_business_profiles').upsert({
         user_id:session.user.id,store_name:businessDraftName.trim().slice(0,100),
         description:businessDraftDescription.trim().slice(0,1200)||null,
