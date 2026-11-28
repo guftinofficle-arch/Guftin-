@@ -1,14 +1,23 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
+import * as LocalAuthentication from 'expo-local-authentication';
 import NetInfo from '@react-native-community/netinfo';
 import {
-  ActivityIndicator, Alert, Animated, AppState, BackHandler, FlatList, Image, KeyboardAvoidingView, Modal,
+  Alert, Animated, AppState, BackHandler, FlatList, Image, KeyboardAvoidingView, Modal,
   Platform, RefreshControl, ScrollView, Share, StatusBar, Switch, Text, TextInput, ToastAndroid,
   TouchableOpacity, View, useWindowDimensions
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from './src/lib/supabase';
+import { upgrade20 } from './src/features/upgrade20';
+import { CallControlButton } from './src/features/calls/CallControlButton';
+import { isStatusActive } from './src/features/status/statusUtils';
+import { saveMediaToGallery } from './src/features/media/saveMediaToGallery';
+import { ChatOptionsPopover } from './src/features/chat-menu/ChatOptionsPopover';
+import { LiveverseScreen } from './src/features/liveverse/LiveverseScreen';
+import { MagicMomentsScreen } from './src/features/magic-moments/MagicMomentsScreen';
+import { getChannelAnalytics, recordChannelAnalyticsEvent } from './src/features/channels/channelAnalytics';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 import * as ImagePicker from 'expo-image-picker';
@@ -95,6 +104,16 @@ const stopGuftinCallAudioSession = async (): Promise<void> => {
   return guftinCallAudioStopPromise;
 };
 const incomingCallNotificationId = (callId:string) => 'guftin-incoming-call-'+callId;
+const areBackgroundCallsEnabled = async ():Promise<boolean> => {
+  try {
+    const raw = await AsyncStorage.getItem('guftin-preferences');
+    const saved = raw ? JSON.parse(raw) : {};
+    return saved?.backgroundCallsEnabled !== false;
+  } catch {
+    // Keep calls enabled if an older or unreadable preferences record exists.
+    return true;
+  }
+};
 const dismissIncomingCallNotification = async (callId:string) => {
   const identifier=incomingCallNotificationId(callId);
   try{await Notifications.cancelScheduledNotificationAsync(identifier);}catch{}
@@ -135,6 +154,7 @@ const presentNativeIncomingCall = async (payload:any) => {
   const callId = typeof payload?.call_id === 'string' ? payload.call_id :
     typeof payload?.id === 'string' ? payload.id : '';
   if (!callId || Platform.OS !== 'android') return;
+  if (!(await areBackgroundCallsEnabled())) return;
   const callerName = typeof payload?.caller_name === 'string' && payload.caller_name.trim()
     ? payload.caller_name.trim() : 'Guftin contact';
   const callType = payload?.call_type === 'video' ? 'video' : 'voice';
@@ -249,17 +269,18 @@ const registerIncomingCallBackgroundTask=()=>{
 };
 
 
-let C:any = { ink:'#102b27', muted:'#82938e', green:'#087e6c', mint:'#e5f5ee', paper:'#f5f8f6', white:'#fff', line:'#e9efec', red:'#b94e48' };
+let C:any = { ink:'#17352d', muted:'#81918a', green:'#079b5b', mint:'#e5f7eb', paper:'#fbf5eb', white:'#fff', line:'#eee8df', red:'#b94e48' };
 const THEMES:any = {
-  emerald:{ink:'#102b27',muted:'#82938e',green:'#087e6c',mint:'#e5f5ee',paper:'#f5f8f6',white:'#fff',line:'#e9efec',red:'#b94e48'},
+  emerald:{ink:'#17352d',muted:'#81918a',green:'#079b5b',mint:'#e5f7eb',paper:'#fbf5eb',white:'#fff',line:'#eee8df',red:'#b94e48'},
   ocean:{ink:'#112b46',muted:'#71869e',green:'#2476d2',mint:'#e5f0ff',paper:'#f4f8ff',white:'#fff',line:'#e0e9f5',red:'#c94f68'},
   violet:{ink:'#2d2145',muted:'#8b7c9f',green:'#7950c8',mint:'#efe8ff',paper:'#f8f5ff',white:'#fff',line:'#ece4f7',red:'#c45073'},
   sunset:{ink:'#472b2b',muted:'#987c73',green:'#d45b42',mint:'#ffede4',paper:'#fff7f2',white:'#fff',line:'#f3e4dc',red:'#b63f4b'},
   night:{ink:'#edf3ff',muted:'#9baac0',green:'#77b9ff',mint:'#223d5d',paper:'#101a2b',white:'#1a2940',line:'#2a3b54',red:'#ff8894'}
 };
-type Chat = { id:string; name:string; avatar:string; avatarUrl?:string; color:string; last:string; time:string; unread:number; online:boolean; kind:string; lastAt:number; isOfficial?:boolean; isVerified?:boolean; isChannelOwner?:boolean; inviteCode?:string; isPublic?:boolean; ownerId?:string; description?:string; hasConversationActivity?:boolean; hasCallActivity?:boolean; pendingContactId?:string; hasPendingActivity?:boolean };
-type Message = { id:string; conversation_id:string; sender_id:string|null; body:string|null; message_type:string; attachment_url?:string|null; created_at:string; mine:boolean; deleted_at?:string|null; pending?:boolean };
+type Chat = { id:string; name:string; avatar:string; avatarUrl?:string; color:string; last:string; time:string; unread:number; online:boolean; kind:string; lastAt:number; communityId?:string; isCommunityAdmin?:boolean; isOfficial?:boolean; isVerified?:boolean; isChannelOwner?:boolean; inviteCode?:string; isPublic?:boolean; ownerId?:string; description?:string; hasConversationActivity?:boolean; hasCallActivity?:boolean; pendingContactId?:string; hasPendingActivity?:boolean };
+type Message = { id:string; conversation_id:string; sender_id:string|null; body:string|null; message_type:string; attachment_url?:string|null; created_at:string; edited_at?:string|null; mine:boolean; deleted_at?:string|null; pending?:boolean };
 const sortInboxChats=(items:Chat[])=>items.slice().sort((a,b)=>(Number(!!b.isOfficial)-Number(!!a.isOfficial))||((Number(b.lastAt)||0)-(Number(a.lastAt)||0)));
+const isGuftinUuid=(value:any):value is string=>typeof value==='string'&&/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(value);
 const normalizeGuftinPhone=(value:string):string|null=>{
   const raw=String(value||'').trim();
   if(!raw)return null;
@@ -272,6 +293,18 @@ const normalizeGuftinPhone=(value:string):string|null=>{
   else if(digits.length===10&&digits.startsWith('3'))normalized='+92'+digits;
   else return null;
   return /^\+[1-9][0-9]{7,14}$/.test(normalized)?normalized:null;
+};
+const extractCommunityInviteCode=(url:string)=>{
+  const parts=url.replace(/[?#].*$/, '').split('/').filter(Boolean);
+  const communityIndex=parts.findIndex(part=>part.toLowerCase()==='community');
+  if(communityIndex<0||!parts[communityIndex+1])return '';
+  try{return decodeURIComponent(parts[communityIndex+1]);}catch{return parts[communityIndex+1];}
+};
+const extractBusinessStoreOwner=(url:string)=>{
+  const parts=url.replace(/[?#].*$/, '').split('/').filter(Boolean);
+  const businessIndex=parts.findIndex(part=>part.toLowerCase()==='business'||part.toLowerCase()==='store');
+  const owner=businessIndex>=0?parts[businessIndex+1]:'';
+  return owner&&/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(owner)?owner:'';
 };
 const extractChannelInviteCode=(url:string)=>{
   const parts=url.replace(/[?#].*$/, '').split('/').filter(Boolean);
@@ -387,19 +420,102 @@ function Avatar({label,color,size=52,online=false,uri}:any) {
 function BrandLogo({size=78}:any) {
   return <Image source={require('./assets/guftin-official-logo.webp')} style={{width:size,height:size}} resizeMode="contain"/>;
 }
+
+const GUFTIN_WELCOME_SOUND_KEY='guftin-welcome-chime-played-v1';
+const createGuftinWelcomeChime=():Uint8Array=>{
+  const sampleRate=22050,seconds=0.78,sampleCount=Math.floor(sampleRate*seconds);
+  const buffer=new ArrayBuffer(44+sampleCount*2),view=new DataView(buffer);
+  const writeText=(offset:number,value:string)=>{for(let i=0;i<value.length;i++)view.setUint8(offset+i,value.charCodeAt(i));};
+  writeText(0,'RIFF');view.setUint32(4,36+sampleCount*2,true);writeText(8,'WAVE');
+  writeText(12,'fmt ');view.setUint32(16,16,true);view.setUint16(20,1,true);
+  view.setUint16(22,1,true);view.setUint32(24,sampleRate,true);view.setUint32(28,sampleRate*2,true);
+  view.setUint16(32,2,true);view.setUint16(34,16,true);writeText(36,'data');view.setUint32(40,sampleCount*2,true);
+  const notes=[{at:0,frequency:659.25},{at:0.22,frequency:830.61},{at:0.44,frequency:987.77}];
+  for(let i=0;i<sampleCount;i++){
+    const t=i/sampleRate;let value=0;
+    for(const note of notes){
+      const local=t-note.at;
+      if(local>=0&&local<0.20){
+        const attack=Math.min(1,local/0.018),release=Math.min(1,(0.20-local)/0.055);
+        const envelope=Math.max(0,Math.min(attack,release));
+        value+=Math.sin(2*Math.PI*note.frequency*local)*envelope*0.115;
+      }
+    }
+    view.setInt16(44+i*2,Math.max(-1,Math.min(1,value))*32767,true);
+  }
+  return new Uint8Array(buffer);
+};
+function AnimatedBrandLogo({size=78,playIntroSound=true}:any){
+  const turn=useRef(new Animated.Value(0)).current;
+  const scale=useRef(new Animated.Value(0.72)).current;
+  const glow=useRef(new Animated.Value(0)).current;
+  const soundRef=useRef<Audio.Sound|null>(null);
+  useEffect(()=>{
+    const animation=Animated.parallel([
+      Animated.timing(turn,{toValue:1,duration:1350,useNativeDriver:true}),
+      Animated.sequence([
+        Animated.timing(scale,{toValue:1.12,duration:720,useNativeDriver:true}),
+        Animated.spring(scale,{toValue:1,useNativeDriver:true,friction:5,tension:75})
+      ]),
+      Animated.sequence([
+        Animated.timing(glow,{toValue:1,duration:650,useNativeDriver:true}),
+        Animated.timing(glow,{toValue:0.35,duration:700,useNativeDriver:true})
+      ])
+    ]);
+    animation.start();
+    let mounted=true;
+    if(playIntroSound){
+      void (async()=>{
+        try{
+          const played=await AsyncStorage.getItem(GUFTIN_WELCOME_SOUND_KEY);
+          if(played==='1'||!mounted)return;
+          await AsyncStorage.setItem(GUFTIN_WELCOME_SOUND_KEY,'1');
+          const audioFile=new File(Paths.document,'guftin-welcome-chime.wav');
+          if(!audioFile.exists){audioFile.create();await audioFile.write(createGuftinWelcomeChime());}
+          const loaded=await Audio.Sound.createAsync({uri:audioFile.uri},{shouldPlay:true,volume:0.16});
+          if(!mounted){await loaded.sound.unloadAsync();return;}
+          soundRef.current=loaded.sound;
+          loaded.sound.setOnPlaybackStatusUpdate((status:any)=>{
+            if(status?.isLoaded&&status.didJustFinish){
+              const finished=soundRef.current;soundRef.current=null;
+              if(finished)void finished.unloadAsync().catch(()=>{});
+            }
+          });
+        }catch(error:any){console.warn('Guftin welcome sound unavailable:',error?.message||error);}
+      })();
+    }
+    return ()=>{
+      mounted=false;animation.stop();
+      const current=soundRef.current;soundRef.current=null;
+      if(current)void current.unloadAsync().catch(()=>{});
+    };
+  },[turn,scale,glow,playIntroSound]);
+  const rotation=turn.interpolate({inputRange:[0,1],outputRange:['0deg','720deg']});
+  const haloOpacity=glow.interpolate({inputRange:[0,1],outputRange:[0.18,0.9]});
+  const frame=size+30;
+  return <View accessibilityLabel="Guftin animated logo" style={{width:frame,height:frame,alignItems:'center',justifyContent:'center'}}>
+    <Animated.View style={{position:'absolute',width:frame-4,height:frame-4,borderRadius:frame/2,borderWidth:2,borderColor:'#16c8ff',opacity:haloOpacity,transform:[{rotate:rotation},{scale}]}}/>
+    <Animated.View style={{position:'absolute',width:frame-15,height:frame-15,borderRadius:frame/2,borderWidth:2,borderColor:'#a52cff',opacity:haloOpacity,transform:[{rotate:rotation}]}}/>
+    <Animated.View style={{transform:[{rotate:rotation},{scale}]}}>
+      <BrandLogo size={size}/>
+    </Animated.View>
+  </View>;
+}
+function GuftinLoader({color=C.green,size=22,style}:any){
+  const turn=useRef(new Animated.Value(0)).current;
+  useEffect(()=>{
+    const loop=Animated.loop(Animated.timing(turn,{toValue:1,duration:1050,useNativeDriver:true}));
+    loop.start();return ()=>loop.stop();
+  },[turn]);
+  const rotation=turn.interpolate({inputRange:[0,1],outputRange:['0deg','360deg']});
+  const diameter=Math.max(20,Number(size)||22);
+  return <Animated.View accessibilityRole="progressbar" accessibilityLabel="Loading Guftin" style={[{width:diameter,height:diameter,borderRadius:diameter/2,borderWidth:2.5,borderTopColor:color,borderRightColor:'#a62cff',borderBottomColor:'transparent',borderLeftColor:'#24caff',alignItems:'center',justifyContent:'center',transform:[{rotate:rotation}]},style]}>
+    <BrandLogo size={Math.max(13,diameter*.68)}/>
+  </Animated.View>;
+}
+
 function Heading({children}:any) { return <Text style={{fontSize:25,fontWeight:'900',color:C.ink,letterSpacing:-.6}}>{children}</Text>; }
 
-function CallControlButton({label,onPress,active=false,danger=false,disabled=false}:any) {
-  return <Btn disabled={disabled} onPress={onPress} style={{
-    flexGrow:1,flexBasis:'22%',minWidth:70,minHeight:54,paddingHorizontal:8,paddingVertical:9,
-    alignItems:'center',justifyContent:'center',borderRadius:18,
-    backgroundColor:danger?'#c43e48':active?'#e8c75c':'#244b45',
-    borderWidth:1,borderColor:danger?'#f17a82':active?'#f4d782':'#47766c',
-    opacity:disabled?0.45:1
-  }}>
-    <Text numberOfLines={2} style={{color:danger?'#fff':active?'#23362f':'#fff',fontSize:11,fontWeight:'900',textAlign:'center'}}>{label}</Text>
-  </Btn>;
-}
 
 function CallRoomScreen({callId,callType,onHangUp,callScope,sessionUserId}:any) {
   const tracks=useTracks([Track.Source.Camera]);
@@ -628,17 +744,17 @@ function CallRoomScreen({callId,callType,onHangUp,callScope,sessionUserId}:any) 
     :recording?.status==='switching_to_recording'?'PREPARING CONSENTED RECORDING':'SAVING RECORDING…';
   const videoTileHeight=Math.max(112,Math.min(220,Math.floor((windowHeight-insets.top-insets.bottom-330-(recordingActive?46:0))/Math.max(1,Math.ceil(tracks.length/2)))));
 
-  return <View style={{flex:1,backgroundColor:'#081d1b'}}>
-    <SafeAreaView edges={['top','left','right']} style={{flex:1,backgroundColor:'#102b27'}}>
-      <StatusBar barStyle="light-content" backgroundColor="#102b27"/>
-      <View style={{height:62,paddingHorizontal:15,flexDirection:'row',alignItems:'center',justifyContent:'space-between',borderBottomWidth:1,borderColor:'#2c5148'}}>
+  return <View style={{flex:1,backgroundColor:'#050a2b'}}>
+    <SafeAreaView edges={['top','left','right']} style={{flex:1,backgroundColor:'#080d39'}}>
+      <StatusBar barStyle="light-content" backgroundColor="#080d39"/>
+      <View style={{height:68,paddingHorizontal:18,flexDirection:'row',alignItems:'center',justifyContent:'space-between',borderBottomWidth:1,borderColor:'#273b91'}}>
         <View style={{flex:1}}>
           <Text style={{fontSize:19,fontWeight:'900',color:'#fff',letterSpacing:-0.3}}>
             {callType==='video'?(callScope==='group'?'Group video call':'Video call'):(callScope==='group'?'Group voice call':'Voice call')}
           </Text>
-          <Text style={{fontSize:11,color:'#b8d2c8',marginTop:3}}>{participants.length} participant{participants.length===1?'':'s'} connected</Text>
+          <Text style={{fontSize:11,color:'#a8c9ff',marginTop:3}}>{participants.length} participant{participants.length===1?'':'s'} connected</Text>
         </View>
-        <Btn onPress={openCallMenu} style={{width:46,height:46,borderRadius:15,backgroundColor:'#1b4038',alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:'#47766c'}}>
+        <Btn onPress={openCallMenu} style={{width:46,height:46,borderRadius:15,backgroundColor:'#171c66',alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:'#436dff'}}>
           <Text style={{fontSize:26,fontWeight:'900',color:'#fff'}}>⋮</Text>
         </Btn>
       </View>
@@ -652,25 +768,25 @@ function CallRoomScreen({callId,callType,onHangUp,callScope,sessionUserId}:any) 
           numColumns={2} columnWrapperStyle={{gap:9}} style={{flex:1}}
           contentContainerStyle={{gap:9,paddingBottom:12,flexGrow:1}}
           renderItem={({item}:any)=>isTrackReference(item)
-            ?<View style={{flex:1,height:videoTileHeight,borderRadius:16,overflow:'hidden',backgroundColor:'#1b3832',borderWidth:1,borderColor:'#47766c'}}>
+            ?<View style={{flex:1,height:videoTileHeight,borderRadius:16,overflow:'hidden',backgroundColor:'#101642',borderWidth:1,borderColor:'#436dff'}}>
               <VideoTrack trackRef={item} style={{width:'100%',height:'100%'}}/>
-              <View style={{position:'absolute',left:8,bottom:8,paddingHorizontal:8,paddingVertical:4,backgroundColor:'#061b18cc',borderRadius:8}}>
+              <View style={{position:'absolute',left:8,bottom:8,paddingHorizontal:8,paddingVertical:4,backgroundColor:'#070a2dcc',borderRadius:8}}>
                 <Text style={{fontSize:10,color:'#fff',fontWeight:'800'}} numberOfLines={1}>{item.participant?.name||item.participant?.identity||'Participant'}</Text>
               </View>
             </View>
-            :<View style={{width:'48%',height:videoTileHeight,alignItems:'center',justifyContent:'center',backgroundColor:'#1b3832',borderRadius:16,borderWidth:1,borderColor:'#47766c'}}><Text style={{color:'#fff'}}>Camera is off</Text></View>}
+            :<View style={{width:'48%',height:videoTileHeight,alignItems:'center',justifyContent:'center',backgroundColor:'#101642',borderRadius:16,borderWidth:1,borderColor:'#436dff'}}><Text style={{color:'#fff'}}>Camera is off</Text></View>}
           ListEmptyComponent={<View style={{flex:1,minHeight:160,alignItems:'center',justifyContent:'center',padding:26}}>
-            <Text style={{fontSize:40,color:'#d4f1e5'}}>▣</Text>
+            <Text style={{fontSize:40,color:'#d7e9ff'}}>▣</Text>
             <Text style={{fontSize:13,fontWeight:'800',color:'#fff',marginTop:12}}>Waiting for video participants…</Text>
           </View>}
         />:<View style={{flex:1,alignItems:'center',justifyContent:'center',padding:24}}>
-          <View style={{width:154,height:154,borderRadius:77,backgroundColor:'#174438',borderWidth:2,borderColor:'#49b58b',alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:66,color:'#fff'}}>☎</Text></View>
-          <Text style={{color:'#f3fff8',marginTop:18,fontSize:20,fontWeight:'900'}}>Secure voice connection</Text>
-          <Text style={{color:'#a9c8ba',marginTop:7,fontSize:12,textAlign:'center',lineHeight:18}}>Your microphone, speaker and recording controls stay available below.</Text>
+          <View style={{width:184,height:184,borderRadius:92,backgroundColor:'#100d50',borderWidth:3,borderColor:'#19bfff',alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:72,color:'#f7f3ff'}}>☎</Text></View>
+          <Text style={{color:'#f4f5ff',marginTop:18,fontSize:20,fontWeight:'900'}}>Secure voice connection</Text>
+          <Text style={{color:'#a9baff',marginTop:7,fontSize:12,textAlign:'center',lineHeight:18}}>Your microphone, speaker and recording controls stay available below.</Text>
         </View>}
       </View>
     </SafeAreaView>
-    <SafeAreaView edges={['bottom']} style={{backgroundColor:'#0c211e',borderTopWidth:1,borderColor:'#2b5348',paddingHorizontal:12,paddingTop:10,paddingBottom:10}}>
+    <SafeAreaView edges={['bottom']} style={{backgroundColor:'#080d36',borderTopWidth:1,borderColor:'#343b9b',paddingHorizontal:12,paddingTop:10,paddingBottom:10}}>
       <View style={{flexDirection:'row',flexWrap:'wrap',gap:8,justifyContent:'space-between'}}>
         <CallControlButton label={isMicrophoneEnabled?'🎙  Mic on':'🎙  Mic muted'} active={!isMicrophoneEnabled} disabled={controlBusy} onPress={()=>void toggleMicrophone()}/>
         <CallControlButton label={speakerOn?'🔊  Speaker on':'🔊  Speaker'} active={speakerOn} disabled={controlBusy} onPress={()=>void toggleSpeaker()}/>
@@ -680,8 +796,8 @@ function CallRoomScreen({callId,callType,onHangUp,callScope,sessionUserId}:any) 
         </>:null}
         <CallControlButton label={recordingBusy?'Recording…':'⋮  Call options'} active={recordingActive} disabled={recordingBusy} onPress={openCallMenu}/>
       </View>
-      <Btn onPress={()=>void handleHangUp()} style={{marginTop:9,minHeight:56,borderRadius:17,backgroundColor:'#d94350',borderWidth:1,borderColor:'#fa7b83',alignItems:'center',justifyContent:'center',elevation:5}}>
-        <Text style={{fontSize:16,color:'#fff',fontWeight:'900'}}>End call</Text>
+      <Btn onPress={()=>void handleHangUp()} style={{marginTop:9,minHeight:64,borderRadius:34,backgroundColor:'#ed075b',borderWidth:1,borderColor:'#ff68b4',alignItems:'center',justifyContent:'center',elevation:5}}>
+        <Text style={{fontSize:18,color:'#fff',fontWeight:'900',letterSpacing:0.4}}>End call</Text>
       </Btn>
     </SafeAreaView>
     <Modal visible={!!consentPrompt} transparent animationType="fade" onRequestClose={()=>{}}>
@@ -695,7 +811,7 @@ function CallRoomScreen({callId,callType,onHangUp,callScope,sessionUserId}:any) 
           <View style={{flexDirection:'row',gap:10,marginTop:22}}>
             <Btn disabled={recordingBusy} onPress={()=>void answerRecordingConsent('declined')} style={{flex:1,paddingVertical:14,borderRadius:13,backgroundColor:'#fbe7e8',alignItems:'center'}}><Text style={{color:'#a42f39',fontWeight:'900'}}>Decline</Text></Btn>
             <Btn disabled={recordingBusy} onPress={()=>void answerRecordingConsent('accepted')} style={{flex:1,paddingVertical:14,borderRadius:13,backgroundColor:'#16845f',alignItems:'center'}}>
-              {recordingBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Accept</Text>}
+              {recordingBusy?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Accept</Text>}
             </Btn>
           </View>
         </View>
@@ -722,44 +838,44 @@ function CallLobbyScreen({call,mode,onAccept,onDecline,onCancel,busy}:any) {
   const isGroup=(call?.call_scope||call?.callScope)==='group';
   const displayName=incoming?(call?.caller_name||'Guftin contact'):(call?.contact_name||call?.caller_name||'Guftin contact');
   const statusLabel=busy?'Preparing secure connection…':incoming?(isVideo?'Incoming video call':'Incoming voice call'):(isVideo?'Calling by video…':'Calling…');
-  return <SafeAreaView edges={['top','left','right','bottom']} style={{flex:1,backgroundColor:'#071b18'}}>
-    <StatusBar barStyle="light-content" backgroundColor="#071b18"/>
+  return <SafeAreaView edges={['top','left','right','bottom']} style={{flex:1,backgroundColor:'#05082b'}}>
+    <StatusBar barStyle="light-content" backgroundColor="#05082b"/>
     <View style={{flex:1,paddingHorizontal:22,paddingTop:16,paddingBottom:Math.max(insets.bottom,18)+8}}>
       <View style={{alignItems:'center'}}>
-        <Text style={{fontSize:18,fontWeight:'900',letterSpacing:4,color:'#f4fff9'}}>GUFTIN</Text>
-        <View style={{marginTop:8,paddingHorizontal:13,paddingVertical:6,borderRadius:20,backgroundColor:'#123d32',borderWidth:1,borderColor:'#236451'}}>
-          <Text style={{fontSize:9,fontWeight:'900',letterSpacing:2,color:'#9de5c5'}}>PRIVATE {isVideo?'VIDEO':'VOICE'} CALL</Text>
+        <Text style={{fontSize:18,fontWeight:'900',letterSpacing:4,color:'#f6f4ff'}}>GUFTIN</Text>
+        <View style={{marginTop:8,paddingHorizontal:13,paddingVertical:6,borderRadius:20,backgroundColor:'#17105c',borderWidth:1,borderColor:'#315bce'}}>
+          <Text style={{fontSize:9,fontWeight:'900',letterSpacing:2,color:'#83dcff'}}>PRIVATE {isVideo?'VIDEO':'VOICE'} CALL</Text>
         </View>
       </View>
       <View style={{alignItems:'center',justifyContent:'center',flex:1,paddingVertical:12}}>
-        <View style={{width:190,height:190,alignItems:'center',justifyContent:'center'}}>
-          <Animated.View style={{position:'absolute',width:164,height:164,borderRadius:82,borderWidth:2,borderColor:'#49d7a0',opacity:pulseOpacity,transform:[{scale:pulseScale}]}}/>
-          <View style={{width:148,height:148,borderRadius:74,borderWidth:2,backgroundColor:'#0b2a23',borderColor:'#286a55',alignItems:'center',justifyContent:'center',shadowColor:'#31c48d',shadowOpacity:0.28,shadowRadius:25,elevation:14,overflow:'hidden'}}>
-            {call?.contact_avatar_url||call?.avatar_url?<Image source={{uri:call.contact_avatar_url||call.avatar_url}} style={{width:138,height:138,borderRadius:69}}/>
-              :<View style={{width:138,height:138,borderRadius:69,borderWidth:2,borderColor:'#3a9c79',backgroundColor:'#164638',alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:49,fontWeight:'900',color:'#f5fff9'}}>{initials(displayName)}</Text></View>}
+        <View style={{width:220,height:220,alignItems:'center',justifyContent:'center'}}>
+          <Animated.View style={{position:'absolute',width:164,height:164,borderRadius:82,borderWidth:2,borderColor:'#10cfff',opacity:pulseOpacity,transform:[{scale:pulseScale}]}}/>
+          <View style={{width:164,height:164,borderRadius:82,borderWidth:3,backgroundColor:'#0b1047',borderColor:'#6b38ff',alignItems:'center',justifyContent:'center',shadowColor:'#a32cff',shadowOpacity:0.28,shadowRadius:25,elevation:14,overflow:'hidden'}}>
+            {call?.contact_avatar_url||call?.avatar_url?<Image source={{uri:call.contact_avatar_url||call.avatar_url}} style={{width:154,height:154,borderRadius:77}}/>
+              :<View style={{width:138,height:138,borderRadius:69,borderWidth:2,borderColor:'#287dff',backgroundColor:'#17105c',alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:49,fontWeight:'900',color:'#f5fff9'}}>{initials(displayName)}</Text></View>}
           </View>
         </View>
-        <Text numberOfLines={2} style={{fontSize:28,fontWeight:'900',color:'#fff',textAlign:'center',marginTop:18,letterSpacing:-0.6}}>{displayName}</Text>
-        <Text style={{fontSize:13,color:'#a8cfc0',marginTop:8,fontWeight:'700'}}>{isGroup?'Group conversation':isVideo?'Guftin video call':'Guftin voice call'}</Text>
-        <Text style={{fontSize:10,color:'#78bba0',marginTop:7,letterSpacing:1.2,fontWeight:'800'}}>END-TO-END ENCRYPTED</Text>
-        <View style={{marginTop:18,paddingHorizontal:17,paddingVertical:10,borderRadius:18,backgroundColor:'#10382d',borderWidth:1,borderColor:'#245c49',flexDirection:'row',alignItems:'center',gap:9}}>
+        <Text numberOfLines={2} style={{fontSize:30,fontWeight:'900',color:'#fff',textAlign:'center',marginTop:18,letterSpacing:-0.6}}>{displayName}</Text>
+        <Text style={{fontSize:13,color:'#b6c8ff',marginTop:8,fontWeight:'700'}}>{isGroup?'Group conversation':isVideo?'Guftin video call':'Guftin voice call'}</Text>
+        <Text style={{fontSize:10,color:'#83bfff',marginTop:7,letterSpacing:1.2,fontWeight:'800'}}>END-TO-END ENCRYPTED</Text>
+        <View style={{marginTop:18,paddingHorizontal:17,paddingVertical:10,borderRadius:18,backgroundColor:'#12134e',borderWidth:1,borderColor:'#4c3ab8',flexDirection:'row',alignItems:'center',gap:9}}>
           <View style={{width:7,height:7,borderRadius:4,backgroundColor:busy?'#e8c46a':'#52dda2'}}/>
-          <Text style={{fontSize:12,color:'#d9f3e7',fontWeight:'800'}}>{statusLabel}</Text>
+          <Text style={{fontSize:12,color:'#e4e8ff',fontWeight:'800'}}>{statusLabel}</Text>
         </View>
-        <Text style={{fontSize:11,color:'#789f90',marginTop:13,textAlign:'center',lineHeight:17}}>{incoming?'Answer to connect, or decline this call.':'Waiting for the other person to answer.'}</Text>
+        <Text style={{fontSize:11,color:'#9aa8dc',marginTop:13,textAlign:'center',lineHeight:17}}>{incoming?'Answer to connect, or decline this call.':'Waiting for the other person to answer.'}</Text>
       </View>
       {incoming?<View style={{flexDirection:'row',justifyContent:'space-around',alignItems:'center',paddingTop:10}}>
         <View style={{alignItems:'center',gap:9}}>
-          <Btn disabled={busy} onPress={onDecline} style={{width:72,height:72,borderRadius:36,backgroundColor:'#d94350',alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:'#fa7b83',opacity:busy?0.5:1}}><Text style={{fontSize:34,color:'#fff',fontWeight:'500'}}>×</Text></Btn>
-          <Text style={{fontSize:12,color:'#ffd9dc',fontWeight:'800'}}>Decline</Text>
+          <Btn disabled={busy} onPress={onDecline} style={{width:84,height:84,borderRadius:42,backgroundColor:'#e90055',alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:'#ff64b6',opacity:busy?0.5:1}}><Text style={{fontSize:34,color:'#fff',fontWeight:'500'}}>×</Text></Btn>
+          <Text style={{fontSize:12,color:'#ffd7ee',fontWeight:'800'}}>Decline</Text>
         </View>
         <View style={{alignItems:'center',gap:9}}>
-          <Btn disabled={busy} onPress={onAccept} style={{width:78,height:78,borderRadius:39,backgroundColor:'#18a96f',alignItems:'center',justifyContent:'center',borderWidth:2,borderColor:'#82edbd',elevation:10,opacity:busy?0.5:1}}><Text style={{fontSize:31,color:'#fff'}}>{isVideo?'▣':'☎'}</Text></Btn>
-          <Text style={{fontSize:12,color:'#bff7d9',fontWeight:'900'}}>Answer</Text>
+          <Btn disabled={busy} onPress={onAccept} style={{width:78,height:78,borderRadius:39,backgroundColor:'#1522ad',alignItems:'center',justifyContent:'center',borderWidth:2,borderColor:'#36d5ff',elevation:10,opacity:busy?0.5:1}}><Text style={{fontSize:31,color:'#fff'}}>{isVideo?'▣':'☎'}</Text></Btn>
+          <Text style={{fontSize:12,color:'#cdefff',fontWeight:'900'}}>Answer</Text>
         </View>
       </View>:<View style={{alignItems:'center',paddingTop:10}}>
-        <Btn onPress={onCancel} style={{width:78,height:78,borderRadius:39,backgroundColor:'#d94350',alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:'#fa7b83',elevation:7}}><Text style={{fontSize:34,color:'#fff',fontWeight:'500'}}>×</Text></Btn>
-        <Text style={{fontSize:12,color:'#ffd9dc',fontWeight:'800',marginTop:9}}>Cancel call</Text>
+        <Btn onPress={onCancel} style={{width:78,height:78,borderRadius:39,backgroundColor:'#e90055',alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:'#ff64b6',elevation:7}}><Text style={{fontSize:34,color:'#fff',fontWeight:'500'}}>×</Text></Btn>
+        <Text style={{fontSize:12,color:'#ffd7ee',fontWeight:'800',marginTop:9}}>Cancel call</Text>
       </View>}
     </View>
   </SafeAreaView>;
@@ -790,7 +906,7 @@ function SecureLiveKitRoom({liveCall,onDisconnected,onHangUp,onConnected,session
 
   if(!audioReady){
     return <View style={{flex:1,alignItems:'center',justifyContent:'center',backgroundColor:'#071c1b',padding:24}}>
-      <ActivityIndicator color="#65d6b2" size="large"/>
+      <GuftinLoader color="#65d6b2" size="large"/>
       <Text style={{color:'#fff',fontWeight:'700',marginTop:14}}>Preparing secure call audio…</Text>
     </View>;
   }
@@ -846,6 +962,7 @@ function GuftinApp() {
   const [profileReady,setProfileReady]=useState(false);
   const [chats,setChats]=useState<Chat[]>([]);
   const [active,setActive]=useState<Chat|null>(null);
+  const [liveverseOpen,setLiveverseOpen]=useState(false);
   const [pendingNotificationConversation,setPendingNotificationConversation]=useState<string|null>(null);
   const [messages,setMessages]=useState<Record<string,Message[]>>({});
   const [peerLastReadAt,setPeerLastReadAt]=useState<string|null>(null);
@@ -853,8 +970,8 @@ function GuftinApp() {
   const activeConversationKindRef=useRef<string|null>(null);
   const chatMessagesListRef=useRef<FlatList<Message>|null>(null);
   const loadMessagesRef=useRef<((id:string)=>Promise<void>)|null>(null);
-  const flushPendingMessagesRef=useRef<(()=>Promise<void>)|null>(null);
-  const flushPendingMediaRef=useRef<(()=>Promise<void>)|null>(null);
+  const flushPendingMessagesRef=useRef<((force?:boolean)=>Promise<void>)|null>(null);
+  const flushPendingMediaRef=useRef<((force?:boolean)=>Promise<void>)|null>(null);
   const flushingPendingMessages=useRef(false);
   const flushingPendingMedia=useRef(false);
   const onlineRef=useRef(false);
@@ -867,6 +984,14 @@ function GuftinApp() {
     activeConversationKindRef.current=active?.kind||null;
   },[active?.id,active?.kind]);
   const [draft,setDraft]=useState('');
+  const [aiDraft,setAiDraft]=useState('');
+  const [aiChatId,setAiChatId]=useState<string|null>(null);
+  const [aiMessages,setAiMessages]=useState<Array<{role:string;content:string}>>([]);
+  const [aiChats,setAiChats]=useState<any[]>([]);
+  const [aiBusy,setAiBusy]=useState(false);
+  const [aiHistoryOpen,setAiHistoryOpen]=useState(false);
+  const [aiChatRowDismissed,setAiChatRowDismissed]=useState(false);
+  const [aiMode,setAiMode]=useState<'chat'|'write'|'translate'|'summarize'|'reply'>('chat');
   const [search,setSearch]=useState('');
   const [searching,setSearching]=useState(false);
   const [loading,setLoading]=useState(true);
@@ -885,6 +1010,46 @@ function GuftinApp() {
   const [recording,setRecording]=useState<Audio.Recording|null>(null);
   const [recordingBusy,setRecordingBusy]=useState(false);
   const [settingsOpen,setSettingsOpen]=useState(false);
+  const [officialUsersOpen,setOfficialUsersOpen]=useState(false);
+  const [officialMetrics,setOfficialMetrics]=useState<any>(null);
+  const [officialMetricsLoading,setOfficialMetricsLoading]=useState(false);
+  const [officialMetricsError,setOfficialMetricsError]=useState('');
+  const [chatOptionsOpen,setChatOptionsOpen]=useState(false);
+  const [attachmentTrayOpen,setAttachmentTrayOpen]=useState(false);
+  const [advancedCenterOpen,setAdvancedCenterOpen]=useState(false);
+  const [advancedCenterLoading,setAdvancedCenterLoading]=useState(false);
+  const [advancedCenterRows,setAdvancedCenterRows]=useState<Array<{label:string;count:number;detail:string;ok:boolean}>>([]);
+  const [scheduleComposerOpen,setScheduleComposerOpen]=useState(false);
+  const [scheduleDraft,setScheduleDraft]=useState('');
+  const [scheduleAtInput,setScheduleAtInput]=useState('');
+  const [scheduleMode,setScheduleMode]=useState<'at'|'after'>('at');
+  const [scheduleDelayAmount,setScheduleDelayAmount]=useState('10');
+  const [scheduleDelayUnit,setScheduleDelayUnit]=useState<'minutes'|'hours'|'days'>('minutes');
+  const [scheduleBusy,setScheduleBusy]=useState(false);
+  const [scheduledMessagesOpen,setScheduledMessagesOpen]=useState(false);
+  const [scheduledMessages,setScheduledMessages]=useState<any[]>([]);
+  const [scheduledMessagesLoading,setScheduledMessagesLoading]=useState(false);
+  const [editModalVisible,setEditModalVisible]=useState(false);
+  const [editingMessage,setEditingMessage]=useState<Message|null>(null);
+  const [editDraft,setEditDraft]=useState('');
+  const [editBusy,setEditBusy]=useState(false);
+  const [editHistoryVisible,setEditHistoryVisible]=useState(false);
+  const [editHistoryLoading,setEditHistoryLoading]=useState(false);
+  const [editHistoryRows,setEditHistoryRows]=useState<any[]>([]);
+  const [groupPolls,setGroupPolls]=useState<any[]>([]);
+  const [groupEvents,setGroupEvents]=useState<any[]>([]);
+  const [eventCreateVisible,setEventCreateVisible]=useState(false);
+  const [eventTitle,setEventTitle]=useState('');
+  const [eventDetails,setEventDetails]=useState('');
+  const [eventStartsAt,setEventStartsAt]=useState('');
+  const [eventReminderMinutes,setEventReminderMinutes]=useState(15);
+  const [eventBusy,setEventBusy]=useState(false);
+  const [groupCollabLoading,setGroupCollabLoading]=useState(false);
+  const [pollCreateVisible,setPollCreateVisible]=useState(false);
+  const [pollQuestion,setPollQuestion]=useState('');
+  const [pollOptionsText,setPollOptionsText]=useState('');
+  const [pollAllowsMultiple,setPollAllowsMultiple]=useState(false);
+  const [pollBusy,setPollBusy]=useState(false);
   const [savedItemsOpen,setSavedItemsOpen]=useState(false);
   const [savedItems,setSavedItems]=useState<any[]>([]);
   const [savedItemsLoading,setSavedItemsLoading]=useState(false);
@@ -907,12 +1072,18 @@ function GuftinApp() {
   const [appLocked,setAppLocked]=useState(false);
   const [appLockEnabled,setAppLockEnabled]=useState(false);
   const [pinBusy,setPinBusy]=useState(false);
+  const [biometricLockEnabled,setBiometricLockEnabled]=useState(false);
+  const [biometricAvailable,setBiometricAvailable]=useState(false);
+  const [biometricBusy,setBiometricBusy]=useState(false);
   const [showReadReceipts,setShowReadReceipts]=useState(true);
   const [lastSeenVisibility,setLastSeenVisibility]=useState<'everyone'|'contacts'|'nobody'|'selected'>('contacts');
   const [profilePhotoVisibility,setProfilePhotoVisibility]=useState<'everyone'|'contacts'|'nobody'|'selected'>('everyone');
   const [aboutVisibility,setAboutVisibility]=useState<'everyone'|'contacts'|'nobody'|'selected'>('everyone');
   const [privacySettingsLoaded,setPrivacySettingsLoaded]=useState(false);
   const [deviceManagerOpen,setDeviceManagerOpen]=useState(false);
+  const [blockedUsers,setBlockedUsers]=useState<any[]>([]);
+  const [blockedUsersOpen,setBlockedUsersOpen]=useState(false);
+  const [blockedUsersLoading,setBlockedUsersLoading]=useState(false);
   const [registeredDevices,setRegisteredDevices]=useState<any[]>([]);
   const [devicesLoading,setDevicesLoading]=useState(false);
   const [mediaAutoDownload,setMediaAutoDownload]=useState(false);
@@ -931,6 +1102,7 @@ function GuftinApp() {
   const [callHistory,setCallHistory]=useState<any[]>([]);
   const [adsReady,setAdsReady]=useState(false);
   const [pushEnabled,setPushEnabled]=useState(false);
+  const [backgroundCallsEnabled,setBackgroundCallsEnabled]=useState(true);
   const [pushBusy,setPushBusy]=useState(false);
   const [pushPermissionReady,setPushPermissionReady]=useState(false);
   const [permissionSetupVisible,setPermissionSetupVisible]=useState(false);
@@ -985,8 +1157,6 @@ function GuftinApp() {
   },[session?.user?.id]);
 
   const [authBusy,setAuthBusy]=useState(false);
-  const [googleBusy,setGoogleBusy]=useState(false);
-  const [googleUsernameChangeAvailable,setGoogleUsernameChangeAvailable]=useState(false);
   const [authMode,setAuthMode]=useState<'login'|'signup'>('signup');
   const [fullName,setFullName]=useState('');
   const [username,setUsername]=useState('');
@@ -1012,7 +1182,49 @@ function GuftinApp() {
   const [groupContactsLoading,setGroupContactsLoading]=useState(false);
   const [groupCreating,setGroupCreating]=useState(false);
   const [channels,setChannels]=useState<any[]>([]);
+  const [hubCommunities,setHubCommunities]=useState<any[]>([]);
+  const [hubBusinessProducts,setHubBusinessProducts]=useState<any[]>([]);
+  const [hubBusinessStores,setHubBusinessStores]=useState<any[]>([]);
+  const [myBusinessProfile,setMyBusinessProfile]=useState<any>(null);
+  const [hubLoading,setHubLoading]=useState(false);
+  const [communityCreateOpen,setCommunityCreateOpen]=useState(false);
+  const [communityDraftTitle,setCommunityDraftTitle]=useState('');
+  const [communityDraftMembers,setCommunityDraftMembers]=useState('');
+  const [communityBusy,setCommunityBusy]=useState(false);
+  const [businessSetupOpen,setBusinessSetupOpen]=useState(false);
+  const [businessDraftName,setBusinessDraftName]=useState('');
+  const [businessDraftDescription,setBusinessDraftDescription]=useState('');
+  const [businessDraftEmail,setBusinessDraftEmail]=useState('');
+  const [businessDraftPhone,setBusinessDraftPhone]=useState('');
+  const [businessLogoAsset,setBusinessLogoAsset]=useState<any>(null);
+  const [businessBusy,setBusinessBusy]=useState(false);
+  const [productEditorOpen,setProductEditorOpen]=useState(false);
+  const [productDraftTitle,setProductDraftTitle]=useState('');
+  const [productDraftDescription,setProductDraftDescription]=useState('');
+  const [productDraftPrice,setProductDraftPrice]=useState('');
+  const [productDraftAvailability,setProductDraftAvailability]=useState<'available'|'out_of_stock'|'preorder'>('available');
+  const [productDraftPublished,setProductDraftPublished]=useState(true);
+  const [productImageAsset,setProductImageAsset]=useState<any>(null);
+  const [productEditing,setProductEditing]=useState<any>(null);
+  const [productBusy,setProductBusy]=useState(false);
+  const [selectedBusinessProduct,setSelectedBusinessProduct]=useState<any>(null);
+  const [communityGroupTarget,setCommunityGroupTarget]=useState<string|null>(null);
   const [pendingChannelInvite,setPendingChannelInvite]=useState<string|null>(null);
+  const [pendingCommunityInvite,setPendingCommunityInvite]=useState<string|null>(null);
+  const [communityInvitePreview,setCommunityInvitePreview]=useState<any>(null);
+  const [communityInvitePreviewLoading,setCommunityInvitePreviewLoading]=useState(false);
+  const [pendingBusinessStoreOwner,setPendingBusinessStoreOwner]=useState<string|null>(null);
+  const [selectedCommunity,setSelectedCommunity]=useState<any>(null);
+  const [communityMembers,setCommunityMembers]=useState<any[]>([]);
+  const [communityGroups,setCommunityGroups]=useState<any[]>([]);
+  const [communityAnnouncementConversationId,setCommunityAnnouncementConversationId]=useState<string|null>(null);
+  const [communityInviteCode,setCommunityInviteCode]=useState('');
+  const [communityMemberUsername,setCommunityMemberUsername]=useState('');
+  const [communityDetailsLoading,setCommunityDetailsLoading]=useState(false);
+  const [communityMemberBusy,setCommunityMemberBusy]=useState(false);
+  const [selectedBusinessStore,setSelectedBusinessStore]=useState<any>(null);
+  const [businessStoreProducts,setBusinessStoreProducts]=useState<any[]>([]);
+  const [businessStoreLoading,setBusinessStoreLoading]=useState(false);
   const [channelsLoading,setChannelsLoading]=useState(false);
   const [channelSearch,setChannelSearch]=useState('');
   const [channelCreateOpen,setChannelCreateOpen]=useState(false);
@@ -1051,6 +1263,11 @@ function GuftinApp() {
     signedMediaCache.current.set(path,{url:data.signedUrl,expiresAt:Date.now()+23*60*60*1000});
     return data.signedUrl;
   },[]);
+  const getSignedBusinessMediaUrl=useCallback(async(path:string):Promise<string|null>=>{
+    if(!path)return null;
+    const {data,error}=await supabase.storage.from('business-store-media').createSignedUrl(path,60*60*24);
+    return error||!data?.signedUrl?null:data.signedUrl;
+  },[]);
 
   useEffect(()=>{
     let active=true;
@@ -1064,6 +1281,7 @@ function GuftinApp() {
           if(typeof saved.autoSync==='boolean')setAutoSync(saved.autoSync);
           if([15,30,60].includes(saved.syncIntervalSeconds))setSyncIntervalSeconds(saved.syncIntervalSeconds);
           if(typeof saved.mediaAutoDownload==='boolean')setMediaAutoDownload(saved.mediaAutoDownload);
+          if(typeof saved.backgroundCallsEnabled==='boolean')setBackgroundCallsEnabled(saved.backgroundCallsEnabled);
           if(['emerald','ocean','violet','sunset','night'].includes(saved.themeName))setThemeName(saved.themeName);
         }catch{ /* Ignore an outdated or malformed local preferences record. */ }
       }
@@ -1074,7 +1292,7 @@ function GuftinApp() {
 
   useEffect(()=>{
     if(!settingsLoaded)return;
-    void AsyncStorage.setItem('guftin-preferences',JSON.stringify({showReadReceipts,onlineVisibility,autoSync,syncIntervalSeconds,mediaAutoDownload,themeName}));
+    void AsyncStorage.setItem('guftin-preferences',JSON.stringify({showReadReceipts,onlineVisibility,autoSync,syncIntervalSeconds,mediaAutoDownload,backgroundCallsEnabled,themeName}));
   },[settingsLoaded,showReadReceipts,onlineVisibility,autoSync,syncIntervalSeconds,mediaAutoDownload,themeName]);
 
   // Create Android notification channels at startup; request OS permissions only
@@ -1137,6 +1355,10 @@ function GuftinApp() {
       void completeAuthUrl(url);
       const inviteCode=extractChannelInviteCode(url);
       if(inviteCode)setPendingChannelInvite(inviteCode);
+      const communityCode=extractCommunityInviteCode(url);
+      if(communityCode)setPendingCommunityInvite(communityCode);
+      const businessOwner=extractBusinessStoreOwner(url);
+      if(businessOwner)setPendingBusinessStoreOwner(businessOwner);
     };
     const linkSub=Linking.addEventListener('url',({url})=>handleIncomingUrl(url));
     Linking.getInitialURL().then(url=>{if(url)handleIncomingUrl(url);});
@@ -1237,8 +1459,6 @@ function GuftinApp() {
       return;
     }
     setProfile(data);
-    const {data:googleRenameAvailable}=await supabase.rpc('kc_google_username_change_available');
-    setGoogleUsernameChangeAvailable(googleRenameAvailable===true);
     void AsyncStorage.setItem(profileCacheKey,JSON.stringify(data)).catch(()=>{});
     setProfileName(data?.display_name||session.user.user_metadata?.display_name||'');
     setProfileUsername(data?.username||session.user.user_metadata?.username||'');
@@ -1276,34 +1496,58 @@ function GuftinApp() {
         return;
       }
       const directConversationIds=rows.filter(r=>r.conversation?.kind==='direct').map(r=>r.conversation_id).filter(Boolean);
-      const [memberResult,profileResult,messageResult,hiddenResult,channelResult,callResult]=await Promise.all([
+      const [memberResult,messageResult,hiddenResult,channelResult,callResult]=await Promise.all([
         supabase.from('kc_conversation_members').select('conversation_id,user_id,last_read_at,joined_at').in('conversation_id',ids),
-        supabase.from('kc_profiles').select('id,display_name,avatar_url,is_online').neq('id',session.user.id),
-        supabase.from('kc_messages').select('id,conversation_id,sender_id,body,message_type,created_at,deleted_at')
+        supabase.from('kc_messages').select('id,conversation_id,sender_id,body,message_type,created_at,edited_at,deleted_at')
           .in('conversation_id',ids).is('deleted_at',null).order('created_at',{ascending:false}).limit(500),
         supabase.from('kc_message_hidden').select('message_id').eq('user_id',session.user.id),
         supabase.from('kc_channels').select('conversation_id,owner_id,title,description,logo_path,invite_code,is_public,is_official,is_verified').in('conversation_id',ids),
         directConversationIds.length?supabase.from('kc_call_logs').select('conversation_id').in('conversation_id',directConversationIds):Promise.resolve({data:[],error:null})
       ]);
       if(memberResult.error) throw memberResult.error;
-      if(profileResult.error) throw profileResult.error;
       if(messageResult.error) throw messageResult.error;
       if(channelResult.error) throw channelResult.error;
       if(callResult.error) console.warn('Direct chat call activity could not be checked:',callResult.error.message);
       const members=(memberResult.data||[]) as any[];
+      // Only request profiles for people in this user's conversations. Fetching
+      // every other profile on each inbox refresh scales poorly and leaks excess metadata.
+      const peerIds=[...new Set(members.filter(m=>m.user_id!==session.user.id).map(m=>m.user_id))];
+      const profileResult=peerIds.length
+        ?await supabase.from('kc_profiles').select('id,display_name,avatar_url,is_online').in('id',peerIds)
+        :{data:[],error:null};
+      if(profileResult.error) throw profileResult.error;
       const channelMap=new Map((channelResult.data||[]).map((channel:any)=>[channel.conversation_id,channel]));
       const callActivityIds=new Set(((callResult.data||[]) as any[]).map((call:any)=>call.conversation_id).filter(Boolean));
       const hiddenIds=new Set((hiddenResult.data||[]).map((row:any)=>row.message_id));
       hiddenIds.forEach(id=>hiddenMessageIds.current.add(id));
       const inboxMessages=((messageResult.data||[]) as any[]).filter(message=>!hiddenIds.has(message.id)&&!hiddenMessageIds.current.has(message.id));
-      const peerIds=[...new Set(members.filter(m=>m.user_id!==session.user.id).map(m=>m.user_id))];
-      const profiles=(profileResult.error?[]:(profileResult.data||[])) as any[];
-      const profileMap=new Map(profiles.filter(p=>peerIds.includes(p.id)).map(p=>[p.id,p]));
+      const profiles=(profileResult.data||[]) as any[];
+      const profileMap=new Map(profiles.map(p=>[p.id,p]));
+      const membersByConversation=new Map<string,any[]>();
+      for(const member of members){
+        const bucket=membersByConversation.get(member.conversation_id)||[];
+        bucket.push(member);
+        membersByConversation.set(member.conversation_id,bucket);
+      }
+      const membershipByConversation=new Map(rows.map(row=>[row.conversation_id,row]));
+      const unreadByConversation=new Map<string,number>();
+      for(const message of inboxMessages){
+        if(!message.sender_id||message.sender_id===session.user.id)continue;
+        const membership=membershipByConversation.get(message.conversation_id);
+        if(!membership)continue;
+        const readThrough=Math.max(
+          membership.last_read_at?new Date(membership.last_read_at).getTime():0,
+          membership.joined_at?new Date(membership.joined_at).getTime():0
+        );
+        if(new Date(message.created_at).getTime()>readThrough){
+          unreadByConversation.set(message.conversation_id,(unreadByConversation.get(message.conversation_id)||0)+1);
+        }
+      }
       const latest=new Map<string,any>();
       for(const message of inboxMessages) if(!latest.has(message.conversation_id)) latest.set(message.conversation_id,message);
       const mappedRows=await Promise.all(rows.map(async row=>{
         const conv=row.conversation||{};
-        const peers=members.filter(m=>m.conversation_id===row.conversation_id&&m.user_id!==session.user.id);
+        const peers=(membersByConversation.get(row.conversation_id)||[]).filter(m=>m.user_id!==session.user.id);
         const peer=peers.length?profileMap.get(peers[0].user_id):null;
         // A direct membership is not itself a conversation. Require a real registered peer profile.
         if(conv.kind==='direct'&&(!peer||!peer.id))return null;
@@ -1313,15 +1557,7 @@ function GuftinApp() {
         const avatarUrl=avatarPath?(await getSignedMediaUrl(avatarPath))||undefined:undefined;
         let last=latest.get(row.conversation_id);
         if(last&&hiddenMessageIds.current.has(last.id))last=undefined;
-        const readThrough=Math.max(
-          row.last_read_at?new Date(row.last_read_at).getTime():0,
-          row.joined_at?new Date(row.joined_at).getTime():0
-        );
-        const unread=inboxMessages.filter((message:any)=>
-          message.conversation_id===row.conversation_id &&
-          message.sender_id!==session.user.id &&
-          new Date(message.created_at).getTime()>readThrough
-        ).length;
+        const unread=unreadByConversation.get(row.conversation_id)||0;
         let preview='No messages yet';
         if(last){
           if(last.deleted_at)preview='This message was deleted';
@@ -1352,6 +1588,17 @@ function GuftinApp() {
       if(!isConnectivityFailure(e))Alert.alert('Inbox could not load',e?.message||'Please try again.');
     }finally{setLoading(false);}
   },[session,deviceIdentity,getSignedMediaUrl]);
+
+  // Coalesce bursts of realtime events into one inbox refresh instead of
+  // launching a full set of database queries for every individual message.
+  const inboxRefreshTimer=useRef<ReturnType<typeof setTimeout>|null>(null);
+  const scheduleInboxRefresh=useCallback(()=>{
+    if(inboxRefreshTimer.current)clearTimeout(inboxRefreshTimer.current);
+    inboxRefreshTimer.current=setTimeout(()=>{
+      inboxRefreshTimer.current=null;
+      void loadInbox();
+    },400);
+  },[loadInbox]);
 
   const loadCallHistory=useCallback(async()=>{
     if(!session)return;
@@ -1623,19 +1870,7 @@ function GuftinApp() {
     }catch(error:any){console.warn('Push dispatch unavailable:',error?.message||error);}
   };
 
-  const saveMediaToGallery=async(item:any,showFeedback=true)=>{
-    if(!item?.attachment_url||!['image','video'].includes(item.message_type))return;
-    try{
-      const permission=await MediaLibrary.requestPermissionsAsync(true);
-      if(!permission.granted)throw new Error('Allow photo library permission to save this media.');
-      await MediaLibrary.saveToLibraryAsync(item.attachment_url);
-      if(showFeedback)Alert.alert('Saved to gallery','The photo/video was saved to your device gallery.');
-    }catch(e:any){
-      if(showFeedback)Alert.alert('Could not save media',e?.message||'Try again after allowing gallery permission.');
-    }
-  };
-
-  const hideChat=async(chat:Chat)=>{
+    const hideChat=async(chat:Chat)=>{
     if(!session)return;
     if(chat.isOfficial){
       Alert.alert('Guftin Official stays in your inbox','The verified official chat is kept visible so you do not miss important announcements.');
@@ -1760,6 +1995,73 @@ function GuftinApp() {
     finally{setSavedItemsLoading(false);}
   };
 
+  const loadScheduledMessages=async()=>{
+    setScheduledMessagesLoading(true);
+    try{const rows:any[]=(await upgrade20.listScheduledMessages()) as any[];setScheduledMessages(rows);}
+    catch(error:any){Alert.alert('Scheduled messages unavailable',error?.message||'Could not load your scheduled messages.');}
+    finally{setScheduledMessagesLoading(false);}
+  };
+
+  const cancelScheduledMessage=async(id:string)=>{
+    try{const result=await upgrade20.cancelQueuedMessage(id);if(!result){Alert.alert('Message already processing','This message may already be in delivery. Refresh the list to check its status.');}await loadScheduledMessages();}
+    catch(error:any){Alert.alert('Could not cancel message',error?.message||'Please try again.');}
+  };
+
+  const openScheduleComposer=()=>{
+    setScheduleDraft(draft);
+    setScheduleMode('at');
+    setScheduleDelayAmount('10');
+    setScheduleDelayUnit('minutes');
+    const local=new Date(Date.now()+10*60*1000);
+    const pad=(value:number)=>String(value).padStart(2,'0');
+    setScheduleAtInput(local.getFullYear()+'-'+pad(local.getMonth()+1)+'-'+pad(local.getDate())+' '+pad(local.getHours())+':'+pad(local.getMinutes()));
+    setScheduleComposerOpen(true);
+  };
+
+  const submitScheduledMessage=async()=>{
+    if(!active||active.kind==='channel'||active.kind==='announcement'||!session?.user?.id||scheduleBusy)return;
+    const body=scheduleDraft.trim();
+    let scheduledAt:Date;
+    if(scheduleMode==='after'){
+      const amount=Number(scheduleDelayAmount);
+      const multiplier=scheduleDelayUnit==='minutes'?60_000:scheduleDelayUnit==='hours'?3_600_000:86_400_000;
+      if(!Number.isInteger(amount)||amount<1||amount>365) {Alert.alert('Invalid delay','Enter a whole number between 1 and 365.');return;}
+      scheduledAt=new Date(Date.now()+amount*multiplier);
+    }else{
+      scheduledAt=new Date(scheduleAtInput.trim().replace(' ','T'));
+    }
+    if(!body){Alert.alert('Message is empty','Enter the message you want Guftin to send later.');return;}
+    if(!Number.isFinite(scheduledAt.getTime())||scheduledAt.getTime()<=Date.now()+5000){Alert.alert('Choose a future time','Select a date and time at least a few seconds from now.');return;}
+    setScheduleBusy(true);
+    try{
+      const envelope=await encryptConversationText(active.id,body);
+      await upgrade20.createScheduledMessage({conversation_id:active.id,body_envelope:envelope,message_type:'text',scheduled_at:scheduledAt.toISOString()});
+      setScheduleComposerOpen(false);setScheduleDraft('');setScheduleAtInput('');setDraft('');
+      Alert.alert('Message scheduled','Your encrypted message is saved on Guftin servers. It will be sent automatically at the selected time, even if this phone is offline or you sign out.');
+      if(scheduledMessagesOpen)void loadScheduledMessages();
+    }catch(error:any){Alert.alert('Message not scheduled',error?.message||'Please try again.');}
+    finally{setScheduleBusy(false);}
+  };
+
+  const loadAdvancedFeatureCenter=async()=>{
+    if(!session?.user?.id)return;
+    setAdvancedCenterLoading(true);
+    const checks:Array<{label:string;detail:string;load:()=>Promise<any>}>=[
+      {label:'Encrypted backups',detail:'Encrypted backup records',load:()=>upgrade20.listEncryptedBackups()},
+      {label:'Scheduled messages',detail:'Queued and scheduled messages',load:()=>upgrade20.listScheduledMessages()},
+      {label:'Chat folders',detail:'Your saved chat folders',load:()=>upgrade20.listChatFolders()},
+      {label:'Communities',detail:'Communities available to your account',load:()=>upgrade20.listCommunities()},
+      {label:'Business quick replies',detail:'Your saved quick replies',load:()=>upgrade20.listQuickReplies()},
+      {label:'Linked encryption devices',detail:'Registered encryption devices',load:()=>upgrade20.listEncryptionDevices()},
+      {label:'Blocked accounts',detail:'Accounts you have blocked',load:()=>upgrade20.listBlockedUsers()},
+      {label:'Your reports',detail:'Reports submitted from your account',load:()=>upgrade20.listMyReports()},
+      {label:'Your appeals',detail:'Appeals submitted from your account',load:()=>upgrade20.listMyAppeals()}
+    ];
+    const results=await Promise.all(checks.map(async item=>{try{const data=await item.load();return {label:item.label,detail:item.detail,count:Array.isArray(data)?data.length:(data?1:0),ok:true};}catch(error:any){return {label:item.label,detail:error?.message||'This feature is not available for this account yet.',count:0,ok:false};}}));
+    setAdvancedCenterRows(results);
+    setAdvancedCenterLoading(false);
+  };
+
   const savePrivacyPreferences=async(patch:any)=>{
     if(!session?.user?.id)return false;
     const payload={
@@ -1773,8 +2075,20 @@ function GuftinApp() {
       ...patch,
       updated_at:new Date().toISOString()
     };
+    const cacheKey='guftin-cache-privacy-settings:'+session.user.id;
+    try{await AsyncStorage.setItem(cacheKey,JSON.stringify(payload));}
+    catch(error:any){Alert.alert('Privacy setting not saved locally',error?.message||'Phone storage is unavailable.');return false;}
+    if(!onlineRef.current){
+      await AsyncStorage.setItem('guftin-pending-privacy-settings:'+session.user.id,'1').catch(()=>{});
+      return true;
+    }
     const {error}=await supabase.from('kc_user_privacy_settings').upsert(payload,{onConflict:'user_id'});
-    if(error){Alert.alert('Privacy setting not saved',error.message);return false;}
+    if(error){
+      await AsyncStorage.setItem('guftin-pending-privacy-settings:'+session.user.id,'1').catch(()=>{});
+      if(!isConnectivityFailure(error))Alert.alert('Privacy setting saved on this phone; server sync will retry when online.',error.message);
+      return true;
+    }
+    await AsyncStorage.removeItem('guftin-pending-privacy-settings:'+session.user.id).catch(()=>{});
     return true;
   };
 
@@ -1792,11 +2106,31 @@ function GuftinApp() {
   useEffect(()=>{
     let mounted=true;
     if(!session?.user?.id){setPrivacySettingsLoaded(false);return;}
+    const cacheKey='guftin-cache-privacy-settings:'+session.user.id;
     void (async()=>{
+      try{
+        const cachedRaw=await AsyncStorage.getItem(cacheKey);
+        if(cachedRaw){
+          const cached=JSON.parse(cachedRaw);
+          if(cached&&mounted){
+            setLastSeenVisibility(cached.last_seen_visibility||'contacts');
+            setOnlineVisibility(cached.online_visibility!=='nobody');
+            setProfilePhotoVisibility(cached.profile_photo_visibility||'everyone');
+            setAboutVisibility(cached.about_visibility||'everyone');
+            setShowReadReceipts(cached.read_receipts_enabled!==false);
+            setPrivacySettingsLoaded(true);
+          }
+        }
+      }catch(error:any){console.warn('Privacy settings cache could not be read:',error?.message||error);}
+      if(!onlineRef.current){if(mounted)setPrivacySettingsLoaded(true);return;}
       const {data,error}=await supabase.from('kc_user_privacy_settings')
         .select('last_seen_visibility,online_visibility,profile_photo_visibility,about_visibility,read_receipts_enabled')
         .eq('user_id',session.user.id).maybeSingle();
-      if(error){console.warn('Privacy settings could not be loaded:',error.message);if(mounted)setPrivacySettingsLoaded(true);return;}
+      if(error){
+        console.warn('Privacy settings could not be refreshed:',error.message);
+        if(mounted)setPrivacySettingsLoaded(true);
+        return;
+      }
       if(data){
         if(mounted){
           setLastSeenVisibility(data.last_seen_visibility||'contacts');
@@ -1804,6 +2138,7 @@ function GuftinApp() {
           setProfilePhotoVisibility(data.profile_photo_visibility||'everyone');
           setAboutVisibility(data.about_visibility||'everyone');
           setShowReadReceipts(data.read_receipts_enabled!==false);
+          void AsyncStorage.setItem(cacheKey,JSON.stringify(data)).catch(()=>{});
         }
       }else{
         const {error:insertError}=await supabase.from('kc_user_privacy_settings').insert({user_id:session.user.id});
@@ -1813,6 +2148,26 @@ function GuftinApp() {
     })();
     return ()=>{mounted=false;};
   },[session?.user?.id]);
+
+  useEffect(()=>{
+    if(!session?.user?.id||!isOnline)return;
+    let active=true;
+    const syncPendingPrivacy=async()=>{
+      const pendingKey='guftin-pending-privacy-settings:'+session.user.id;
+      try{
+        if(await AsyncStorage.getItem(pendingKey)!=='1')return;
+        const raw=await AsyncStorage.getItem('guftin-cache-privacy-settings:'+session.user.id);
+        if(!raw)return;
+        const cached=JSON.parse(raw);
+        const {error}=await supabase.from('kc_user_privacy_settings')
+          .upsert({...cached,user_id:session.user.id,updated_at:new Date().toISOString()},{onConflict:'user_id'});
+        if(!error&&active)await AsyncStorage.removeItem(pendingKey);
+        else if(error&&!isConnectivityFailure(error))console.warn('Offline privacy settings sync:',error.message);
+      }catch(error:any){console.warn('Offline privacy settings remain queued:',error?.message||error);}
+    };
+    void syncPendingPrivacy();
+    return()=>{active=false;};
+  },[isOnline,session?.user?.id]);
 
   const removeSavedItem=async(id:string)=>{
     if(!session?.user?.id)return;
@@ -1890,6 +2245,165 @@ function GuftinApp() {
     setFolderModalVisible(false);setFolderTitle('');setFolderTargetChat(null);
   };
 
+  const reportMessage=async(item:Message,reason:'spam'|'scam'|'harassment'|'impersonation'|'suspicious_link'|'other')=>{
+    if(!session?.user?.id||!item.sender_id||item.mine)return;
+    const {error}=await supabase.from('kc_spam_reports').insert({
+      reporter_id:session.user.id,
+      target_user_id:item.sender_id,
+      message_id:item.id,
+      reason
+    });
+    if(error){
+      Alert.alert('Report not sent',error.message||'Please try again.');
+      return;
+    }
+    Alert.alert('Report submitted','Thank you. This message has been reported for review.');
+  };
+
+  const startEditMessage=(item:Message)=>{
+    if(active?.kind==='channel'||active?.kind==='announcement'||!item.mine||item.message_type!=='text'||item.deleted_at||item.pending)return;
+    if(Date.now()-new Date(item.created_at).getTime()>15*60*1000){Alert.alert('Edit time expired','Messages can only be edited for 15 minutes after sending.');return;}
+    setEditingMessage(item);setEditDraft(item.body||'');setEditModalVisible(true);
+  };
+
+  const saveEditedMessage=async()=>{
+    const item=editingMessage;
+    const body=editDraft.trim();
+    if(!item||!session?.user?.id||!deviceIdentity||editBusy)return;
+    if(!body){Alert.alert('Message is empty','Enter the updated message text.');return;}
+    if(Date.now()-new Date(item.created_at).getTime()>15*60*1000){Alert.alert('Edit time expired','Messages can only be edited for 15 minutes after sending.');return;}
+    setEditBusy(true);
+    try{
+      const {data:members,error:membersError}=await supabase.from('kc_conversation_members').select('user_id').eq('conversation_id',item.conversation_id);
+      if(membersError)throw membersError;
+      const memberIds=[...new Set((members||[]).map((row:any)=>row.user_id))] as string[];
+      if(!memberIds.includes(session.user.id))throw new Error('You are no longer a member of this conversation.');
+      const {data:devices,error:devicesError}=await supabase.from('kc_e2ee_devices').select('id,user_id,public_key').in('user_id',memberIds).is('revoked_at',null);
+      if(devicesError)throw devicesError;
+      const registeredUsers=new Set((devices||[]).map((device:any)=>device.user_id));
+      if(memberIds.some(id=>!registeredUsers.has(id)))throw new Error('Every conversation member must have a registered encryption device before this message can be edited.');
+      const encryptedBody=encryptMessageForDevices(body,devices||[],deviceIdentity);
+      const {data,error}=await supabase.rpc('kc_edit_message',{p_message_id:item.id,p_new_body_envelope:encryptedBody});
+      if(error)throw error;
+      const editedAt=typeof data==='string'?data:new Date().toISOString();
+      setMessages(prev=>({...prev,[item.conversation_id]:(prev[item.conversation_id]||[]).map(message=>message.id===item.id?{...message,body,edited_at:editedAt}:message)}));
+      const currentConversationMessages=messages[item.conversation_id]||[];
+      if(currentConversationMessages[currentConversationMessages.length-1]?.id===item.id)setChats(prev=>prev.map(chat=>chat.id===item.conversation_id?{...chat,last:body}:chat));
+      setEditModalVisible(false);setEditingMessage(null);setEditDraft('');
+      Alert.alert('Message edited','Your encrypted message was updated. Previous versions are retained in edit history.');
+    }catch(error:any){Alert.alert('Message not edited',error?.message||'Please try again.');}
+    finally{setEditBusy(false);}
+  };
+
+  const loadMessageEditHistory=async(item:Message)=>{
+    if(!deviceIdentity){Alert.alert('Secure device unavailable','Your local encryption key is not ready.');return;}
+    setEditHistoryLoading(true);
+    try{
+      const rows:any[]=(await upgrade20.listMessageEditHistory(item.id)) as any[];
+      const mapped=rows.map((row:any)=>{
+        const open=(value:string)=>{try{return value?.startsWith(E2EE_PREFIX)?decryptMessageForDevice(value,deviceIdentity):'Encrypted history entry';}catch{return 'Could not decrypt this history entry on this device.';}};
+        return {id:row.id,edited_at:row.edited_at,previous:open(row.previous_body_envelope),updated:open(row.new_body_envelope)};
+      });
+      setEditHistoryRows(mapped);setEditHistoryVisible(true);
+    }catch(error:any){Alert.alert('Edit history unavailable',error?.message||'Please try again.');}
+    finally{setEditHistoryLoading(false);}
+  };
+
+  const encryptConversationText=async(conversationId:string,plainText:string)=>{
+    if(!session?.user?.id||!deviceIdentity)throw new Error('Secure chat is not ready.');
+    const {data:members,error:membersError}=await supabase.from('kc_conversation_members').select('user_id').eq('conversation_id',conversationId);
+    if(membersError)throw membersError;
+    const memberRows:any[]=(members||[]) as any[];
+    const memberIds=[...new Set(memberRows.map((row:any)=>row.user_id))] as string[];
+    if(!memberIds.includes(session.user.id))throw new Error('You are no longer a member of this group.');
+    const {data:devices,error:devicesError}=await supabase.from('kc_e2ee_devices').select('id,user_id,public_key').in('user_id',memberIds).is('revoked_at',null);
+    if(devicesError)throw devicesError;
+    const registeredUsers=new Set((devices||[]).map((device:any)=>device.user_id));
+    if(memberIds.some(id=>!registeredUsers.has(id)))throw new Error('Every group member must register a secure device before creating an encrypted poll.');
+    return encryptMessageForDevices(plainText,devices||[],deviceIdentity);
+  };
+
+  const loadGroupPolls=async(conversationId:string)=>{
+    if(!session?.user?.id||!deviceIdentity)return;
+    setGroupCollabLoading(true);
+    try{
+      const rows:any[]=(await upgrade20.listPolls(conversationId)) as any[];
+      const mapped=rows.map((poll:any)=>{
+        const open=(value:string)=>{try{return value?.startsWith(E2EE_PREFIX)?decryptMessageForDevice(value,deviceIdentity):'Encrypted poll';}catch{return 'Could not decrypt poll on this device.';}};
+        const votes=Array.isArray(poll.kc_poll_votes)?poll.kc_poll_votes:[];
+        const options=(poll.kc_poll_options||[]).slice().sort((a:any,b:any)=>a.sort_order-b.sort_order).map((option:any)=>({id:option.id,label:open(option.option_envelope),voteCount:votes.filter((vote:any)=>vote.option_id===option.id).length}));
+        return {...poll,question:open(poll.question_envelope),options,myVoteOptionIds:votes.filter((vote:any)=>vote.user_id===session.user.id).map((vote:any)=>vote.option_id)};
+      });
+      setGroupPolls(mapped);
+    }catch(error:any){console.warn('Group polls could not load:',error?.message||error);setGroupPolls([]);}
+    finally{setGroupCollabLoading(false);}
+  };
+
+  const loadGroupEvents=async(conversationId:string)=>{
+    if(!session?.user?.id||!deviceIdentity)return;
+    try{
+      const rows:any[]=(await upgrade20.listGroupEvents(conversationId)) as any[];
+      const open=(value:string)=>{try{return value?.startsWith(E2EE_PREFIX)?decryptMessageForDevice(value,deviceIdentity):'Encrypted event';}catch{return 'Could not decrypt event on this device.';}};
+      setGroupEvents(rows.map((event:any)=>({...event,title:open(event.title_envelope),details:event.details_envelope?open(event.details_envelope):''})));
+    }catch(error:any){console.warn('Group events could not load:',error?.message||error);setGroupEvents([]);}
+  };
+
+  const createGroupEvent=async()=>{
+    if(!active||active.kind!=='group'||eventBusy)return;
+    const title=eventTitle.trim();
+    const startsAt=new Date(eventStartsAt.trim().replace(' ','T'));
+    if(!title||!Number.isFinite(startsAt.getTime())||startsAt.getTime()<=Date.now()){Alert.alert('Check event details','Enter a title and a future local date/time, for example 2026-11-25 18:30.');return;}
+    setEventBusy(true);
+    try{
+      const titleEnvelope=await encryptConversationText(active.id,title);
+      const detailsEnvelope=eventDetails.trim()?await encryptConversationText(active.id,eventDetails.trim()):null;
+      await upgrade20.createGroupEvent({conversation_id:active.id,title_envelope:titleEnvelope,details_envelope:detailsEnvelope,starts_at:startsAt.toISOString(),reminder_minutes:eventReminderMinutes});
+      setEventTitle('');setEventDetails('');setEventStartsAt('');setEventReminderMinutes(15);setEventCreateVisible(false);
+      await loadGroupEvents(active.id);
+      Alert.alert('Event created','Your encrypted group event has been added.');
+    }catch(error:any){Alert.alert('Event not created',error?.message||'Please try again.');}
+    finally{setEventBusy(false);}
+  };
+
+  const respondToGroupEvent=async(eventId:string,response:'going'|'maybe'|'not_going')=>{
+    if(!active||active.kind!=='group')return;
+    try{await upgrade20.respondToGroupEvent(eventId,response);await loadGroupEvents(active.id);}
+    catch(error:any){Alert.alert('Response not saved',error?.message||'Please try again.');}
+  };
+
+  const cancelGroupEvent=async(eventId:string)=>{
+    if(!active||active.kind!=='group')return;
+    Alert.alert('Cancel group event?','Members will no longer see this event as active.',[{text:'Keep event',style:'cancel'},{text:'Cancel event',style:'destructive',onPress:()=>void (async()=>{try{await upgrade20.cancelGroupEvent(eventId);await loadGroupEvents(active.id);}catch(error:any){Alert.alert('Event not cancelled',error?.message||'Please try again.');}})()}]);
+  };
+
+  const createGroupPoll=async()=>{
+    if(!active||active.kind!=='group'||pollBusy)return;
+    const question=pollQuestion.trim();
+    const options=pollOptionsText.split('\n').map(value=>value.trim()).filter(Boolean);
+    if(!question||options.length<2||options.length>12){Alert.alert('Poll needs more information','Enter a question and between 2 and 12 options, one per line.');return;}
+    setPollBusy(true);
+    try{
+      const questionEnvelope=await encryptConversationText(active.id,question);
+      const optionEnvelopes=await Promise.all(options.map(option=>encryptConversationText(active.id,option)));
+      await upgrade20.createPoll({conversation_id:active.id,question_envelope:questionEnvelope,options:optionEnvelopes,allows_multiple:pollAllowsMultiple});
+      setPollQuestion('');setPollOptionsText('');setPollAllowsMultiple(false);setPollCreateVisible(false);
+      await loadGroupPolls(active.id);
+      Alert.alert('Poll created','Your encrypted group poll is now available to group members.');
+    }catch(error:any){Alert.alert('Poll not created',error?.message||'Please try again.');}
+    finally{setPollBusy(false);}
+  };
+
+  const voteInGroupPoll=async(pollId:string,optionId:string)=>{
+    if(!active||active.kind!=='group')return;
+    try{await upgrade20.castPollVote(pollId,optionId);await loadGroupPolls(active.id);}
+    catch(error:any){Alert.alert('Vote not saved',error?.message||'This poll may be closed or you may have already voted.');}
+  };
+
+  useEffect(()=>{
+    if(active?.kind==='group'&&deviceIdentity){void loadGroupPolls(active.id);void loadGroupEvents(active.id);}
+    else{setGroupPolls([]);setGroupEvents([]);}
+  },[active?.id,active?.kind,deviceIdentity?.deviceId,session?.user?.id]);
+
   const deleteMessage=async(item:Message)=>{
     if(!session)return;
     const hideForMe=async()=>{
@@ -1910,10 +2424,28 @@ function GuftinApp() {
         if(storageError)console.warn('Message removed but its stored media cleanup failed:',storageError.message);
       }
     };
-    const options:any[]=[{text:'Save to Saved Items',onPress:()=>void (async()=>{const {error}=await supabase.from('kc_saved_items').upsert({user_id:session.user.id,message_id:item.id,conversation_id:item.conversation_id},{onConflict:'user_id,message_id'});if(error){Alert.alert('Could not save message',error.message);return;}Alert.alert('Saved','This message is now in Saved Items.');})()},{text:'Delete for me',onPress:()=>void hideForMe()}];
+    const options:any[]=[];
+    if(active?.kind!=='channel'&&item.mine&&item.message_type==='text'&&!item.deleted_at&&!item.pending&&Date.now()-new Date(item.created_at).getTime()<=15*60*1000)options.push({text:'Edit message',onPress:()=>startEditMessage(item)});
+    if(active?.kind!=='channel'&&item.mine&&item.edited_at)options.push({text:'View edit history',onPress:()=>void loadMessageEditHistory(item)});
+    options.push({text:'Save to Saved Items',onPress:()=>void (async()=>{const {error}=await supabase.from('kc_saved_items').upsert({user_id:session.user.id,message_id:item.id,conversation_id:item.conversation_id},{onConflict:'user_id,message_id'});if(error){Alert.alert('Could not save message',error.message);return;}Alert.alert('Saved','This message is now in Saved Items.');})()});
+    options.push({text:'Delete for me',onPress:()=>void hideForMe()});
     if(item.mine&&!item.deleted_at)options.push({text:'Delete for everyone',style:'destructive',onPress:()=>void deleteForEveryone()});
+    if(!item.mine&&item.sender_id){
+      options.push({text:'Report message',style:'destructive',onPress:()=>{
+        const reasons:any[]=[
+          {text:'Spam',onPress:()=>void reportMessage(item,'spam')},
+          {text:'Scam or fraud',onPress:()=>void reportMessage(item,'scam')},
+          {text:'Harassment',onPress:()=>void reportMessage(item,'harassment')},
+          {text:'Impersonation',onPress:()=>void reportMessage(item,'impersonation')},
+          {text:'Suspicious link',onPress:()=>void reportMessage(item,'suspicious_link')},
+          {text:'Other',onPress:()=>void reportMessage(item,'other')},
+          {text:'Cancel',style:'cancel'}
+        ];
+        Alert.alert('Report message','Choose the reason for your report.',reasons);
+      }});
+    }
     options.push({text:'Cancel',style:'cancel'});
-    Alert.alert('Delete message','Choose where to delete this message.',options);
+    Alert.alert('Message options','Save, delete, or report this message.',options);
   };
 
   const joinCall=useCallback(async(call:any)=>{
@@ -2022,15 +2554,18 @@ function GuftinApp() {
     setProfileReady(false);
     void loadProfile();
     void loadInbox();
-    void supabase.from('kc_profiles').update({is_online:true,last_seen_at:new Date().toISOString()}).eq('id',session.user.id);
+    if(onlineRef.current)void supabase.from('kc_profiles').update({is_online:true,last_seen_at:new Date().toISOString()}).eq('id',session.user.id);
+    let realtimeConnected=false;
     const appState=AppState.addEventListener('change',(state)=>{
-      void supabase.from('kc_profiles').update({is_online:onlineVisibility&&state==='active',last_seen_at:new Date().toISOString()}).eq('id',session.user.id);
+      if(onlineRef.current)void supabase.from('kc_profiles').update({is_online:onlineVisibility&&state==='active',last_seen_at:new Date().toISOString()}).eq('id',session.user.id);
       if(state==='active'){
         void loadInbox();
         if(activeConversationIdRef.current)void loadMessagesRef.current?.(activeConversationIdRef.current);
         void loadProfile();
-        void flushPendingMessagesRef.current?.();
-        void flushPendingMediaRef.current?.();
+        if(onlineRef.current){
+          void flushPendingMessagesRef.current?.();
+          void flushPendingMediaRef.current?.();
+        }
       }
     });
     const channel=supabase.channel('kingchat-user-'+session.user.id)
@@ -2057,20 +2592,20 @@ function GuftinApp() {
             void saveMediaToGallery(item,false);
           }
         }
-        void loadInbox();
+        scheduleInboxRefresh();
       })
       .on('postgres_changes',{event:'UPDATE',schema:'public',table:'kc_messages'},payload=>{
         const updated=payload.new as any;
         if(updated.deleted_at){
           setMessages(prev=>({...prev,[updated.conversation_id]:(prev[updated.conversation_id]||[]).map(item=>item.id===updated.id?{...item,deleted_at:updated.deleted_at,body:null,attachment_url:null}:item)}));
-          void loadInbox();
+          scheduleInboxRefresh();
         }
       })
       .on('postgres_changes',{event:'DELETE',schema:'public',table:'kc_messages'},payload=>{
         const removed=payload.old as any;
         if(removed?.id){
           setMessages(prev=>Object.fromEntries(Object.entries(prev).map(([conversationId,items]:any)=>[conversationId,items.filter((item:any)=>item.id!==removed.id)])));
-          void loadInbox();
+          scheduleInboxRefresh();
         }
       })
       .on('postgres_changes',{event:'UPDATE',schema:'public',table:'kc_conversation_members'},payload=>{
@@ -2078,11 +2613,11 @@ function GuftinApp() {
         if(member.conversation_id===activeConversationIdRef.current && member.user_id!==session.user.id){
           setPeerLastReadAt(member.last_read_at||null);
         }
-        void loadInbox();
+        scheduleInboxRefresh();
       })
       .on('postgres_changes',{event:'UPDATE',schema:'public',table:'kc_profiles'},()=>{
         // Refresh names and signed avatar URLs immediately after a contact edits a profile.
-        void loadInbox();
+        scheduleInboxRefresh();
       })
       .on('postgres_changes',{event:'*',schema:'public',table:'kc_call_logs'},payload=>{
         const call=(payload.new||payload.old) as any;
@@ -2126,19 +2661,25 @@ function GuftinApp() {
         }
       }).subscribe((status,error)=>{
         if(status==='SUBSCRIBED'){
+          realtimeConnected=true;
           console.log('Guftin realtime connected');
-          void flushPendingMessagesRef.current?.();
-          void flushPendingMediaRef.current?.();
+          if(onlineRef.current){
+            void flushPendingMessagesRef.current?.();
+            void flushPendingMediaRef.current?.();
+          }
         }else if(status==='CHANNEL_ERROR'||status==='TIMED_OUT'||status==='CLOSED'){
+          realtimeConnected=false;
           console.warn('Guftin realtime unavailable; automatic sync will use polling.',error?.message||status);
         }
       });
     // Realtime is the fast path. Polling is a recovery path for devices or
     // projects where Postgres Changes is not enabled or the socket drops.
     const syncTimer=setInterval(()=>{
-      if(AppState.currentState==='active'){
-        if(autoSync){
-          void loadInbox();
+      if(AppState.currentState==='active'&&onlineRef.current){
+        // Realtime already delivers changes immediately. Poll only when the
+        // socket is unavailable, avoiding repeated full inbox queries on fast devices.
+        if(autoSync&&!realtimeConnected){
+          scheduleInboxRefresh();
           const conversationId=activeConversationIdRef.current;
           if(conversationId)void loadMessagesRef.current?.(conversationId);
         }
@@ -2148,12 +2689,13 @@ function GuftinApp() {
     },Math.max(15,syncIntervalSeconds)*1000);
     return ()=>{
       clearInterval(syncTimer);
+      if(inboxRefreshTimer.current){clearTimeout(inboxRefreshTimer.current);inboxRefreshTimer.current=null;}
       appState.remove();
       void supabase.removeChannel(channel);
       setIncomingCall(null);setOutgoingCall(null);setLiveCall(null);
       void supabase.from('kc_profiles').update({is_online:false,last_seen_at:new Date().toISOString()}).eq('id',session.user.id);
     };
-  },[session,loadProfile,loadInbox,loadCallHistory,resolveMessage,joinCall,respondToCall,acceptCallWhenReady,onlineVisibility,autoSync,syncIntervalSeconds,showReadReceipts,mediaAutoDownload]);
+  },[session,loadProfile,loadInbox,loadCallHistory,resolveMessage,joinCall,respondToCall,acceptCallWhenReady,onlineVisibility,autoSync,syncIntervalSeconds,showReadReceipts,mediaAutoDownload,scheduleInboxRefresh]);
 
   useEffect(()=>{
     let mounted=true;
@@ -2238,7 +2780,7 @@ function GuftinApp() {
     };
     const foregroundPushSubscription=Notifications.addNotificationReceivedListener((notification:any)=>{
       const data=notification?.request?.content?.data as any;
-      if(data?.type!=='incoming_call'||typeof data.call_id!=='string')return;
+      if(!backgroundCallsEnabled||data?.type!=='incoming_call'||typeof data.call_id!=='string')return;
       void supabase.from('kc_call_logs')
         .select('id,conversation_id,caller_id,callee_id,call_type,status,call_scope')
         .eq('id',data.call_id).maybeSingle().then(async({data:call,error})=>{
@@ -2259,10 +2801,11 @@ function GuftinApp() {
       subscription.remove();
       foregroundPushSubscription.remove();
     };
-  },[session,respondToCall,acceptCallWhenReady,loadInbox,joinCall]);
+  },[session,respondToCall,acceptCallWhenReady,loadInbox,joinCall,backgroundCallsEnabled]);
 
   const loadMessages=useCallback(async(conversationId:string)=>{
-    if(!session||clearingConversationIds.current.has(conversationId))return;
+    // Local pending IDs are not Postgres UUIDs; never query message history with them.
+    if(!session||!isGuftinUuid(conversationId)||clearingConversationIds.current.has(conversationId))return;
     const loadGeneration=clearGenerationByConversation.current.get(conversationId)||0;
     const messageCacheKey='guftin-cache-messages:'+session.user.id+':'+conversationId;
     let cachedMessages:Message[]=[];
@@ -2334,7 +2877,7 @@ function GuftinApp() {
       let offset=0;
       while(true){
         const page=await supabase.from('kc_messages')
-          .select('id,conversation_id,sender_id,body,message_type,attachment_url,created_at,deleted_at')
+          .select('id,conversation_id,sender_id,body,message_type,attachment_url,created_at,edited_at,deleted_at')
           .eq('conversation_id',conversationId)
           .order('created_at',{ascending:true}).range(offset,offset+199);
         if(page.error){if(!isConnectivityFailure(page.error))Alert.alert('Channel history could not load',page.error.message);return;}
@@ -2345,7 +2888,7 @@ function GuftinApp() {
       }
     }else{
       const result=await supabase.from('kc_messages')
-        .select('id,conversation_id,sender_id,body,message_type,attachment_url,created_at,deleted_at')
+        .select('id,conversation_id,sender_id,body,message_type,attachment_url,created_at,edited_at,deleted_at')
         .eq('conversation_id',conversationId)
         .order('created_at',{ascending:true}).limit(200);
       if(result.error){if(!isConnectivityFailure(result.error))Alert.alert('Messages could not load',result.error.message);return;}
@@ -2401,7 +2944,7 @@ function GuftinApp() {
   loadMessagesRef.current=loadMessages;
 
   useEffect(()=>{
-    if(session&&active&&!active.pendingContactId)void loadMessages(active.id);
+    if(session&&active&&!active.pendingContactId&&isGuftinUuid(active.id))void loadMessages(active.id);
   },[session?.user?.id,deviceIdentity?.deviceId,active?.id,loadMessages]);
 
   const refresh=async()=>{
@@ -2462,7 +3005,11 @@ function GuftinApp() {
     else if(pinTargetChat){setActive(pinTargetChat);setPeerLastReadAt(null);}
     Alert.alert('PIN reset','Your new PIN has been saved.');
   };
-  useEffect(()=>{if(!session?.user?.id)return;let live=true;(async()=>{const enabled=await AsyncStorage.getItem('guftin-app-lock-enabled');if(!live)return;setAppLockEnabled(enabled==='1');if(enabled==='1'&&await SecureStore.getItemAsync(pinStorageKey('app')))setAppLocked(true);})();return()=>{live=false;};},[session?.user?.id]);
+  useEffect(()=>{if(!session?.user?.id)return;let live=true;(async()=>{const enabled=await AsyncStorage.getItem('guftin-app-lock-enabled');const biometric=await AsyncStorage.getItem('guftin-biometric-lock-enabled');const hasPin=!!(await SecureStore.getItemAsync(pinStorageKey('app')));const hardware=await LocalAuthentication.hasHardwareAsync().catch(()=>false);const enrolled=await LocalAuthentication.isEnrolledAsync().catch(()=>false);if(!live)return;setAppLockEnabled(enabled==='1'&&hasPin);setBiometricAvailable(hardware&&enrolled);setBiometricLockEnabled(biometric==='1'&&enabled==='1'&&hasPin&&hardware&&enrolled);if(enabled==='1'&&hasPin)setAppLocked(true);})();return()=>{live=false;};},[session?.user?.id]);
+
+  const runBiometricUnlock=async()=>{try{setBiometricBusy(true);const hardware=await LocalAuthentication.hasHardwareAsync();const enrolled=await LocalAuthentication.isEnrolledAsync();if(!hardware||!enrolled){setBiometricAvailable(false);Alert.alert('Biometrics unavailable','Set up fingerprint or face unlock in your phone settings, or use your Guftin PIN.');return;}const result=await LocalAuthentication.authenticateAsync({promptMessage:'Unlock Guftin',cancelLabel:'Use PIN',disableDeviceFallback:true,biometricsSecurityLevel:'strong'});if(result.success){setAppLocked(false);setPinModalVisible(false);setPinEntry('');}else if(result.error!=='user_cancel'&&result.error!=='system_cancel'&&result.error!=='app_cancel'){Alert.alert('Biometric unlock not completed','Use your Guftin PIN to unlock the app.');}}catch(error:any){Alert.alert('Biometric unlock unavailable',error?.message||'Use your Guftin PIN.');}finally{setBiometricBusy(false);}};
+
+  const setBiometricLock=async(enabled:boolean)=>{if(!enabled){await AsyncStorage.removeItem('guftin-biometric-lock-enabled');setBiometricLockEnabled(false);return;}try{const hasPin=!!(await SecureStore.getItemAsync(pinStorageKey('app')));if(!hasPin){Alert.alert('Set App Lock PIN first','Create your Guftin App PIN before enabling fingerprint or face unlock.');return;}const hardware=await LocalAuthentication.hasHardwareAsync();const enrolled=await LocalAuthentication.isEnrolledAsync();if(!hardware||!enrolled){Alert.alert('Biometrics not set up','Set up fingerprint or face unlock in your phone settings first.');return;}const check=await LocalAuthentication.authenticateAsync({promptMessage:'Confirm biometric unlock for Guftin',cancelLabel:'Cancel',disableDeviceFallback:true,biometricsSecurityLevel:'strong'});if(!check.success)return;await AsyncStorage.setItem('guftin-biometric-lock-enabled','1');setBiometricAvailable(true);setBiometricLockEnabled(true);}catch(error:any){Alert.alert('Could not enable biometric lock',error?.message||'Please try again.');}};
 
   const openChat=async(chat:Chat)=>{
     const permanentlyUnlocked=await AsyncStorage.getItem('guftin-chat-lock-disabled:'+chat.id);
@@ -2475,17 +3022,26 @@ function GuftinApp() {
     // The real conversation is created by ensureActiveDirectConversation() on send/call.
     if(chat.pendingContactId || chat.id.startsWith('pending:'))return;
     // The active-chat effect performs the single initial load; do not fetch twice.
-    void supabase.from('kc_conversation_members').update({hidden_at:null})
-      .eq('conversation_id',chat.id).eq('user_id',session.user.id);
+    if(onlineRef.current){
+      void supabase.from('kc_conversation_members').update({hidden_at:null})
+        .eq('conversation_id',chat.id).eq('user_id',session.user.id);
+    }
   };
 
   const ensureActiveDirectConversation=async(chat:Chat):Promise<Chat>=>{
-    if(!chat.pendingContactId)return chat;
+    // Older cached contacts may contain only the local pending:<user UUID> id.
+    // Resolve that placeholder before any message, media, or call flow reaches Postgres.
+    const pendingContactId=chat.pendingContactId||(chat.id.startsWith('pending:')?chat.id.slice('pending:'.length):undefined);
+    if(!pendingContactId){
+      if(!isGuftinUuid(chat.id))throw new Error('This chat has an outdated temporary ID. Reopen the contact and try again.');
+      return chat;
+    }
+    if(!isGuftinUuid(pendingContactId))throw new Error('This contact reference is invalid. Reopen the contact and try again.');
     if(!session?.user?.id)throw new Error('Sign in required to start this conversation.');
-    const {data,error}=await supabase.rpc('kc_start_direct_conversation',{p_contact_id:chat.pendingContactId});
+    const {data,error}=await supabase.rpc('kc_start_direct_conversation',{p_contact_id:pendingContactId});
     if(error)throw error;
     const conversationId=typeof data==='string'?data:Array.isArray(data)?data[0]:data?.conversation_id;
-    if(typeof conversationId!=='string'||!conversationId)throw new Error('Guftin could not create the conversation. Please try again.');
+    if(!isGuftinUuid(conversationId))throw new Error('Guftin could not create a valid conversation. Please try again.');
     const ready:Chat={
       ...chat,id:conversationId,pendingContactId:undefined,
       last:'No messages yet',time:'',lastAt:Date.now(),
@@ -2506,10 +3062,325 @@ function GuftinApp() {
       isPublic:channel.is_public!==false,ownerId:channel.owner_id,description:channel.description||''
     };
     void openChat(chat);
+    void recordChannelAnalyticsEvent(supabase,channel.conversation_id,session.user.id,'view').catch(error=>console.warn('Channel view analytics unavailable:',error?.message||error));
+  };
+
+  const loadUpdatesHub=useCallback(async()=>{
+    if(!session?.user?.id)return;
+    const hubCacheKey='guftin-cache-updates-hub:'+session.user.id;
+    try{
+      const cachedRaw=await AsyncStorage.getItem(hubCacheKey);
+      if(cachedRaw){
+        const cached=JSON.parse(cachedRaw);
+        if(cached&&Array.isArray(cached.communities)&&Array.isArray(cached.products)&&Array.isArray(cached.stores)){
+          setHubCommunities(cached.communities);
+          setHubBusinessProducts(cached.products);
+          setHubBusinessStores(cached.stores);
+          setMyBusinessProfile(cached.myProfile||null);
+          setHubLoading(false);
+        }
+      }
+    }catch(error:any){console.warn('Updates hub cache could not be read:',error?.message||error);}
+    if(!onlineRef.current){setHubLoading(false);return;}
+    setHubLoading(true);
+    try{
+      const [cm,pr,bp,stores]=await Promise.all([
+        supabase.from('kc_community_members').select('community_id,role,joined_at,kc_communities!inner(id,title,owner_id,created_at)').eq('user_id',session.user.id).order('joined_at',{ascending:false}).limit(60),
+        supabase.from('kc_business_products').select('id,owner_id,title,description,price,currency_code,availability,is_published,image_path,created_at').eq('is_published',true).order('created_at',{ascending:false}).limit(40),
+        supabase.from('kc_business_profiles').select('user_id,store_name,description,contact_email,contact_phone,contact_username,currency_code,logo_path,tagline').eq('user_id',session.user.id).maybeSingle(),
+        supabase.from('kc_business_profiles').select('user_id,store_name,description,contact_email,contact_phone,contact_username,currency_code,logo_path,tagline,created_at').order('created_at',{ascending:false}).limit(100)
+      ]);
+      if(cm.error)throw cm.error;if(pr.error)throw pr.error;if(bp.error)throw bp.error;if(stores.error)throw stores.error;
+      setHubCommunities((cm.data||[]).map((r:any)=>({...((Array.isArray(r.kc_communities)?r.kc_communities[0]:r.kc_communities)||{}),role:r.role})).filter((x:any)=>x.id));
+      const productsWithImages=await Promise.all((pr.data||[]).map(async(row:any)=>({...row,image_signed_url:row.image_path?await getSignedBusinessMediaUrl(row.image_path):null})));
+      const storesWithLogos=await Promise.all((stores.data||[]).map(async(row:any)=>({...row,logo_signed_url:row.logo_path?await getSignedBusinessMediaUrl(row.logo_path):null})));
+      const myProfile=bp.data?{...bp.data,logo_signed_url:bp.data.logo_path?await getSignedBusinessMediaUrl(bp.data.logo_path):null}:null;
+      setHubBusinessProducts(productsWithImages);setMyBusinessProfile(myProfile);setHubBusinessStores(storesWithLogos);
+      void AsyncStorage.setItem(hubCacheKey,JSON.stringify({communities:(cm.data||[]).map((r:any)=>({...((Array.isArray(r.kc_communities)?r.kc_communities[0]:r.kc_communities)||{}),role:r.role})).filter((x:any)=>x.id),products:productsWithImages,stores:storesWithLogos,myProfile})).catch(()=>{});
+    }catch(e:any){console.warn('Updates hub load:',e?.message||e);}finally{setHubLoading(false);}
+  },[session?.user?.id,getSignedBusinessMediaUrl]);
+  const loadCommunityDetails=async(community:any)=>{
+    if(!community?.id||!session?.user?.id)return;
+    const communityCacheKey='guftin-cache-community:'+session.user.id+':'+community.id;
+    setSelectedCommunity(community);setCommunityDetailsLoading(true);setCommunityInviteCode('');
+    try{
+      const cachedRaw=await AsyncStorage.getItem(communityCacheKey);
+      if(cachedRaw){
+        const cached=JSON.parse(cachedRaw);
+        if(cached&&Array.isArray(cached.members)&&Array.isArray(cached.groups)){
+          setCommunityMembers(cached.members);
+          setCommunityGroups(cached.groups);
+          setCommunityAnnouncementConversationId(cached.announcementConversationId||null);
+          if(cached.inviteCode)setCommunityInviteCode(cached.inviteCode);
+          setCommunityDetailsLoading(false);
+        }
+      }
+    }catch(error:any){console.warn('Community cache could not be read:',error?.message||error);}
+    if(!onlineRef.current){setCommunityDetailsLoading(false);return;}
+    try{
+      const [membersResult,groupsResult,announcementResult]=await Promise.all([
+        supabase.rpc('kc_list_community_members',{p_community_id:community.id}),
+        supabase.from('kc_community_groups').select('conversation_id,kc_conversations!inner(id,kind,title,photo_url)').eq('community_id',community.id).order('created_at',{ascending:false}),
+        supabase.from('kc_community_announcements').select('conversation_id').eq('community_id',community.id).maybeSingle()
+      ]);
+      if(membersResult.error)throw membersResult.error;
+      if(groupsResult.error)throw groupsResult.error;
+      if(announcementResult.error)throw announcementResult.error;
+      const members=membersResult.data||[];
+      const groups=(groupsResult.data||[]).map((row:any)=>Array.isArray(row.kc_conversations)?row.kc_conversations[0]:row.kc_conversations).filter(Boolean);
+      setCommunityMembers(members);
+      setCommunityGroups(groups);
+      const announcementConversationId=announcementResult.data?.conversation_id||null;
+      setCommunityAnnouncementConversationId(announcementConversationId);
+      let inviteCodeToCache='';
+      if(community.role==='owner'||community.role==='admin'){
+        const {data:existing,error:inviteReadError}=await supabase.from('kc_community_invites').select('invite_code').eq('community_id',community.id).is('revoked_at',null).order('created_at',{ascending:false}).limit(1).maybeSingle();
+        if(inviteReadError)throw inviteReadError;
+        if(existing?.invite_code)inviteCodeToCache=existing.invite_code;
+        else{
+          const {data:created,error:createError}=await supabase.from('kc_community_invites').insert({community_id:community.id,created_by:session.user.id}).select('invite_code').single();
+          if(createError)throw createError;
+          inviteCodeToCache=created.invite_code;
+        }
+        setCommunityInviteCode(inviteCodeToCache);
+      }
+      void AsyncStorage.setItem(communityCacheKey,JSON.stringify({members,groups,announcementConversationId,inviteCode:inviteCodeToCache})).catch(()=>{});
+    }catch(error:any){if(!isConnectivityFailure(error))Alert.alert('Community could not open',error?.message||'Please try again.');}
+    finally{setCommunityDetailsLoading(false);}
+  };
+  const shareCommunityInvite=async()=>{
+    if(!selectedCommunity?.id||!communityInviteCode)return;
+    const inviteUrl='https://guftin-official.pages.dev/community/'+encodeURIComponent(communityInviteCode);
+    try{await Share.share({message:'Join my Guftin community “'+selectedCommunity.title+'”:\n'+inviteUrl});}
+    catch(error:any){Alert.alert('Invite could not be shared',error?.message||'Please try again.');}
+  };
+  const addCommunityMember=async()=>{
+    const username=communityMemberUsername.trim().replace(/^@/,'');
+    if(!selectedCommunity?.id||!username||communityMemberBusy)return;
+    setCommunityMemberBusy(true);
+    try{
+      const {error}=await supabase.rpc('kc_add_community_member_by_username',{p_community_id:selectedCommunity.id,p_username:username});
+      if(error)throw error;
+      setCommunityMemberUsername('');
+      await loadCommunityDetails(selectedCommunity);
+      Alert.alert('Member added','The Guftin account has been added to this community.');
+    }catch(error:any){Alert.alert('Member not added',error?.message||'Check the username and try again.');}
+    finally{setCommunityMemberBusy(false);}
+  };
+  const openCommunityAnnouncement=async()=>{
+    if(!selectedCommunity?.id||!communityAnnouncementConversationId)return;
+    const canPost=selectedCommunity.role==='owner'||selectedCommunity.role==='admin';
+    const title=(selectedCommunity.title||'Community')+' · Announcements';
+    const chat:Chat={id:communityAnnouncementConversationId,name:title,avatar:'📢',color:C.green,last:'Community announcements',time:'',unread:0,online:false,kind:'announcement',lastAt:Date.now(),communityId:selectedCommunity.id,isCommunityAdmin:canPost,isChannelOwner:canPost};
+    setSelectedCommunity(null);setTab('Chats');
+    try{await openChat(chat);}catch(error:any){Alert.alert('Announcements could not open',error?.message||'Please try again.');}
+  };
+  const openCommunityGroup=async(group:any)=>{
+    if(!group?.id)return;
+    const title=group.title||'Community group';
+    const chat:Chat={id:group.id,name:title,avatar:initials(title),avatarUrl:group.photo_url||undefined,color:colorFor(title),last:'Community group',time:'',unread:0,online:false,kind:'group',lastAt:Date.now()};
+    setSelectedCommunity(null);setTab('Chats');
+    try{await openChat(chat);}catch(error:any){Alert.alert('Group could not open',error?.message||'Please try again.');}
+  };
+  const loadOfficialUserMetrics=async()=>{
+    if((session?.user?.email||'').toLowerCase()!=='guftinofficle@gmail.com')return;
+    setOfficialMetricsLoading(true);setOfficialMetricsError('');
+    try{
+      const {data,error}=await supabase.rpc('kc_official_user_metrics');
+      if(error)throw error;
+      setOfficialMetrics(data||null);
+    }catch(error:any){setOfficialMetricsError(error?.message||'Could not load account metrics.');}
+    finally{setOfficialMetricsLoading(false);}
+  };
+  const openBusinessStore=async(ownerId:string)=>{
+    if(!ownerId)return;
+    setSelectedBusinessStore({user_id:ownerId,store_name:'Business store'});setBusinessStoreLoading(true);setBusinessStoreProducts([]);
+    try{
+      const productQuery=supabase.from('kc_business_products').select('id,owner_id,title,description,price,currency_code,availability,image_path,is_published,created_at').eq('owner_id',ownerId).order('created_at',{ascending:false}).limit(80);
+      if(ownerId!==session?.user?.id)productQuery.eq('is_published',true);
+      const [profileResult,productsResult]=await Promise.all([
+        supabase.from('kc_business_profiles').select('user_id,store_name,description,contact_email,contact_phone,contact_username,currency_code,logo_path,tagline').eq('user_id',ownerId).maybeSingle(),
+        productQuery
+      ]);
+      if(profileResult.error)throw profileResult.error;if(productsResult.error)throw productsResult.error;
+      const profile:any=profileResult.data||{user_id:ownerId,store_name:'Business store',description:'No public store profile has been added yet.',logo_path:null,contact_phone:null,contact_email:null};
+      const logoUrl=profile.logo_path?await getSignedBusinessMediaUrl(profile.logo_path):null;
+      setSelectedBusinessStore({...profile,logo_signed_url:logoUrl});
+      const products=await Promise.all((productsResult.data||[]).map(async(row:any)=>({...row,image_signed_url:row.image_path?await getSignedBusinessMediaUrl(row.image_path):null})));
+      setBusinessStoreProducts(products);
+    }catch(error:any){Alert.alert('Business store could not open',error?.message||'Please try again.');setSelectedBusinessStore(null);}
+    finally{setBusinessStoreLoading(false);}
+  };
+  useEffect(()=>{
+    if(!session?.user?.id||!pendingBusinessStoreOwner)return;
+    const ownerId=pendingBusinessStoreOwner;setPendingBusinessStoreOwner(null);setTab('Hub');
+    void openBusinessStore(ownerId);
+  },[session?.user?.id,pendingBusinessStoreOwner]);
+  const shareBusinessStore=async()=>{
+    const ownerId=selectedBusinessStore?.user_id;
+    if(!ownerId)return;
+    const url='https://guftin-official.pages.dev/business/'+ownerId;
+    try{await Share.share({message:'Visit this Guftin business store:\n'+url});}
+    catch(error:any){Alert.alert('Store link could not be shared',error?.message||'Please try again.');}
+  };
+  const createHubCommunity=async()=>{
+    if(!communityDraftTitle.trim()||communityBusy)return;setCommunityBusy(true);
+    try{
+      const created:any=await upgrade20.createCommunity(communityDraftTitle.trim());
+      const usernames=[...new Set(communityDraftMembers.split(/[\n,; ]+/).map(value=>value.trim().replace(/^@/, '').toLowerCase()).filter(Boolean))].slice(0,50);
+      const addResults=await Promise.all(usernames.map(async username=>{
+        const {error}=await supabase.rpc('kc_add_community_member_by_username',{p_community_id:created.id,p_username:username});
+        return {username,error:error?.message||null};
+      }));
+      const failed=addResults.filter(result=>result.error);
+      setCommunityDraftTitle('');setCommunityDraftMembers('');setCommunityCreateOpen(false);await loadUpdatesHub();
+      await loadCommunityDetails({...created,role:'owner'});
+      if(failed.length)Alert.alert('Community created',`Community is ready. ${addResults.length-failed.length} member(s) added; check these usernames: ${failed.map(item=>item.username).join(', ')}. You can share the invite link from the community page.`);
+      else Alert.alert('Community created','Your community is ready. Selected Guftin users have been added. Share the invitation link from the community page.');
+    }catch(e:any){Alert.alert('Community not created',e?.message||'Please try again.');}finally{setCommunityBusy(false);}
+  };
+  const chooseBusinessLogo=async()=>{
+    const permission=await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if(!permission.granted){Alert.alert('Permission needed','Allow photo access to choose your store logo.');return;}
+    const result=await ImagePicker.launchImageLibraryAsync({mediaTypes:['images'],allowsEditing:true,aspect:[1,1],quality:0.88});
+    if(!result.canceled&&result.assets?.[0])setBusinessLogoAsset(result.assets[0]);
+  };
+  const chooseProductImage=async()=>{
+    const permission=await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if(!permission.granted){Alert.alert('Permission needed','Allow photo access to choose a product photo.');return;}
+    const result=await ImagePicker.launchImageLibraryAsync({mediaTypes:['images'],allowsEditing:true,aspect:[4,3],quality:0.88});
+    if(!result.canceled&&result.assets?.[0])setProductImageAsset(result.assets[0]);
+  };
+  const uploadBusinessStoreImage=async(asset:any,folder:'store'|'products')=>{
+    if(!session?.user?.id||!asset?.uri)throw new Error('Choose an image first.');
+    const file=new File(asset.uri);
+    if(file.size>8*1024*1024)throw new Error('Store images must be under 8 MB.');
+    const bytes=new Uint8Array(await file.arrayBuffer());
+    const mime=['image/jpeg','image/png','image/webp'].includes(asset.mimeType)?asset.mimeType:'image/jpeg';
+    const extension=mime==='image/png'?'png':mime==='image/webp'?'webp':'jpg';
+    const path=session.user.id+'/'+folder+'/'+Date.now()+'_'+ExpoCrypto.randomUUID()+'.'+extension;
+    const {error}=await supabase.storage.from('business-store-media').upload(path,bytes,{contentType:mime,upsert:false});
+    bytes.fill(0);
+    if(error)throw error;
+    return path;
+  };
+  const saveBusinessProfile=async()=>{
+    if(!session?.user?.id||!businessDraftName.trim()||businessBusy)return;setBusinessBusy(true);
+    try{
+      let logoPath=myBusinessProfile?.logo_path||null;
+      if(businessLogoAsset)logoPath=await uploadBusinessStoreImage(businessLogoAsset,'store');
+      const contactValue=businessDraftPhone.trim();
+      const usernameCandidate=contactValue.replace(/^@/,'').toLowerCase();
+      const isUsername=!!contactValue&&/^[a-z0-9_]{3,24}$/.test(usernameCandidate)&&!/[+ ()-]/.test(contactValue)&&!/^\d{7,}$/.test(contactValue);
+      const rawContactPhone=contactValue&&!isUsername?contactValue:null;
+      const contactPhone=rawContactPhone?normalizeGuftinPhone(rawContactPhone):null;
+      const contactUsername=isUsername?usernameCandidate:null;
+      if(rawContactPhone&&!contactPhone)throw new Error('Enter a valid Pakistan mobile number (03… or +92…) or a Guftin username.');
+      const {data,error}=await supabase.from('kc_business_profiles').upsert({
+        user_id:session.user.id,store_name:businessDraftName.trim().slice(0,100),
+        description:businessDraftDescription.trim().slice(0,1200)||null,
+        contact_email:businessDraftEmail.trim()||null,contact_phone:contactPhone,contact_username:contactUsername,
+        logo_path:logoPath,currency_code:'PKR',updated_at:new Date().toISOString()
+      },{onConflict:'user_id'}).select().single();
+      if(error)throw error;
+      const logoUrl=logoPath?await getSignedBusinessMediaUrl(logoPath):null;
+      setMyBusinessProfile({...data,logo_signed_url:logoUrl});setBusinessLogoAsset(null);setBusinessSetupOpen(false);
+      await loadUpdatesHub();
+      Alert.alert('Business profile saved','Your Guftin business profile is now saved.');
+    }catch(e:any){Alert.alert('Business profile not saved',e?.message||'Please try again.');}finally{setBusinessBusy(false);}
+  };
+  const openProductEditor=(product?:any)=>{
+    setProductEditing(product||null);
+    setProductDraftTitle(product?.title||'');
+    setProductDraftDescription(product?.description||'');
+    setProductDraftPrice(product?.price==null?'':String(product.price));
+    setProductDraftAvailability(product?.availability||'available');
+    setProductDraftPublished(product?.is_published!==false);
+    setProductImageAsset(null);setProductEditorOpen(true);
+  };
+  const saveBusinessProduct=async()=>{
+    if(!session?.user?.id||productBusy)return;
+    const title=productDraftTitle.trim(),price=Number(productDraftPrice);
+    if(!title||!productDraftPrice.trim()||!Number.isFinite(price)||price<0){Alert.alert('Product details needed','Enter a product name and a valid price.');return;}
+    setProductBusy(true);
+    try{
+      let imagePath=productEditing?.image_path||undefined;
+      if(productImageAsset)imagePath=await uploadBusinessStoreImage(productImageAsset,'products');
+      const patch={title,description:productDraftDescription.trim().slice(0,2000)||undefined,price,currency_code:'PKR',availability:productDraftAvailability,image_path:imagePath,is_published:productDraftPublished};
+      if(productEditing?.id)await upgrade20.updateBusinessProduct(productEditing.id,patch);
+      else await upgrade20.saveBusinessProduct(patch);
+      setProductEditorOpen(false);setProductEditing(null);setProductImageAsset(null);
+      await loadUpdatesHub();await openBusinessStore(session.user.id);
+      Alert.alert('Product saved',productDraftPublished?'Your product is now published in your store.':'Your product is saved as a draft.');
+    }catch(e:any){Alert.alert('Product not saved',e?.message||'Please try again.');}
+    finally{setProductBusy(false);}
+  };
+  const contactBusinessSeller=async(product?:any)=>{
+    const phone=String(selectedBusinessStore?.contact_phone||'').replace(/[^0-9]/g,'');
+    const username=String(selectedBusinessStore?.contact_username||'').trim().replace(/^@/,'');
+    const email=String(selectedBusinessStore?.contact_email||'').trim();
+    const message=encodeURIComponent('Hello, I am interested in '+(product?.title||'your products')+' on your Guftin store.');
+    try{
+      if(username){
+        const {data,error}=await supabase.rpc('kc_save_contact_by_username',{p_username:username});
+        if(error)throw error;
+        const row=Array.isArray(data)?data[0]:data;
+        if(!row?.contact_id)throw new Error('The saved Guftin username could not be found.');
+        const name=row.display_name||row.username||'Guftin member';
+        const avatarUrl=row.avatar_url?await getSignedMediaUrl(row.avatar_url):null;
+        const chat:Chat={id:'pending:'+row.contact_id,pendingContactId:row.contact_id,name,avatar:initials(name),avatarUrl:avatarUrl||undefined,color:colorFor(name),last:'Start a conversation',time:'',unread:0,online:false,kind:'direct',lastAt:0};
+        setSelectedBusinessProduct(null);setSelectedBusinessStore(null);setPeerLastReadAt(null);await openChat(chat);return;
+      }
+      if(phone){await Linking.openURL('tel:'+phone);return;}
+      if(email){await Linking.openURL('mailto:'+email+'?subject='+encodeURIComponent('Guftin store enquiry')+'&body='+message);return;}
+      Alert.alert('Seller contact unavailable','This store has not added a contact number, Guftin username or email yet.');
+    }catch(e:any){Alert.alert('Could not open contact option',e?.message||'Please try again.');}
+  };
+  useEffect(()=>{if(tab==='Hub'&&session?.user?.id)void loadUpdatesHub();},[tab,session?.user?.id,loadUpdatesHub]);
+  useEffect(()=>{
+    if(!session?.user?.id||!pendingCommunityInvite)return;
+    let active=true;
+    const preview=async()=>{
+      setCommunityInvitePreviewLoading(true);
+      try{
+        const {data,error}=await supabase.rpc('kc_preview_community_invite',{p_invite_code:pendingCommunityInvite});
+        if(error)throw error;
+        const row=Array.isArray(data)?data[0]:data;
+        if(!row?.community_id)throw new Error('This community invite link is invalid or expired.');
+        if(active){setCommunityInvitePreview({...row,invite_code:pendingCommunityInvite});setTab('Hub');}
+      }catch(error:any){if(active){setPendingCommunityInvite(null);Alert.alert('Community invite unavailable',error?.message||'This invite link may be invalid or expired.');}}
+      finally{if(active)setCommunityInvitePreviewLoading(false);}
+    };
+    void preview();
+    return()=>{active=false;};
+  },[session?.user?.id,pendingCommunityInvite]);
+  const joinCommunityFromInvite=async()=>{
+    if(!communityInvitePreview?.invite_code||communityMemberBusy)return;
+    setCommunityMemberBusy(true);
+    try{
+      const {data,error}=await supabase.rpc('kc_join_community_by_invite',{p_invite_code:communityInvitePreview.invite_code});
+      if(error)throw error;
+      const communityId=typeof data==='string'?data:data?.community_id||communityInvitePreview.community_id;
+      const {data:community,error:communityError}=await supabase.from('kc_communities').select('id,title,owner_id,created_at').eq('id',communityId).single();
+      if(communityError)throw communityError;
+      setCommunityInvitePreview(null);setPendingCommunityInvite(null);await loadUpdatesHub();
+      await loadCommunityDetails({...community,role:'member'});
+      Alert.alert('Community joined','You are now a member of this Guftin community.');
+    }catch(error:any){Alert.alert('Could not join community',error?.message||'Please try again.');}
+    finally{setCommunityMemberBusy(false);}
   };
 
   const loadChannels=useCallback(async()=>{
     if(!session)return;
+    const channelCacheKey='guftin-cache-channels:'+session.user.id;
+    try{
+      const cachedRaw=await AsyncStorage.getItem(channelCacheKey);
+      if(cachedRaw){
+        const cached=JSON.parse(cachedRaw);
+        if(Array.isArray(cached)){setChannels(cached);setChannelsLoading(false);}
+      }
+    }catch(error:any){console.warn('Channel cache could not be read:',error?.message||error);}
+    if(!onlineRef.current){setChannelsLoading(false);return;}
     setChannelsLoading(true);
     try{
       const {data,error}=await supabase.from('kc_channels')
@@ -2524,13 +3395,15 @@ function GuftinApp() {
         :{data:[],error:null};
       if(followingError)throw followingError;
       const membershipMap=new Map((following||[]).map((row:any)=>[row.conversation_id,row.role]));
-      setChannels(rowsWithLogos.map(row=>({...row,isFollowing:membershipMap.has(row.conversation_id),myRole:membershipMap.get(row.conversation_id)||null})));
+      const mappedChannels=rowsWithLogos.map(row=>({...row,isFollowing:membershipMap.has(row.conversation_id),myRole:membershipMap.get(row.conversation_id)||null}));
+      setChannels(mappedChannels);
+      void AsyncStorage.setItem(channelCacheKey,JSON.stringify(mappedChannels)).catch(()=>{});
     }catch(error:any){
       if(!isConnectivityFailure(error))Alert.alert('Channels could not load',error?.message||'Please refresh and try again.');
     }finally{setChannelsLoading(false);}
   },[session,getSignedMediaUrl]);
 
-  useEffect(()=>{if(session&&tab==='Channels')void loadChannels();},[session?.user?.id,tab,loadChannels]);
+  useEffect(()=>{if(session&&tab==='Updates')void loadChannels();},[session?.user?.id,tab,loadChannels]);
 
   const openChannelEditor=(channel:any)=>{
     const target=channel||channels.find(row=>row.conversation_id===active?.id)||active;
@@ -2612,6 +3485,7 @@ function GuftinApp() {
     try{
       const {data,error}=await supabase.rpc('kc_join_channel',{p_channel_id:null,p_invite_code:invite});
       if(error)throw error;
+      if(typeof data==='string')void recordChannelAnalyticsEvent(supabase,data,session.user.id,'follow').catch(()=>{});
       await Promise.all([loadChannels(),loadInbox()]);
       const {data:channel,error:channelError}=await supabase.from('kc_channels')
         .select('conversation_id,owner_id,title,description,logo_path,invite_code,is_public,is_official,is_verified')
@@ -2628,7 +3502,7 @@ function GuftinApp() {
     if(!session?.user?.id||!pendingChannelInvite||channelBusy)return;
     const inviteCode=pendingChannelInvite;
     setPendingChannelInvite(null);
-    setTab('Channels');
+    setTab('Updates');
     void joinChannelByInvite(inviteCode,false);
   },[session?.user?.id,pendingChannelInvite,channelBusy,joinChannelByInvite]);
 
@@ -2638,6 +3512,7 @@ function GuftinApp() {
     try{
       const {error}=await supabase.rpc('kc_join_channel',{p_channel_id:channel.conversation_id,p_invite_code:null});
       if(error)throw error;
+      void recordChannelAnalyticsEvent(supabase,channel.conversation_id,session!.user.id,'follow').catch(()=>{});
       await Promise.all([loadChannels(),loadInbox()]);
       Alert.alert('Following channel','You are now following '+(channel.title||'this channel')+'.');
     }catch(error:any){Alert.alert('Could not follow channel',error?.message||'Please try again.');}
@@ -2652,8 +3527,23 @@ function GuftinApp() {
   const shareChannelInvite=async(channel:any)=>{
     if(!channel?.invite_code)return;
     const link='https://guftin-official.pages.dev/channel/'+encodeURIComponent(channel.invite_code);
+    if(session?.user?.id)void recordChannelAnalyticsEvent(supabase,channel.conversation_id,session.user.id,'share').catch(()=>{});
     try{await Share.share({message:'Follow '+(channel.title||'this Guftin channel')+' on Guftin:\n'+link});}
     catch(error:any){Alert.alert('Could not share invite',error?.message||'Invite code: '+channel.invite_code);}
+  };
+
+  const showChannelAnalytics=async(channel:any)=>{
+    if(!session||channel?.owner_id!==session.user.id){Alert.alert('Owner access required','Only the channel owner can view channel analytics.');return;}
+    try{
+      const stats=await getChannelAnalytics(supabase,channel.conversation_id);
+      Alert.alert('Channel analytics',[
+        'Followers: '+stats.followers,
+        'Posts: '+stats.posts,
+        'Views: '+stats.views,
+        'Shares: '+stats.shares,
+        'New follows: '+stats.follows
+      ].join('\\n'));
+    }catch(error:any){Alert.alert('Analytics unavailable',error?.message||'Please try again.');}
   };
 
   const showChannelOptions=()=>{
@@ -2661,6 +3551,7 @@ function GuftinApp() {
     const channel=channels.find(row=>row.conversation_id===active.id)||active;
     const options:any[]=[];
     if(active.isChannelOwner){
+      options.push({text:'Channel analytics',onPress:()=>void showChannelAnalytics(channel)});
       options.push({text:'Edit channel name and logo',onPress:()=>openChannelEditor(channel)});
       options.push({text:'Share invite link',onPress:()=>void shareChannelInvite(channel)});
       options.push({text:'Share invite code',onPress:()=>void Share.share({message:channel.invite_code||active.inviteCode||''})});
@@ -2768,11 +3659,65 @@ function GuftinApp() {
     setDraft('');
   };
 
-  const sendMessage=async()=>{
-    const body=draft.trim();
+  const assertDirectConversationAllowed=async(conversationId:string)=>{
+    if(!session?.user?.id)throw new Error('Sign in required.');
+    const {data:members,error:membersError}=await supabase.from('kc_conversation_members')
+      .select('user_id').eq('conversation_id',conversationId);
+    if(membersError)throw membersError;
+    const ids=[...new Set((members||[]).map((row:any)=>row.user_id))] as string[];
+    if(ids.length!==2)return;
+    const peer=ids.find(id=>id!==session.user.id);
+    if(!peer)return;
+    const {data,error}=await supabase.rpc('kc_is_user_blocked',{p_other_user_id:peer});
+    if(error)throw error;
+    if(data===true)throw new Error('Messaging is unavailable because one of the participants has blocked the other.');
+  };
+
+  const loadBlockedUsers=async()=>{
+    if(!session?.user?.id)return;
+    setBlockedUsersLoading(true);
+    try{
+      const {data,error}=await supabase.from('kc_user_blocks').select('blocked_user_id,created_at').eq('blocker_id',session.user.id).order('created_at',{ascending:false});
+      if(error)throw error;
+      setBlockedUsers(data||[]);
+    }catch(error:any){Alert.alert('Blocked users unavailable',error?.message||'Please try again.');}
+    finally{setBlockedUsersLoading(false);}
+  };
+  const unblockContact=async(userId:string)=>{
+    try{
+      const {error}=await supabase.from('kc_user_blocks').delete().eq('blocker_id',session.user.id).eq('blocked_user_id',userId);
+      if(error)throw error;
+      setBlockedUsers(prev=>prev.filter(item=>item.blocked_user_id!==userId));
+      Alert.alert('Contact unblocked','This user is no longer on your blocked list.');
+    }catch(error:any){Alert.alert('Could not unblock contact',error?.message||'Please try again.');}
+  };
+
+  const blockCurrentContact=async(chat:Chat)=>{
+    if(!session?.user?.id||chat.kind!=='direct')return;
+    try{
+      const {data:members,error:membersError}=await supabase.from('kc_conversation_members')
+        .select('user_id').eq('conversation_id',chat.id);
+      if(membersError)throw membersError;
+      const peer=(members||[]).map((row:any)=>row.user_id).find((id:string)=>id!==session.user.id);
+      if(!peer)throw new Error('Could not identify the other participant.');
+      const {error}=await supabase.from('kc_user_blocks').upsert(
+        {blocker_id:session.user.id,blocked_user_id:peer},
+        {onConflict:'blocker_id,blocked_user_id'}
+      );
+      if(error)throw error;
+      Alert.alert('Contact blocked','This contact has been added to your blocked users. Existing chat history has not been deleted.');
+    }catch(error:any){
+      Alert.alert('Could not block contact',error?.message||'Please try again.');
+    }
+  };
+
+  const sendMessage=async(bodyOverride?:unknown)=>{
+    // TouchableOpacity.onPress passes a native press event. Only accept an explicit
+    // string override (used by the Schedule composer); otherwise send the draft.
+    const body=(typeof bodyOverride==='string'?bodyOverride:draft).trim();
     if(!body||!active||!session||sending||clearingConversationIds.current.has(active.id))return;
-    if(active.kind==='channel'){
-      if(!active.isChannelOwner){Alert.alert('Channel is read-only','Only the channel owner can publish updates.');return;}
+    if(active.kind==='channel'||active.kind==='announcement'){
+      if(!active.isChannelOwner){Alert.alert(active.kind==='announcement'?'Announcements are read-only':'Channel is read-only',active.kind==='announcement'?'Only the community owner or an admin can post announcements.':'Only the channel owner can publish updates.');return;}
       setSending(true);
       try{
         const {data,error}=await supabase.from('kc_messages').insert({conversation_id:active.id,sender_id:session.user.id,body,message_type:'text'})
@@ -2782,8 +3727,8 @@ function GuftinApp() {
         setMessages(prev=>({...prev,[active.id]:[...(prev[active.id]||[]),item]}));
         setDraft('');
         setChats(prev=>prev.map(chat=>chat.id===active.id?{...chat,last:body,time:timeLabel(data.created_at),lastAt:Date.now()}:chat));
-        void dispatchPush(active.isOfficial?'official_broadcast':'message',data.id);
-      }catch(error:any){Alert.alert('Channel update not sent',error?.message||'Please try again.');}
+        void dispatchPush(active.kind==='announcement'?'message':active.isOfficial?'official_broadcast':'message',data.id);
+      }catch(error:any){Alert.alert(active.kind==='announcement'?'Announcement not posted':'Channel update not sent',error?.message||'Please try again.');}
       finally{setSending(false);}
       return;
     }
@@ -2803,7 +3748,7 @@ function GuftinApp() {
     }
   };
 
-  const flushPendingMessages=useCallback(async()=>{
+  const flushPendingMessages=useCallback(async(force=false)=>{
     if(!session||!deviceIdentity||e2eeStatus!=='ready'||!onlineRef.current||flushingPendingMessages.current)return;
     flushingPendingMessages.current=true;
     try{
@@ -2815,7 +3760,31 @@ function GuftinApp() {
       for(let index=0;index<queue.length;index++){
         const pending=queue[index];
         if(clearingConversationIds.current.has(pending.conversation_id))continue;
+        if(!force&&Number(pending.nextAttemptAt||0)>Date.now()){remaining.push(pending);continue;}
         try{
+          const legacyConversationId=String(pending.conversation_id||'');
+          if(legacyConversationId.startsWith('pending:')){
+            const contactId=legacyConversationId.slice('pending:'.length);
+            if(!isGuftinUuid(contactId))throw new Error('This saved message has an invalid temporary chat reference. Reopen the contact and resend it.');
+            const {data:resolvedData,error:resolveError}=await supabase.rpc('kc_start_direct_conversation',{p_contact_id:contactId});
+            if(resolveError)throw resolveError;
+            const resolvedConversationId=typeof resolvedData==='string'?resolvedData:Array.isArray(resolvedData)?resolvedData[0]:resolvedData?.conversation_id;
+            if(!isGuftinUuid(resolvedConversationId))throw new Error('The saved message could not be linked to a valid conversation.');
+            for(const queued of queue){if(queued.conversation_id===legacyConversationId)queued.conversation_id=resolvedConversationId;}
+            pending.conversation_id=resolvedConversationId;
+            await AsyncStorage.setItem(queueKey,JSON.stringify(queue));
+            setMessages(prev=>{
+              const migrated=(prev[legacyConversationId]||[]).map(item=>({...item,conversation_id:resolvedConversationId}));
+              return {...prev,[resolvedConversationId]:[...(prev[resolvedConversationId]||[]),...migrated],[legacyConversationId]:[]};
+            });
+            setActive(prev=>prev?.id===legacyConversationId?{...prev,id:resolvedConversationId,pendingContactId:undefined}:prev);
+            setChats(prev=>{
+              const next=sortInboxChats(prev.map(chat=>chat.id===legacyConversationId?{...chat,id:resolvedConversationId,pendingContactId:undefined}:chat));
+              void AsyncStorage.setItem('guftin-cache-inbox:'+session.user.id,JSON.stringify(next)).catch(()=>{});
+              return next;
+            });
+          }
+          if(!isGuftinUuid(pending.conversation_id))throw new Error('This saved message does not have a valid conversation. Reopen the contact and resend it.');
           const {data:members,error:membersError}=await supabase.from('kc_conversation_members')
             .select('user_id').eq('conversation_id',pending.conversation_id);
           if(membersError)throw membersError;
@@ -2848,8 +3817,12 @@ function GuftinApp() {
           ]}));
           void dispatchPush('message',saved.id);
         }catch(error:any){
-          remaining.push(...queue.slice(index));
-          if(!isConnectivityFailure(error))console.warn('Pending message remains queued:',error?.message||error);
+          const attempts=(Number(pending.attempts)||0)+1;
+          const transient=isConnectivityFailure(error);
+          const delay=Math.min(transient?120000:900000,(transient?5000:30000)*Math.pow(2,Math.min(attempts-1,6)));
+          remaining.push({...pending,attempts,nextAttemptAt:Date.now()+delay,lastError:String(error?.message||error||'Send failed').slice(0,180)});
+          remaining.push(...queue.slice(index+1));
+          if(!transient)console.warn('Pending message paused with backoff:',error?.message||error);
           break;
         }
       }
@@ -2903,7 +3876,7 @@ function GuftinApp() {
       JSON.stringify(messages[conversationId]||[])).catch(()=>{});
   };
 
-  const flushPendingMedia=useCallback(async()=>{
+  const flushPendingMedia=useCallback(async(force=false)=>{
     if(!session||!deviceIdentity||e2eeStatus!=='ready'||!onlineRef.current||flushingPendingMedia.current)return;
     flushingPendingMedia.current=true;
     try{
@@ -2915,9 +3888,29 @@ function GuftinApp() {
       for(let index=0;index<queue.length;index++){
         const pending=queue[index];
         if(clearingConversationIds.current.has(pending.conversation_id))continue;
+        if(!force&&Number(pending.nextAttemptAt||0)>Date.now()){remaining.push(pending);continue;}
         let plainBytes:Uint8Array|undefined;
         let outboundCipher:Uint8Array|undefined;
         try{
+          const legacyConversationId=String(pending.conversation_id||'');
+          if(legacyConversationId.startsWith('pending:')){
+            const contactId=legacyConversationId.slice('pending:'.length);
+            if(!isGuftinUuid(contactId))throw new Error('This saved attachment has an invalid temporary chat reference. Reopen the contact and resend it.');
+            const {data:resolvedData,error:resolveError}=await supabase.rpc('kc_start_direct_conversation',{p_contact_id:contactId});
+            if(resolveError)throw resolveError;
+            const resolvedConversationId=typeof resolvedData==='string'?resolvedData:Array.isArray(resolvedData)?resolvedData[0]:resolvedData?.conversation_id;
+            if(!isGuftinUuid(resolvedConversationId))throw new Error('The saved attachment could not be linked to a valid conversation.');
+            for(const queued of queue){if(queued.conversation_id===legacyConversationId)queued.conversation_id=resolvedConversationId;}
+            pending.conversation_id=resolvedConversationId;
+            await AsyncStorage.setItem(queueKey,JSON.stringify(queue));
+            setActive(prev=>prev?.id===legacyConversationId?{...prev,id:resolvedConversationId,pendingContactId:undefined}:prev);
+            setChats(prev=>{
+              const next=sortInboxChats(prev.map(chat=>chat.id===legacyConversationId?{...chat,id:resolvedConversationId,pendingContactId:undefined}:chat));
+              void AsyncStorage.setItem('guftin-cache-inbox:'+session.user.id,JSON.stringify(next)).catch(()=>{});
+              return next;
+            });
+          }
+          if(!isGuftinUuid(pending.conversation_id))throw new Error('This saved attachment does not have a valid conversation. Reopen the contact and resend it.');
           let outboundBody=pending.outboundBody as string|undefined;
           let outboundFileUri=pending.outboundFileUri as string|undefined;
           let objectPath=pending.objectPath as string|undefined;
@@ -3008,8 +4001,12 @@ function GuftinApp() {
           try{if(localEncrypted.exists)localEncrypted.delete();}catch{}
           try{if(outboundFile.exists)outboundFile.delete();}catch{}
         }catch(error:any){
-          remaining.push(...queue.slice(index));
-          if(!isConnectivityFailure(error))console.warn('Pending media remains queued:',error?.message||error);
+          const attempts=(Number(pending.attempts)||0)+1;
+          const transient=isConnectivityFailure(error);
+          const delay=Math.min(transient?120000:900000,(transient?5000:30000)*Math.pow(2,Math.min(attempts-1,6)));
+          remaining.push({...pending,attempts,nextAttemptAt:Date.now()+delay,lastError:String(error?.message||error||'Upload failed').slice(0,180)});
+          remaining.push(...queue.slice(index+1));
+          if(!transient)console.warn('Pending media paused with backoff:',error?.message||error);
           break;
         }finally{
           plainBytes?.fill(0);
@@ -3080,6 +4077,7 @@ function GuftinApp() {
 
     try{
       const chatToSend=await ensureActiveDirectConversation(active);
+      await assertDirectConversationAllowed(chatToSend.id);
       const conversationId=chatToSend.id;
       const {data,error}=await supabase.from('kc_messages').insert({
         conversation_id:conversationId,sender_id:session.user.id,body:encrypted.body,
@@ -3131,18 +4129,19 @@ function GuftinApp() {
     }
   };
 
-  const sendPhotosVideos=async()=>{
+  const sendPhotosVideos=async(selectedAsset?:ImagePicker.ImagePickerAsset)=>{
     if(!active||!session||mediaPreparing)return;
     if(!deviceIdentity||e2eeStatus!=='ready'){
       Alert.alert('Secure media is not ready','Guftin is still setting up this device encryption key.');
       return;
     }
     try{
-      const result=await ImagePicker.launchImageLibraryAsync({
-        mediaTypes:['images','videos'],allowsEditing:false,quality:0.85,videoMaxDuration:60
-      });
-      if(result.canceled||!result.assets?.length)return;
-      const asset=result.assets[0];
+      let asset=selectedAsset;
+      if(!asset){
+        const result=await ImagePicker.launchImageLibraryAsync({mediaTypes:['images','videos'],allowsEditing:false,quality:0.85,videoMaxDuration:60});
+        if(result.canceled||!result.assets?.length)return;
+        asset=result.assets[0];
+      }
       const messageType=asset.type==='video'?'video':'image';
       const file=new File(asset.uri);
       if(file.size>MAX_MEDIA_BYTES){
@@ -3156,6 +4155,7 @@ function GuftinApp() {
         return;
       }
       const chatToSend=await ensureActiveDirectConversation(active);
+      await assertDirectConversationAllowed(chatToSend.id);
       const conversationId=chatToSend.id;
       const id=ExpoCrypto.randomUUID();
       const localId='pending:'+id;
@@ -3239,6 +4239,7 @@ function GuftinApp() {
         return;
       }
       const chatToSend=await ensureActiveDirectConversation(active);
+      await assertDirectConversationAllowed(chatToSend.id);
       const conversationId=chatToSend.id;
       const id=ExpoCrypto.randomUUID();
       const localId='pending:'+id;
@@ -3784,19 +4785,10 @@ function GuftinApp() {
     }finally{setAccountEmailBusy(false);}
   };
 
-  const signInEmail=async()=>{
-    const cleanEmail=email.trim().toLowerCase();
-    if(!cleanEmail||!password){setAuthError('Enter your email and password.');return;}
+  const signInWithGoogle=async()=>{
     setAuthBusy(true);setAuthError('');
-    const {error}=await supabase.auth.signInWithPassword({email:cleanEmail,password});
-    setAuthBusy(false);
-    if(error)setAuthError(error.message);
-  };
-
-  const signInGoogle=async()=>{
-    if(googleBusy)return;
-    setGoogleBusy(true);setAuthError('');
     try{
+      // Supabase owns the Google OAuth exchange; this deep link returns control to Guftin.
       const redirectTo=Linking.createURL('auth/callback');
       const {data,error}=await supabase.auth.signInWithOAuth({
         provider:'google',
@@ -3805,21 +4797,47 @@ function GuftinApp() {
       if(error)throw error;
       if(!data?.url)throw new Error('Google sign-in could not start. Please try again.');
       const result=await WebBrowser.openAuthSessionAsync(data.url,redirectTo);
-      if(result.type==='cancel'||result.type==='dismiss')return;
-      if(result.type!=='success'||!result.url)throw new Error('Google sign-in was not completed.');
-      const {data:authData,error:sessionError}=await supabase.auth.exchangeCodeForSession(result.url);
-      if(sessionError)throw sessionError;
-      if(!authData.session)throw new Error('Google did not return a Guftin sign-in session.');
-      const {data:googleProfile,error:profileError}=await supabase.rpc('kc_finish_google_profile');
-      if(profileError)throw profileError;
-      setProfileName(googleProfile?.display_name||authData.session.user.user_metadata?.full_name||authData.session.user.user_metadata?.name||'');
-      setProfileUsername(googleProfile?.username||'');
-      setEmail(authData.session.user.email||'');
-      setAuthError('');
-      void supabase.rpc('kc_set_email_discoverable',{p_enabled:true});
+      if(result.type==='success'&&result.url){
+        await completeAuthUrl(result.url);
+        const {data:userData,error:userError}=await supabase.auth.getUser();
+        if(userError)throw userError;
+        const user=userData.user;
+        if(user){
+          const {data:existingProfile,error:profileError}=await supabase.from('kc_profiles').select('id,username').eq('id',user.id).maybeSingle();
+          if(profileError)console.warn('Google profile lookup:',profileError.message);
+          if(!existingProfile?.username){
+            const meta=user.user_metadata||{};
+            const displayName=String(meta.full_name||meta.name||[meta.given_name,meta.family_name].filter(Boolean).join(' ')||user.email?.split('@')[0]||'Guftin User').trim().slice(0,40);
+            const rawBase=String(meta.username||meta.preferred_username||displayName||user.email?.split('@')[0]||'guftin').toLowerCase().normalize('NFKD').replace(/[^a-z0-9_]+/g,'_').replace(/^_+|_+$/g,'').slice(0,17);
+            const base=rawBase.length>=3?rawBase:'guftin_user';
+            let suggested=base;
+            for(let attempt=0;attempt<6;attempt++){
+              const {data:available,error:availabilityError}=await supabase.rpc('kc_is_username_available',{p_username:suggested});
+              if(availabilityError)throw availabilityError;
+              if(available===true)break;
+              suggested=(base.slice(0,17)+'_'+String(Math.floor(Math.random()*9000)+1000)).slice(0,24);
+            }
+            setProfileName(displayName);
+            setProfileUsername(suggested);
+            const {error:metadataError}=await supabase.auth.updateUser({data:{display_name:displayName,username:suggested}});
+            if(metadataError)console.warn('Google profile defaults could not be saved:',metadataError.message);
+          }
+        }
+      }
     }catch(e:any){
-      setAuthError(e?.message||'Google sign-in failed. Please try again.');
-    }finally{setGoogleBusy(false);}
+      setAuthError(e?.message||'Google sign-in failed. Check your connection and try again.');
+    }finally{
+      setAuthBusy(false);
+    }
+  };
+
+  const signInEmail=async()=>{
+    const cleanEmail=email.trim().toLowerCase();
+    if(!cleanEmail||!password){setAuthError('Enter your email and password.');return;}
+    setAuthBusy(true);setAuthError('');
+    const {error}=await supabase.auth.signInWithPassword({email:cleanEmail,password});
+    setAuthBusy(false);
+    if(error)setAuthError(error.message);
   };
 
   const finishProfile=async()=>{
@@ -3969,12 +4987,9 @@ function GuftinApp() {
     if(cleanName.length<2||cleanName.length>40){Alert.alert('Name required','Use a name between 2 and 40 characters.');return;}
     if(!/^[a-z0-9_]{3,24}$/.test(cleanUsername)){Alert.alert('Username not valid','Use 3-24 lowercase letters, numbers or underscore.');return;}
     setSavingProfile(true);
-    const usernameChanged=Boolean(profile?.username&&cleanUsername!==profile.username);
-    const {error}=usernameChanged
-      ?await supabase.rpc('kc_change_google_username_once',{p_username:cleanUsername})
-      :await supabase.rpc('kc_finish_profile',{p_username:cleanUsername,p_display_name:cleanName});
+    if(profile?.username&&cleanUsername!==profile.username){setSavingProfile(false);Alert.alert('Username is permanent','Your Guftin username cannot be changed after it is created.');return;}
+    const {error}=await supabase.rpc('kc_finish_profile',{p_username:cleanUsername,p_display_name:cleanName});
     if(error){setSavingProfile(false);Alert.alert('Profile not saved',error.message);return;}
-    if(usernameChanged)setGoogleUsernameChangeAvailable(false);
     const {error:aboutError}=await supabase.from('kc_profiles').update({about:about.trim().slice(0,160)}).eq('id',session.user.id);
     setSavingProfile(false);
     if(aboutError){Alert.alert('About text not saved',aboutError.message);return;}
@@ -4003,11 +5018,19 @@ function GuftinApp() {
     }finally{setGroupContactsLoading(false);}
   };
 
-  const openGroupCreator=async()=>{
+  const openGroupCreator=async(communityId?:string)=>{
+    if(communityId)setCommunityGroupTarget(communityId);
     setGroupName('');
     setSelectedGroupIds([]);
     setGroupCreateOpen(true);
-    await loadGroupContacts();
+    if(communityId){
+      setGroupContacts(communityMembers
+        .filter((member:any)=>member.user_id&&member.user_id!==session?.user?.id)
+        .map((member:any)=>({id:member.user_id,display_name:member.display_name||member.username||'Community member',username:member.username||null,avatar_signed_url:member.avatar_url||null})));
+      setGroupContactsLoading(false);
+    }else{
+      await loadGroupContacts();
+    }
   };
 
   const toggleGroupMember=(id:string)=>{
@@ -4021,10 +5044,14 @@ function GuftinApp() {
     if(selectedGroupIds.length<1){Alert.alert('Add members','Select at least one contact to create a group.');return;}
     setGroupCreating(true);
     try{
-      const {data,error}=await supabase.rpc('kc_create_group',{p_title:title,p_member_ids:selectedGroupIds});
-      if(error)throw error;
-      const conversationId=typeof data==='string'?data:(Array.isArray(data)?data[0]:data);
+      const creatingCommunityGroup=!!communityGroupTarget;
+      const result=creatingCommunityGroup
+        ?await supabase.rpc('kc_create_community_group',{p_community_id:communityGroupTarget,p_title:title,p_member_ids:selectedGroupIds})
+        :await supabase.rpc('kc_create_group',{p_title:title,p_member_ids:selectedGroupIds});
+      if(result.error)throw result.error;
+      const conversationId=typeof result.data==='string'?result.data:(Array.isArray(result.data)?result.data[0]:result.data);
       if(!conversationId)throw new Error('The group was created but its conversation ID was not returned.');
+      if(creatingCommunityGroup){setCommunityGroupTarget(null);setTab('Chats');}
       const chat:Chat={id:conversationId,name:title,avatar:initials(title),color:colorFor(title),last:'Group created',time:timeLabel(new Date().toISOString()),unread:0,online:false,kind:'group',lastAt:Date.now()};
       setChats(current=>[chat,...current.filter(item=>item.id!==chat.id)]);
       setGroupCreateOpen(false);
@@ -4129,7 +5156,7 @@ function GuftinApp() {
     const statusCacheKey='guftin-cache-statuses:'+session.user.id;
     try{
       const cachedRaw=await AsyncStorage.getItem(statusCacheKey);
-      if(cachedRaw){const cached=JSON.parse(cachedRaw);if(Array.isArray(cached))setStatuses(cached.filter((item:any)=>!item.expires_at||new Date(item.expires_at).getTime()>Date.now()));}
+      if(cachedRaw){const cached=JSON.parse(cachedRaw);if(Array.isArray(cached))setStatuses(cached.filter((item:any)=>isStatusActive(item)));}
     }catch{}
     if(!onlineRef.current)return;
     const {data,error}=await supabase.from('kc_status_updates').select('id,user_id,caption,media_url,created_at,expires_at')
@@ -4154,7 +5181,7 @@ function GuftinApp() {
       const local=row.media_url?new File(Paths.document,'guftin-status-'+row.id+'.'+ext):null;
       return {...row,display_name:row.user_id===officialResult.data?.owner_id?'Guftin Official':(person?.display_name||'Guftin member'),
         username:row.user_id===officialResult.data?.owner_id?'':(person?.username||''),is_verified:row.user_id===officialResult.data?.owner_id,
-        avatar_signed_url:avatarSigned,status_count:rows.filter(x=>x.user_id===row.user_id).length,media_signed_url:local?.exists?local.uri:null,
+        avatar_signed_url:avatarSigned,status_count:rows.filter(x=>x.user_id===row.user_id).length,media_signed_url:local?.exists?local.uri:null,media_preview_url:local?.exists?local.uri:(row.media_url?(await getSignedMediaUrl(row.media_url))||null:null),
         viewed_by_me:row.user_id===session.user.id||views.some((v:any)=>v.viewer_id===session.user.id),view_count:views.length,
         viewer_names:views.map((v:any)=>(actorMap.get(v.viewer_id) as any)?.display_name||'Guftin member'),
         liker_names:likes.map((v:any)=>(actorMap.get(v.user_id) as any)?.display_name||'Guftin member'),
@@ -4232,11 +5259,61 @@ function GuftinApp() {
   useEffect(()=>{if(session?.user?.id)void loadChatFolders();else{setChatFolders([]);setActiveFolderId(null);}},[session?.user?.id]);
 
   const visible=useMemo(()=>chats.filter(c=>c.name.toLowerCase().includes(search.toLowerCase())&&(!activeFolderId||chatFolders.some((folder:any)=>folder.id===activeFolderId&&folder.conversation_ids.includes(c.id)))),[chats,search,activeFolderId,chatFolders]);
-  const pageTitle=tab==='Chats'?'Messages':tab==='Updates'?'Updates':tab==='Channels'?'Channels':tab==='Calls'?'Calls':'You';
+  const invokeGuftinAI=async(body:any)=>{
+    const {data,error}=await supabase.functions.invoke('ai-chat',{body});
+    if(error)throw new Error(error.message||'Karaboz AI could not be reached.');
+    if(data?.error)throw new Error(String(data.error));
+    return data;
+  };
+  const loadAIChats=async()=>{
+    try{
+      const data=await invokeGuftinAI({action:'list_chats'});
+      setAiChats(Array.isArray(data.chats)?data.chats:[]);
+      setAiHistoryOpen(true);
+    }catch(error:any){Alert.alert('Karaboz AI',error?.message||'Could not load AI history.');}
+  };
+  const openAIChat=async(chatId:string)=>{
+    try{
+      setTab('AI');
+      const data=await invokeGuftinAI({action:'load_chat',chatId});
+      setAiChatId(chatId);
+      setAiMessages(Array.isArray(data.messages)?data.messages:[]);
+      setAiHistoryOpen(false);
+    }catch(error:any){Alert.alert('Karaboz AI',error?.message||'Could not open this AI chat.');}
+  };
+  const sendAIMessage=async()=>{
+    const raw=aiDraft.trim();
+    if(!raw||aiBusy)return;
+    const outgoing=raw;
+    setAiDraft('');
+    setAiMessages(previous=>[...previous,{role:'user',content:raw}]);
+    setAiBusy(true);
+    try{
+      const data=await invokeGuftinAI({message:outgoing,chatId:aiChatId,mode:aiMode});
+      if(typeof data.chatId==='string')setAiChatId(data.chatId);
+      setAiMessages(previous=>[...previous,{role:'assistant',content:String(data.reply||'')}]);
+      const list=await invokeGuftinAI({action:'list_chats'});
+      setAiChats(Array.isArray(list.chats)?list.chats:[]);
+    }catch(error:any){
+      setAiMessages(previous=>[...previous,{role:'assistant',content:'Karaboz AI: '+(error?.message||'Please try again.')}]);
+    }finally{setAiBusy(false);}
+  };
+  const startNewAIChat=()=>{
+    setTab('AI');
+    setAiChatRowDismissed(false);
+    setAiChatId(null);
+    setAiMessages([]);
+    setAiHistoryOpen(false);
+    setAiMode('chat');
+  };
+  useEffect(()=>{if(!session?.user?.id)return;let alive=true;void (async()=>{try{const {data,error}=await supabase.functions.invoke('ai-chat',{body:{action:'list_chats'}});if(!error&&alive)setAiChats(Array.isArray(data?.chats)?data.chats:[]);}catch(e){console.warn('Karaboz AI chat list unavailable',e);}})();return()=>{alive=false;};},[session?.user?.id]);
+  const openKarabozAI=()=>{setTab('AI');setAiChatRowDismissed(false);if(aiChats.length)void openAIChat(aiChats[0].id);else startNewAIChat();};
+  const pageTitle=tab==='Chats'?'Guftin':tab==='Magic'?'Magic Moments':tab==='AI'?'Karaboz AI':tab==='Updates'?'Updates':tab==='Channels'?'Channels':tab==='Hub'?'Business & Communities':tab==='Calls'?'Calls':'My Profile';
+  const totalUnread=chats.reduce((sum:any,item:any)=>sum+(Number(item.unread)||0),0);
 
   if(authRestoring){
     return <SafeAreaView style={{flex:1,backgroundColor:C.paper,alignItems:'center',justifyContent:'center'}}>
-      <ActivityIndicator color={C.green} size="large"/>
+      <GuftinLoader color={C.green} size="large"/>
       <Text style={{color:C.muted,marginTop:12}}>Restoring your Guftin session…</Text>
     </SafeAreaView>;
   }
@@ -4246,7 +5323,7 @@ function GuftinApp() {
       <StatusBar barStyle="dark-content"/>
       <ScrollView contentContainerStyle={{flexGrow:1,justifyContent:'center'}}>
         <View style={{alignItems:'center',marginBottom:34}}>
-          <BrandLogo size={78}/>
+          <AnimatedBrandLogo size={78}/>
           <Heading>{otpPurpose==='recovery'?'Reset your password':'Verify your email'}</Heading>
           <Text style={{color:C.muted,marginTop:10,textAlign:'center',lineHeight:22}}>We sent a 6-digit {otpPurpose==='recovery'?'password reset':'verification'} code to</Text>
           <Text style={{color:C.ink,fontWeight:'800',marginTop:4}}>{email}</Text>
@@ -4259,7 +5336,7 @@ function GuftinApp() {
           <TextInput value={confirmNewPassword} onChangeText={setConfirmNewPassword} placeholder="Confirm new password" secureTextEntry autoCapitalize="none" style={{backgroundColor:C.white,borderRadius:15,padding:16,marginBottom:12,color:C.ink}}/>
         </>:null}
         {authError?<Text style={{color:C.red,fontSize:12,lineHeight:18,marginBottom:12}}>{authError}</Text>:null}
-        <Btn disabled={otpBusy||emailOtp.length!==6||(otpPurpose==='recovery'&&(newPassword.length<8||newPassword!==confirmNewPassword))} onPress={verifyCurrentOtp} style={{backgroundColor:C.green,padding:17,borderRadius:16,alignItems:'center'}}>{otpBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>{otpPurpose==='recovery'?'Verify code & reset password':'Verify email'}</Text>}</Btn>
+        <Btn disabled={otpBusy||emailOtp.length!==6||(otpPurpose==='recovery'&&(newPassword.length<8||newPassword!==confirmNewPassword))} onPress={verifyCurrentOtp} style={{backgroundColor:C.green,padding:17,borderRadius:16,alignItems:'center'}}>{otpBusy?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>{otpPurpose==='recovery'?'Verify code & reset password':'Verify email'}</Text>}</Btn>
         <Btn disabled={otpBusy} onPress={resendCurrentOtp} style={{padding:16,alignItems:'center'}}><Text style={{color:C.green,fontWeight:'800'}}>Resend code</Text></Btn>
         <Btn disabled={otpBusy} onPress={()=>{setEmailOtpPending(false);setEmailOtp('');setNewPassword('');setConfirmNewPassword('');setAuthError('');}} style={{padding:12,alignItems:'center'}}><Text style={{color:C.muted,fontWeight:'700'}}>Back to sign in</Text></Btn>
       </ScrollView>
@@ -4271,7 +5348,7 @@ function GuftinApp() {
       <StatusBar barStyle="dark-content"/>
       <ScrollView contentContainerStyle={{flexGrow:1,justifyContent:'center'}}>
         <View style={{alignItems:'center',marginBottom:34}}>
-          <BrandLogo size={78}/>
+          <AnimatedBrandLogo size={78}/>
           <Heading>Guftin</Heading>
           <Text style={{color:C.muted,marginTop:8}}>Your world. Your people. One place.</Text>
         </View>
@@ -4289,15 +5366,15 @@ function GuftinApp() {
         </>}
         {authError?<Text style={{color:C.red,fontSize:12,lineHeight:18,marginBottom:12}}>{authError}</Text>:null}
         {authMode==='login'?<Btn disabled={authBusy} onPress={requestPasswordReset} style={{padding:10,alignItems:'center'}}><Text style={{color:C.green,fontWeight:'800'}}>Forgot password?</Text></Btn>:null}
-        <Btn disabled={authBusy} onPress={()=>authMode==='signup'?void signUpEmail():void signInEmail()} style={{backgroundColor:C.green,padding:17,borderRadius:16,alignItems:'center'}}>{authBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>{authMode==='signup'?'Create account':'Sign in'}</Text>}</Btn>
-        <View style={{flexDirection:'row',alignItems:'center',gap:12,marginVertical:14}}>
-          <View style={{flex:1,height:1,backgroundColor:C.line}}/><Text style={{color:C.muted,fontSize:11,fontWeight:'700'}}>OR</Text><View style={{flex:1,height:1,backgroundColor:C.line}}/>
+        <Btn disabled={authBusy} onPress={()=>authMode==='signup'?void signUpEmail():void signInEmail()} style={{backgroundColor:C.green,padding:17,borderRadius:16,alignItems:'center'}}>{authBusy?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>{authMode==='signup'?'Create account':'Sign in'}</Text>}</Btn>
+        <View style={{flexDirection:'row',alignItems:'center',marginTop:18,marginBottom:4}}>
+          <View style={{flex:1,height:1,backgroundColor:C.line}}/>
+          <Text style={{color:C.muted,fontSize:11,fontWeight:'700',paddingHorizontal:12}}>OR CONTINUE WITH</Text>
+          <View style={{flex:1,height:1,backgroundColor:C.line}}/>
         </View>
-        <Btn disabled={googleBusy||authBusy} onPress={()=>void signInGoogle()} style={{backgroundColor:C.white,borderWidth:1,borderColor:C.line,padding:16,borderRadius:16,alignItems:'center',flexDirection:'row',justifyContent:'center',gap:10}}>
-          {googleBusy?<ActivityIndicator color={C.green}/>:<Text style={{fontSize:17,fontWeight:'900',color:'#4285F4'}}>G</Text>}
-          <Text style={{color:C.ink,fontWeight:'900'}}>{googleBusy?'Connecting to Google...':'Continue with Google'}</Text>
+        <Btn disabled={authBusy} onPress={()=>void signInWithGoogle()} style={{backgroundColor:C.white,borderWidth:1,borderColor:C.line,padding:16,borderRadius:16,alignItems:'center',marginTop:10,flexDirection:'row',justifyContent:'center'}}>
+          {authBusy?<GuftinLoader color={C.green}/>:<><Text style={{fontSize:18,fontWeight:'900',color:'#4285F4',marginRight:10}}>G</Text><Text style={{color:C.ink,fontWeight:'900'}}>Continue with Google</Text></>}
         </Btn>
-        <Text style={{color:C.muted,fontSize:10,textAlign:'center',marginTop:7}}>Create a new Guftin account or sign in securely with Google.</Text>
         <Btn onPress={()=>{setAuthMode(authMode==='signup'?'login':'signup');setAuthError('');setEmailOtpPending(false);}} style={{padding:16,alignItems:'center'}}><Text style={{color:C.green,fontWeight:'800'}}>{authMode==='signup'?'Already have an account? Sign in':'New to Guftin? Create account'}</Text></Btn>
         {authMode==='signup'?<Text style={{color:C.muted,fontSize:10,textAlign:'center',marginTop:8,lineHeight:16}}>Email verification is required for email signup. A mobile number is optional and is never used to sign in.</Text>:null}
 
@@ -4306,21 +5383,21 @@ function GuftinApp() {
   }
 
   if(!profileReady){
-    return <SafeAreaView style={{flex:1,alignItems:'center',justifyContent:'center',backgroundColor:C.paper}}><ActivityIndicator color={C.green}/><Text style={{color:C.muted,marginTop:10}}>Loading your account…</Text></SafeAreaView>;
+    return <SafeAreaView style={{flex:1,alignItems:'center',justifyContent:'center',backgroundColor:C.paper}}><GuftinLoader color={C.green}/><Text style={{color:C.muted,marginTop:10}}>Loading your account…</Text></SafeAreaView>;
   }
 
   if(!profile?.username){
     return <SafeAreaView style={{flex:1,backgroundColor:C.paper,padding:24,justifyContent:'center'}}>
       <StatusBar barStyle="dark-content"/>
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{flexGrow:1,justifyContent:'center'}}>
-        <View style={{alignItems:'center',marginBottom:26}}><BrandLogo size={70}/><Heading>Complete your Guftin profile</Heading></View>
+        <View style={{alignItems:'center',marginBottom:26}}><AnimatedBrandLogo size={70}/><Heading>Complete your Guftin profile</Heading></View>
         <Text style={{fontSize:22,fontWeight:'900',color:C.ink,marginBottom:8}}>Your account details</Text>
         <Text style={{color:C.muted,lineHeight:20,marginBottom:18}}>Choose a permanent username. Your mobile number is optional and does not need verification.</Text>
         <TextInput value={profileName} onChangeText={setProfileName} placeholder="Full name" autoCapitalize="words" style={{backgroundColor:C.white,borderRadius:15,padding:16,marginBottom:10,color:C.ink}}/>
         <TextInput value={profileUsername} onChangeText={v=>setProfileUsername(v.toLowerCase().replace(/[^a-z0-9_]/g,''))} placeholder="Username (3-24 characters)" autoCapitalize="none" style={{backgroundColor:C.white,borderRadius:15,padding:16,marginBottom:10,color:C.ink}}/>
         <Text style={{fontSize:11,color:C.muted,marginBottom:14}}>Allowed: lowercase letters, numbers and underscore.</Text>
         <TextInput value={profilePhone} onChangeText={setProfilePhone} placeholder="Mobile number (Optional)" keyboardType="phone-pad" autoComplete="tel" style={{backgroundColor:C.white,borderRadius:15,padding:16,marginBottom:14,color:C.ink}}/>
-        <Btn disabled={savingProfile} onPress={()=>void finishProfile()} style={{backgroundColor:C.green,padding:17,borderRadius:16,alignItems:'center'}}>{savingProfile?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Save and continue</Text>}</Btn>
+        <Btn disabled={savingProfile} onPress={()=>void finishProfile()} style={{backgroundColor:C.green,padding:17,borderRadius:16,alignItems:'center'}}>{savingProfile?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Save and continue</Text>}</Btn>
         <Btn onPress={()=>supabase.auth.signOut()} style={{padding:12,alignItems:'center'}}><Text style={{color:C.red,fontWeight:'700'}}>Sign out</Text></Btn>
       </ScrollView>
     </SafeAreaView>;
@@ -4363,7 +5440,7 @@ function GuftinApp() {
             <Text style={{color:C.ink,fontWeight:'800'}}>Not now</Text>
           </Btn>
           <Btn disabled={permissionSetupBusy} onPress={()=>void requestPermissionSetupStep()} style={{flex:1,padding:15,borderRadius:14,alignItems:'center',backgroundColor:C.green}}>
-            {permissionSetupBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>{step.key==='autoSave'?'Save choice':step.key==='fullScreenCalls'?(permissionSetupFullScreenOpened?'Continue':'Open settings'):'Allow'}</Text>}
+            {permissionSetupBusy?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>{step.key==='autoSave'?'Save choice':step.key==='fullScreenCalls'?(permissionSetupFullScreenOpened?'Continue':'Open settings'):'Allow'}</Text>}
           </Btn>
         </View>
         <Btn disabled={permissionSetupBusy} onPress={()=>void finishPermissionSetup()} style={{paddingVertical:14,paddingHorizontal:12,alignItems:'center',marginTop:7}}>
@@ -4407,36 +5484,44 @@ function GuftinApp() {
     />;
   }
 
+  if(active&&liveverseOpen){
+    return <SafeAreaView edges={['top','left','right','bottom']} style={{flex:1,backgroundColor:'#07131f'}}>
+      <StatusBar barStyle="light-content" backgroundColor="#07131f"/>
+      <LiveverseScreen chatId={active.id} chatTitle={active.name} chatKind={active.kind}
+        userId={session.user.id} onClose={()=>setLiveverseOpen(false)}/>
+    </SafeAreaView>;
+  }
+
   if(active){
     const list=messages[active.id]||[];
     return <KeyboardAvoidingView style={{flex:1}} behavior={Platform.OS==='ios'?'padding':'height'} keyboardVerticalOffset={Platform.OS==='ios'?insets.top:0}>
-      <SafeAreaView style={{flex:1,backgroundColor:C.paper}}>
-      <StatusBar barStyle="dark-content"/>
-      <View style={{minHeight:82,backgroundColor:C.white,flexDirection:'row',alignItems:'center',paddingHorizontal:12,paddingVertical:7,borderBottomWidth:1,borderColor:C.line,elevation:2}}>
-        <Btn onPress={()=>setActive(null)} style={{padding:10}}><Text style={{fontSize:24,color:C.ink}}>‹</Text></Btn>
-        <Avatar label={active.avatar} color={active.color} size={43} online={active.online} uri={active.avatarUrl}/>
+      <SafeAreaView style={{flex:1,backgroundColor:'#fbf5eb'}}>
+      <StatusBar barStyle="light-content" backgroundColor="#078b55"/>
+      <View style={{minHeight:92,backgroundColor:'#079b5b',flexDirection:'row',alignItems:'center',paddingHorizontal:12,paddingVertical:10,borderBottomLeftRadius:25,borderBottomRightRadius:25,elevation:8,shadowColor:'#075b3b',shadowOpacity:.22,shadowRadius:10,shadowOffset:{width:0,height:4}}}>
+        <Btn onPress={()=>setActive(null)} style={{padding:0,width:44,height:44,alignItems:'center',justifyContent:'center',borderRadius:22,backgroundColor:'#ffffff24',borderWidth:1,borderColor:'#ffffff38'}}><Text style={{fontSize:25,lineHeight:30,color:'#fff',fontWeight:'700'}}>←</Text></Btn>
+        <View style={{padding:3,borderRadius:28,borderWidth:2,borderColor:'#b8f1c6'}}><Avatar label={active.avatar} color={active.color} size={48} online={active.online} uri={active.avatarUrl}/></View>
         <Btn onPress={()=>active.kind==='channel'?showChannelOptions():void openChatDetails()} style={{flex:1,marginLeft:11,alignItems:'flex-start'}}>
-          <View style={{flexDirection:'row',alignItems:'center',gap:5}}><Text numberOfLines={1} style={{fontWeight:'900',fontSize:15,color:C.ink}}>{active.name}</Text>{active.isVerified?<VerifiedBadge label={active.isOfficial?'Verified Guftin Official account':'Verified channel'}/>:null}</View>
-          <Text style={{fontSize:11,color:active.isOfficial?C.green:active.online?C.green:C.muted}}>{active.kind==='channel'?(active.isOfficial?'Official Guftin announcements':active.isChannelOwner?'Your channel · publish updates':'Channel · read-only'):active.kind==='group'?'Tap for group info':outgoingCall?'Calling…':active.online?'● online':'Tap for contact info'}</Text>
+          <View style={{flexDirection:'row',alignItems:'center',gap:5,flexShrink:1,width:'100%'}}><Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.65} ellipsizeMode="clip" style={{fontWeight:'900',fontSize:16,color:'#fff',flexShrink:1}}>{active.name}</Text>{active.isVerified?<VerifiedBadge label={active.isOfficial?'Verified Guftin Official account':'Verified channel'}/>:null}</View>
+          
         </Btn>
-        {active.kind!=='channel'?(outgoingCall?<Btn onPress={()=>void endCall(outgoingCall.id)} style={{backgroundColor:'#fde8e8',borderRadius:15,width:62,height:58,alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:'#f3c6c6'}}><Text style={{fontSize:11,fontWeight:'900',color:C.red}}>Cancel</Text><Text style={{fontSize:9,color:C.red}}>call</Text></Btn>:<>
-          <Btn disabled={callBusy} onPress={()=>void startCall('voice')} style={{backgroundColor:C.mint,borderRadius:15,width:56,height:58,alignItems:'center',justifyContent:'center',opacity:callBusy?0.5:1,borderWidth:1,borderColor:'#cce9dc'}}><Text style={{fontSize:20,color:C.green}}>☎</Text><Text style={{fontSize:10,fontWeight:'900',color:C.green}}>{active.kind==='group'?'Group call':'Call'}</Text></Btn>
-          <Btn disabled={callBusy} onPress={()=>void startCall('video')} style={{backgroundColor:C.mint,borderRadius:15,width:56,height:58,alignItems:'center',justifyContent:'center',opacity:callBusy?0.5:1,borderWidth:1,borderColor:'#cce9dc'}}><Text style={{fontSize:19,color:C.green}}>▣</Text><Text style={{fontSize:10,fontWeight:'900',color:C.green}}>Video</Text></Btn>
+        {active.kind!=='channel'&&active.kind!=='announcement'?(outgoingCall?<Btn onPress={()=>void endCall(outgoingCall.id)} style={{backgroundColor:'#fde8e8',borderRadius:15,width:62,height:58,alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:'#f3c6c6'}}><Text style={{fontSize:11,fontWeight:'900',color:C.red}}>Cancel</Text><Text style={{fontSize:9,color:C.red}}>call</Text></Btn>:<>
+          <Btn disabled={callBusy} onPress={()=>void startCall('voice')} style={{backgroundColor:'#087b4c',borderRadius:28,width:48,height:48,alignItems:'center',justifyContent:'center',opacity:callBusy?0.5:1,borderWidth:1,borderColor:'#42bf83'}}><Text style={{fontSize:20,color:C.green}}>☎</Text><Text style={{fontSize:10,fontWeight:'900',color:C.green}}>{active.kind==='group'?'Group call':'Call'}</Text></Btn>
+          <Btn disabled={callBusy} onPress={()=>void startCall('video')} style={{backgroundColor:'#087b4c',borderRadius:28,width:48,height:48,alignItems:'center',justifyContent:'center',opacity:callBusy?0.5:1,borderWidth:1,borderColor:'#42bf83'}}><Text style={{fontSize:19,color:C.green}}>▣</Text><Text style={{fontSize:10,fontWeight:'900',color:C.green}}>Video</Text></Btn>
+          <Btn onPress={()=>setLiveverseOpen(true)} style={{backgroundColor:'#073e3b',borderRadius:16,width:49,height:48,alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:'#65e9c0'}}>
+            <Text style={{fontSize:18,color:'#a4ffe0'}}>♫</Text><Text style={{fontSize:9,fontWeight:'900',color:'#a4ffe0'}}>LIVE</Text>
+          </Btn>
         </>):null}
-        <Btn onPress={()=>active.kind==='channel'?showChannelOptions():Alert.alert('Chat options',active.name,[
-          {text:'Chat info',onPress:()=>void openChatDetails()},
-          {text:'Chat PIN settings',onPress:()=>void (async()=>{const key=pinStorageKey('chat',active.id);const stored=await SecureStore.getItemAsync(key);const disabled=await AsyncStorage.getItem('guftin-chat-lock-disabled:'+active.id);Alert.alert('Chat PIN',active.name,stored&&disabled!=='1'?[{text:'Unlock Chat',onPress:()=>startPinFlow('unlock-chat',active)},{text:'Permanently Unlock',style:'destructive',onPress:()=>startPinFlow('remove-chat-lock',active)},{text:'Cancel',style:'cancel'}]:[{text:'Lock Chat',onPress:()=>void (async()=>{await AsyncStorage.removeItem('guftin-chat-lock-disabled:'+active.id);startPinFlow('set-chat',active);})()},{text:'Cancel',style:'cancel'}]);})()},
-          {text:'Clear Chat',style:'destructive',onPress:()=>Alert.alert('Clear this chat?', 'This removes the messages from your Guftin account on this phone. The other participant keeps their chat history.',[
-            {text:'Cancel',style:'cancel'},
-            {text:'Clear Chat',style:'destructive',onPress:()=>void clearChatForMe(active)}
-          ])},
-          {text:'Cancel',style:'cancel'}
-        ])} style={{width:36,height:52,borderRadius:13,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:26,fontWeight:'900',color:C.ink}}>⋮</Text></Btn>
+        <Btn onPress={()=>active.kind==='channel'?showChannelOptions():setChatOptionsOpen(true)} style={{width:40,height:48,borderRadius:22,alignItems:'center',justifyContent:'center',backgroundColor:'#ffffff20'}}><Text style={{fontSize:25,fontWeight:'900',color:'#fff'}}>⋮</Text></Btn>
       </View>
       {!isOnline?<View style={{backgroundColor:'#fff1d6',paddingHorizontal:14,paddingVertical:8}}><Text style={{color:'#815500',fontSize:11,fontWeight:'800',textAlign:'center'}}>You are offline · Showing saved messages. Sending is unavailable.</Text></View>:null}
-      <FlatList ref={chatMessagesListRef} data={list} keyExtractor={m=>m.id} keyboardShouldPersistTaps="handled" style={{flex:1}} contentContainerStyle={{padding:18,gap:12,flexGrow:1,justifyContent:list.length?'flex-end':'center'}}
+      <View pointerEvents="none" style={{position:'absolute',left:0,right:0,top:92,bottom:70,opacity:.12,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:34,lineHeight:76,color:'#c8bda9',letterSpacing:12,textAlign:'center'}}>♡　✉　☻　⌁
+　☆　◉　➤　♡
+✉　☻　☆　⌁　◉
+　♡　➤　✉　☻</Text></View>
+      <FlatList ref={chatMessagesListRef} data={list} keyExtractor={m=>m.id} keyboardShouldPersistTaps="handled" style={{flex:1,backgroundColor:'transparent'}} contentContainerStyle={{padding:16,gap:13,flexGrow:1,justifyContent:list.length?'flex-end':'center'}}
+        ListHeaderComponent={active.kind==='group'&&(groupPolls.length>0||groupEvents.length>0||groupCollabLoading)?<View style={{gap:10,marginBottom:10}}>{groupCollabLoading?<GuftinLoader color={C.green}/>:null}{groupPolls.map(poll=><View key={poll.id} style={{backgroundColor:C.white,borderWidth:1,borderColor:C.line,borderRadius:15,padding:13}}><Text style={{fontSize:13,fontWeight:'900',color:C.ink}}>{poll.question}</Text><Text style={{fontSize:10,color:C.muted,marginTop:3}}>{poll.allows_multiple?'Multiple choices allowed':'Choose one option'} · {poll.kc_poll_votes?.length||0} votes</Text>{poll.options.map((option:any)=><Btn key={option.id} disabled={!!poll.closed_at||poll.myVoteOptionIds.includes(option.id)||!!poll.myVoteOptionIds.length&&!poll.allows_multiple} onPress={()=>void voteInGroupPoll(poll.id,option.id)} style={{backgroundColor:poll.myVoteOptionIds.includes(option.id)?C.mint:C.paper,borderRadius:10,padding:10,marginTop:7,alignItems:'flex-start'}}><Text style={{color:C.ink,fontSize:12,fontWeight:'800'}}>{option.label}　·　{option.voteCount}</Text></Btn>)}{poll.closed_at?<Text style={{fontSize:10,color:C.muted,marginTop:7}}>Poll closed</Text>:poll.creator_id===session?.user?.id?<Btn onPress={()=>Alert.alert('Close this poll?','Members will no longer be able to vote.',[{text:'Keep open',style:'cancel'},{text:'Close poll',style:'destructive',onPress:()=>void (async()=>{try{await upgrade20.closePoll(poll.id);await loadGroupPolls(active.id);}catch(error:any){Alert.alert('Poll not closed',error?.message||'Please try again.');}})()}])} style={{alignSelf:'flex-end',padding:7,marginTop:7}}><Text style={{fontSize:10,color:C.red,fontWeight:'900'}}>Close poll</Text></Btn>:null}</View>)}{groupEvents.map(event=><View key={event.id} style={{backgroundColor:C.white,borderWidth:1,borderColor:C.line,borderRadius:15,padding:13}}><Text style={{fontSize:13,fontWeight:'900',color:C.ink}}>{event.title}</Text><Text style={{fontSize:10,color:C.muted,marginTop:4}}>{new Date(event.starts_at).toLocaleString()} · Reminder {event.reminder_minutes} min before</Text>{event.details?<Text style={{fontSize:12,color:C.ink,marginTop:7}}>{event.details}</Text>:null}<Text style={{fontSize:10,color:C.muted,marginTop:7}}>{(event.kc_group_event_rsvps||[]).filter((r:any)=>r.response==='going').length} going · {(event.kc_group_event_rsvps||[]).filter((r:any)=>r.response==='maybe').length} maybe</Text><View style={{flexDirection:'row',gap:6,marginTop:9}}>{(['going','maybe','not_going'] as const).map(response=><Btn key={response} onPress={()=>void respondToGroupEvent(event.id,response)} style={{flex:1,padding:8,borderRadius:9,backgroundColor:(event.kc_group_event_rsvps||[]).some((r:any)=>r.user_id===session?.user?.id&&r.response===response)?C.mint:C.paper,alignItems:'center'}}><Text style={{fontSize:10,color:C.green,fontWeight:'900'}}>{response==='going'?'Going':response==='maybe'?'Maybe':'No'}</Text></Btn>)}</View>{event.creator_id===session?.user?.id?<Btn onPress={()=>cancelGroupEvent(event.id)} style={{marginTop:7,padding:7,alignSelf:'flex-end'}}><Text style={{fontSize:10,color:C.red,fontWeight:'900'}}>Cancel event</Text></Btn>:null}</View>)}</View>:null}
         ListEmptyComponent={<Text style={{textAlign:'center',color:C.muted}}>No messages yet. Send the first message.</Text>}
-        renderItem={({item})=><TouchableOpacity activeOpacity={1} onLongPress={active.kind==='channel'&&!active.isChannelOwner?undefined:()=>deleteMessage(item)} delayLongPress={420} style={{alignSelf:item.mine?'flex-end':'flex-start',maxWidth:'84%',backgroundColor:item.mine?'#dff4e8':C.white,padding:13,borderRadius:17,borderTopRightRadius:item.mine?5:17,borderTopLeftRadius:item.mine?17:5}}>
+        renderItem={({item})=><TouchableOpacity activeOpacity={1} onLongPress={(active.kind==='channel'||active.kind==='announcement')&&!active.isChannelOwner?undefined:()=>deleteMessage(item)} delayLongPress={420} style={{alignSelf:item.mine?'flex-end':'flex-start',maxWidth:'86%',backgroundColor:item.mine?'#d2f8bd':'#fff',paddingHorizontal:16,paddingVertical:13,borderRadius:23,borderBottomRightRadius:item.mine?6:23,borderTopLeftRadius:item.mine?23:6,borderWidth:1,borderColor:item.mine?'#b7e9a2':'#eeeae3',elevation:2,shadowColor:'#8c806c',shadowOpacity:.10,shadowRadius:4,shadowOffset:{width:0,height:2}}}>
           {item.deleted_at?<Text style={{fontSize:12,color:C.muted,fontStyle:'italic'}}>This message was deleted</Text>:item.message_type==='image'&&item.attachment_url?<Image source={{uri:item.attachment_url}} style={{width:210,height:210,borderRadius:12}} resizeMode="cover"/>:item.message_type==='video'&&item.attachment_url?<VideoBubble uri={item.attachment_url}/>:item.message_type==='audio'&&item.attachment_url?<AudioBubble uri={item.attachment_url}/>:item.message_type==='file'&&item.attachment_url?<View style={{minWidth:225,maxWidth:270,backgroundColor:C.paper,borderRadius:13,padding:12}}>
             <Text style={{fontSize:25,color:C.green}}>▤</Text>
             <Text numberOfLines={2} style={{fontSize:13,fontWeight:'900',color:C.ink,marginTop:5}}>{item.body||'Document'}</Text>
@@ -4447,30 +5532,32 @@ function GuftinApp() {
           </View>:<Text style={{color:C.ink,fontSize:14,lineHeight:21}}>{item.body||'Attachment'}</Text>}
           {!item.deleted_at&&['image','video'].includes(item.message_type)&&item.attachment_url?<Btn onPress={()=>void saveMediaToGallery(item)} style={{marginTop:7,paddingVertical:6,paddingHorizontal:9,borderRadius:9,backgroundColor:C.paper,alignSelf:'flex-start'}}><Text style={{fontSize:11,color:C.green,fontWeight:'800'}}>↓ Save to gallery</Text></Btn>:null}
           <Text style={{textAlign:'right',fontSize:9,color:C.muted,marginTop:5}}>
-            {timeLabel(item.created_at)}{item.pending?' · Queued':item.mine ? " · " + (showReadReceipts && peerLastReadAt && new Date(peerLastReadAt).getTime() >= new Date(item.created_at).getTime() ? "✓✓ Read" : deliveredByMessage[item.id] ? "✓✓ Delivered" : "✓ Sent") : ""}
+            {timeLabel(item.created_at)}{item.edited_at?' · Edited':''}{item.pending?' · Queued':item.mine ? " · " + (showReadReceipts && peerLastReadAt && new Date(peerLastReadAt).getTime() >= new Date(item.created_at).getTime() ? "✓✓ Read" : deliveredByMessage[item.id] ? "✓✓ Delivered" : "✓ Sent") : ""}
           </Text>
-          {item.pending?<Btn onPress={()=>{void flushPendingMessagesRef.current?.();void flushPendingMediaRef.current?.();}} style={{marginTop:6,alignSelf:'flex-end',paddingHorizontal:10,paddingVertical:5,borderRadius:9,backgroundColor:C.mint}}><Text style={{fontSize:10,color:C.green,fontWeight:'900'}}>↻ Retry sending</Text></Btn>:null}
+          {item.pending?<Btn onPress={()=>{void flushPendingMessagesRef.current?.(true);void flushPendingMediaRef.current?.(true);}} style={{marginTop:6,alignSelf:'flex-end',paddingHorizontal:10,paddingVertical:5,borderRadius:9,backgroundColor:C.mint}}><Text style={{fontSize:10,color:C.green,fontWeight:'900'}}>↻ Retry sending</Text></Btn>:null}
         </TouchableOpacity>}/>
-      <View style={{flexDirection:'row',alignItems:'center',padding:11,gap:8,backgroundColor:C.white,borderTopWidth:1,borderColor:C.line}}>
-        {active.kind==='channel'&&!active.isChannelOwner
-          ?<Text style={{flex:1,textAlign:'center',fontSize:12,color:C.muted,fontWeight:'800',paddingVertical:12}}>Only the channel owner can publish updates.</Text>
+      <View style={{flexDirection:'row',alignItems:'center',paddingHorizontal:9,paddingVertical:9,gap:7,backgroundColor:'#fff',borderTopLeftRadius:24,borderTopRightRadius:24,borderTopWidth:1,borderColor:'#eee8df',elevation:6,shadowColor:'#8c806c',shadowOpacity:.12,shadowRadius:8,shadowOffset:{width:0,height:-3}}}>
+        {(active.kind==='channel'||active.kind==='announcement')&&!active.isChannelOwner
+          ?<Text style={{flex:1,textAlign:'center',fontSize:12,color:C.muted,fontWeight:'800',paddingVertical:12}}>{active.kind==='announcement'?'Only the community owner or an admin can post announcements.':'Only the channel owner can publish updates.'}</Text>
           :<>
-            <Btn disabled={mediaPreparing} onPress={sendMedia} style={{width:42,height:42,borderRadius:15,backgroundColor:C.paper,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:23,color:C.green}}>＋</Text></Btn>
-            {active.kind!=='channel'?<Btn disabled={sending||recordingBusy} onPress={recording?stopVoiceRecording:startVoiceRecording} style={{width:42,height:42,borderRadius:15,backgroundColor:recording?'#fde8e8':C.paper,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:18,color:recording?C.red:C.green}}>{recording?'■':'🎙'}</Text></Btn>:null}
-            <TextInput editable={true} value={draft} onChangeText={setDraft} onFocus={()=>requestAnimationFrame(()=>chatMessagesListRef.current?.scrollToEnd({animated:true}))} placeholder={!isOnline?'Offline · message will send when connected':active.kind==='channel'?'Write a channel update…':recording?'Recording… tap ■ to send':'Write a message...'} multiline maxLength={4000} style={{flex:1,minHeight:46,maxHeight:110,backgroundColor:C.paper,borderRadius:16,paddingHorizontal:15,paddingVertical:12,color:C.ink,textAlignVertical:'center'}}/>
-            <Btn disabled={!draft.trim()||sending} onPress={sendMessage} style={{backgroundColor:C.green,width:46,height:46,borderRadius:16,alignItems:'center',justifyContent:'center'}}>
-              {sending?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontSize:20}}>➤</Text>}
+            {active.kind!=='announcement'?<Btn disabled={mediaPreparing} onPress={()=>setAttachmentTrayOpen(v=>!v)} style={{width:44,height:44,borderRadius:23,backgroundColor:'#08a66a',alignItems:'center',justifyContent:'center',elevation:3}}><Text style={{fontSize:27,color:'#fff'}}>＋</Text></Btn>:null}
+            {active.kind!=='channel'&&active.kind!=='announcement'?<Btn disabled={sending||recordingBusy} onPress={recording?stopVoiceRecording:startVoiceRecording} style={{width:42,height:42,borderRadius:15,backgroundColor:recording?'#fde8e8':C.paper,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:18,color:recording?C.red:C.green}}>{recording?'■':'🎙'}</Text></Btn>:null}
+            <TextInput editable={true} value={draft} onChangeText={setDraft} onFocus={()=>requestAnimationFrame(()=>chatMessagesListRef.current?.scrollToEnd({animated:true}))} placeholder={!isOnline?'Offline · message will send when connected':active.kind==='channel'?'Write a channel update…':active.kind==='announcement'?'Write a community announcement…':recording?'Recording… tap ■ to send':'Write a message...'} multiline maxLength={4000} style={{flex:1,minHeight:48,maxHeight:110,backgroundColor:'#f6f6f6',borderRadius:25,paddingHorizontal:15,paddingVertical:12,color:C.ink,textAlignVertical:'center',borderWidth:1,borderColor:'#f0eee9'}}/>
+            {active.kind!=='channel'&&active.kind!=='announcement'?<Btn disabled={scheduleBusy||sending} onPress={openScheduleComposer} style={{width:42,height:42,borderRadius:15,backgroundColor:'#f1f8f4',borderWidth:1,borderColor:'#d9eee2',alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:22,color:C.green}}>◷</Text></Btn>:null}
+            <Btn disabled={!draft.trim()||sending} onPress={()=>{void sendMessage();}} style={{backgroundColor:'#08a96b',width:54,height:54,borderRadius:28,alignItems:'center',justifyContent:'center',elevation:3}}>
+              {sending?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontSize:20}}>➤</Text>}
             </Btn>
           </>}
       </View>
-    <Modal visible={chatDetailsOpen} animationType="slide" onRequestClose={()=>setChatDetailsOpen(false)}>
+      {attachmentTrayOpen&&active.kind!=='channel'&&active.kind!=='announcement'?<View style={{flexDirection:'row',justifyContent:'space-around',alignItems:'center',paddingVertical:13,paddingHorizontal:5,backgroundColor:'#fff',borderTopWidth:1,borderColor:'#f0eee9',borderBottomLeftRadius:24,borderBottomRightRadius:24}}>{[{label:'Gallery',icon:'▧',color:'#7650d8',action:()=>void sendPhotosVideos()},{label:'Camera',icon:'◉',color:'#1878d8',action:()=>void (async()=>{const p=await ImagePicker.requestCameraPermissionsAsync();if(!p.granted){Alert.alert('Permission needed','Allow camera access to take a photo.');return;}const r=await ImagePicker.launchCameraAsync({mediaTypes:['images'],quality:.85});if(!r.canceled&&r.assets?.[0])await sendPhotosVideos(r.assets[0]);})()},{label:'Video',icon:'▶',color:'#dc4773',action:()=>void (async()=>{const p=await ImagePicker.requestCameraPermissionsAsync();if(!p.granted){Alert.alert('Permission needed','Allow camera access to record video.');return;}const r=await ImagePicker.launchCameraAsync({mediaTypes:['videos'],videoMaxDuration:60});if(!r.canceled&&r.assets?.[0])await sendPhotosVideos(r.assets[0]);})()},{label:'Voice',icon:'♩',color:'#12936b',action:()=>{setAttachmentTrayOpen(false);void (recording?stopVoiceRecording():startVoiceRecording());}},{label:'Stickers',icon:'☻',color:'#e88b16',action:()=>Alert.alert('Stickers','Choose an emoji sticker to send.',[{text:'😊',onPress:()=>{setDraft(v=>v+'😊');setAttachmentTrayOpen(false);}},{text:'❤️',onPress:()=>{setDraft(v=>v+'❤️');setAttachmentTrayOpen(false);}},{text:'😂',onPress:()=>{setDraft(v=>v+'😂');setAttachmentTrayOpen(false);}},{text:'Cancel',style:'cancel'}])}].map(item=><Btn key={item.label} onPress={()=>{setAttachmentTrayOpen(false);item.action();}} style={{alignItems:'center',minWidth:55}}><View style={{width:48,height:48,borderRadius:17,backgroundColor:item.color+'18',alignItems:'center',justifyContent:'center',marginBottom:5}}><Text style={{fontSize:23,color:item.color}}>{item.icon}</Text></View><Text style={{fontSize:11,color:C.ink,fontWeight:'700'}}>{item.label}</Text></Btn>)}</View>:null}
+    {chatDetailsOpen?<View style={{position:'absolute',left:0,right:0,top:0,bottom:0,zIndex:1200,elevation:30,backgroundColor:C.paper}}>
       <SafeAreaView style={{flex:1,backgroundColor:C.paper}}>
         <StatusBar barStyle="dark-content"/>
         <View style={{height:58,backgroundColor:C.white,flexDirection:'row',alignItems:'center',paddingHorizontal:14,borderBottomWidth:1,borderColor:C.line}}>
           <Btn onPress={()=>setChatDetailsOpen(false)} style={{padding:10}}><Text style={{fontSize:25,color:C.ink}}>‹</Text></Btn>
           <Text style={{fontSize:18,fontWeight:'900',color:C.ink,marginLeft:8}}>Contact info</Text>
         </View>
-        {chatDetailsLoading?<View style={{flex:1,alignItems:'center',justifyContent:'center'}}><ActivityIndicator color={C.green}/><Text style={{color:C.muted,marginTop:10}}>Loading contact information…</Text></View>:chatDetails?<ScrollView contentContainerStyle={{padding:18,paddingBottom:34}}>
+        {chatDetailsLoading?<View style={{flex:1,alignItems:'center',justifyContent:'center'}}><GuftinLoader color={C.green}/><Text style={{color:C.muted,marginTop:10}}>Loading contact information…</Text></View>:chatDetails?<ScrollView contentContainerStyle={{padding:18,paddingBottom:34}}>
           <View style={{alignItems:'center',backgroundColor:C.white,borderRadius:22,padding:24,marginBottom:16}}>
             <Avatar label={initials(chatDetails.conversation.kind==='group'?chatDetails.conversation.title:(chatDetails.members.find((member:any)=>member.user_id!==session.user.id)?.display_name||active.name||'G'))}
               color={C.green} size={112} uri={chatDetails.conversation.kind==='group'?(chatDetails.conversation.photo_signed_url||undefined):(chatDetails.members.find((member:any)=>member.user_id!==session.user.id)?.avatar_signed_url||undefined)}/>
@@ -4523,8 +5610,51 @@ function GuftinApp() {
           })()}
         </ScrollView>:<View style={{flex:1,alignItems:'center',justifyContent:'center',padding:30}}><Text style={{color:C.muted}}>No contact information available.</Text></View>}
       </SafeAreaView>
-    </Modal>
+    </View>:null}
 
+      <ChatOptionsPopover visible={chatOptionsOpen} onClose={()=>setChatOptionsOpen(false)} topInset={insets.top}>
+
+        <View style={{width:270,maxWidth:'88%',maxHeight:'78%',backgroundColor:'#fffdf8',borderRadius:21,padding:9,borderWidth:1,borderColor:'#e6f2e9',elevation:22,shadowColor:'#064b32',shadowOpacity:.25,shadowRadius:20,shadowOffset:{width:0,height:9}}}>
+          <ScrollView showsVerticalScrollIndicator={false}>
+            {[
+              {label:'Chat info',icon:'ⓘ',run:()=>void openChatDetails()},
+              ...((active as Chat|null)?.kind!=='channel'?[{label:'Schedule message',icon:'◷',run:()=>{setScheduleDraft(draft);const d=new Date(Date.now()+60*60*1000);const pad=(v:number)=>String(v).padStart(2,'0');setScheduleAtInput(`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`);setScheduleComposerOpen(true);}}]:[]),
+              ...((active as Chat|null)?.kind==='group'?[{label:'Create group poll',icon:'☷',run:()=>{setPollQuestion('');setPollOptionsText('');setPollCreateVisible(true);}},{label:'Create group event',icon:'▦',run:()=>{setEventTitle('');setEventDetails('');setEventStartsAt('');setEventCreateVisible(true);}}]:[]),
+              ...((active as Chat|null)?.kind==='direct'?[{label:'Block contact',icon:'⊘',run:()=>Alert.alert('Block this contact?','They will be added to your blocked users. Existing chat history will remain.',[{text:'Cancel',style:'cancel'},{text:'Block',style:'destructive',onPress:()=>void blockCurrentContact(active! as Chat)}])}]:[]),
+              {label:'Chat PIN settings',icon:'▣',run:()=>void (async()=>{const chat=active! as Chat;const key=pinStorageKey('chat',chat.id);const stored=await SecureStore.getItemAsync(key);const disabled=await AsyncStorage.getItem('guftin-chat-lock-disabled:'+chat.id);Alert.alert('Chat PIN',chat.name,stored&&disabled!=='1'?[{text:'Unlock Chat',onPress:()=>startPinFlow('unlock-chat',chat)},{text:'Permanently Unlock',style:'destructive',onPress:()=>startPinFlow('remove-chat-lock',chat)},{text:'Cancel',style:'cancel'}]:[{text:'Lock Chat',onPress:()=>void (async()=>{await AsyncStorage.removeItem('guftin-chat-lock-disabled:'+chat.id);startPinFlow('set-chat',chat);})()},{text:'Cancel',style:'cancel'}]);})()},
+              {label:'Clear Chat',icon:'⌫',run:()=>Alert.alert('Clear this chat?','This removes the messages from your Guftin account on this phone. The other participant keeps their chat history.',[{text:'Cancel',style:'cancel'},{text:'Clear Chat',style:'destructive',onPress:()=>void clearChatForMe(active! as Chat)}])}
+            ].map((item:any,index:number)=><Btn key={item.label} onPress={()=>{setChatOptionsOpen(false);item.run();}} style={{flexDirection:'row',alignItems:'center',gap:12,paddingHorizontal:12,paddingVertical:13,borderBottomWidth:index===0?1:0,borderColor:'#f0eee9'}}>
+              <Text style={{fontSize:18,color:'#078c58',width:24,textAlign:'center'}}>{item.icon}</Text><Text style={{fontSize:13,color:'#203b32',fontWeight:'700'}}>{item.label}</Text>
+            </Btn>)}
+          </ScrollView>
+        </View>
+      
+    </ChatOptionsPopover>
+      {scheduleComposerOpen?<View style={{position:'absolute',left:0,right:0,top:0,bottom:0,zIndex:1000,elevation:30,backgroundColor:'#0009',justifyContent:'center',padding:18}}>
+        <View style={{backgroundColor:C.white,borderRadius:22,padding:18,maxHeight:'88%'}}>
+          <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}>
+            <View><Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>Schedule message</Text><Text style={{fontSize:11,color:C.muted,marginTop:4}}>This chat · Encrypted · Server scheduled</Text><Text style={{fontSize:10,color:C.muted,marginTop:3}}>Tap ➤ in the composer to send now, or schedule below.</Text></View>
+            <Btn onPress={()=>{if(!scheduleBusy)setScheduleComposerOpen(false);}} style={{padding:7}}><Text style={{fontSize:24,color:C.muted}}>×</Text></Btn>
+          </View>
+          <TextInput value={scheduleDraft} onChangeText={setScheduleDraft} placeholder="Write your message…" multiline maxLength={4000} style={{minHeight:105,maxHeight:180,backgroundColor:C.paper,borderRadius:13,padding:12,color:C.ink,textAlignVertical:'top',marginTop:14}}/>
+          <Text style={{color:C.ink,fontWeight:'900',marginTop:16,marginBottom:8}}>When should it be sent?</Text>
+          <View style={{flexDirection:'row',gap:8}}>
+            <Btn onPress={()=>setScheduleMode('at')} style={{flex:1,alignItems:'center',padding:11,borderRadius:11,backgroundColor:scheduleMode==='at'?C.mint:C.paper,borderWidth:1,borderColor:scheduleMode==='at'?C.green:C.line}}><Text style={{fontSize:12,fontWeight:'900',color:scheduleMode==='at'?C.green:C.muted}}>Date & time</Text></Btn>
+            <Btn onPress={()=>setScheduleMode('after')} style={{flex:1,alignItems:'center',padding:11,borderRadius:11,backgroundColor:scheduleMode==='after'?C.mint:C.paper,borderWidth:1,borderColor:scheduleMode==='after'?C.green:C.line}}><Text style={{fontSize:12,fontWeight:'900',color:scheduleMode==='after'?C.green:C.muted}}>After duration</Text></Btn>
+          </View>
+          {scheduleMode==='at'?<TextInput value={scheduleAtInput} onChangeText={setScheduleAtInput} placeholder="YYYY-MM-DD HH:mm" autoCapitalize="none" style={{backgroundColor:C.paper,borderRadius:12,padding:13,color:C.ink,borderWidth:1,borderColor:C.line,marginTop:12}}/>:<View style={{flexDirection:'row',gap:8,alignItems:'center',marginTop:12}}>
+            <TextInput value={scheduleDelayAmount} onChangeText={setScheduleDelayAmount} keyboardType="number-pad" placeholder="10" style={{flex:1,backgroundColor:C.paper,borderRadius:12,padding:13,color:C.ink,borderWidth:1,borderColor:C.line}}/>
+            {(['minutes','hours','days'] as const).map(unit=><Btn key={unit} onPress={()=>setScheduleDelayUnit(unit)} style={{paddingHorizontal:10,paddingVertical:12,borderRadius:10,backgroundColor:scheduleDelayUnit===unit?C.mint:C.paper,borderWidth:1,borderColor:scheduleDelayUnit===unit?C.green:C.line}}><Text style={{fontSize:11,fontWeight:'900',color:scheduleDelayUnit===unit?C.green:C.muted}}>{unit}</Text></Btn>)}
+          </View>}
+          <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginTop:16}}>
+            <Btn onPress={()=>{setScheduleComposerOpen(false);setScheduledMessagesOpen(true);void loadScheduledMessages();}} disabled={scheduleBusy} style={{paddingVertical:10,paddingRight:8}}><Text style={{color:C.green,fontSize:11,fontWeight:'900'}}>View scheduled</Text></Btn>
+            <View style={{flexDirection:'row',gap:8,alignItems:'center'}}>
+              <Btn disabled={scheduleBusy||!scheduleDraft.trim()||sending} onPress={()=>{const body=scheduleDraft.trim();setScheduleComposerOpen(false);void sendMessage(body);}} style={{padding:11}}><Text style={{color:C.green,fontWeight:'900'}}>Send now</Text></Btn><Btn disabled={scheduleBusy} onPress={()=>setScheduleComposerOpen(false)} style={{padding:11}}><Text style={{color:C.muted,fontWeight:'800'}}>Cancel</Text></Btn>
+              <Btn disabled={scheduleBusy||!scheduleDraft.trim()||(scheduleMode==='at'&&!scheduleAtInput.trim())||(scheduleMode==='after'&&!scheduleDelayAmount.trim())} onPress={()=>void submitScheduledMessage()} style={{backgroundColor:C.green,paddingHorizontal:17,paddingVertical:12,borderRadius:12}}>{scheduleBusy?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Schedule & send</Text>}</Btn>
+            </View>
+          </View>
+        </View>
+      </View>:null}
       </SafeAreaView>
     </KeyboardAvoidingView>;
   }
@@ -4534,34 +5664,37 @@ function GuftinApp() {
   const ownChannels=searchableChannels.filter(channel=>channel.owner_id===session?.user?.id&&(!channelQuery||[channel.title,channel.handle,channel.description].some(value=>String(value||'').toLowerCase().includes(channelQuery))));
   const discoverChannels=searchableChannels.filter(channel=>channel.owner_id!==session?.user?.id&&(!channelQuery||[channel.title,channel.handle,channel.description].some(value=>String(value||'').toLowerCase().includes(channelQuery))));
 
-  return <SafeAreaView edges={['top','left','right']} style={{flex:1,backgroundColor:C.white}}>
-    <StatusBar barStyle="dark-content"/>
-    <View style={{paddingHorizontal:18,paddingTop:14,paddingBottom:13,flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}>
-      <View style={{flexDirection:'row',alignItems:'center',gap:10}}>
-        <Btn onPress={()=>setTab('You')}><Avatar label={initials(profile?.display_name||'G')} color={C.green} size={40} uri={profileAvatarUrl}/></Btn>
-        <View><Heading>{pageTitle}</Heading><Text style={{color:C.muted,fontSize:12,marginTop:4}}>{tab==='Chats'?'Your real conversations':tab==='You'?'Your Guftin ID':'Guftin'}</Text></View>
-      </View>
-      <View style={{flexDirection:'row',gap:9}}>
-        <Btn onPress={()=>setSettingsOpen(true)} style={{backgroundColor:C.paper,width:42,height:42,borderRadius:15,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:19,color:C.green}}>⚙</Text></Btn>
-        {tab==='Chats'?<Btn onPress={()=>void openGroupCreator()} style={{backgroundColor:C.mint,width:42,height:42,borderRadius:15,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:18,color:C.green}}>👥</Text></Btn>:null}
-        {tab==='Chats'?<Btn onPress={()=>setSearching(!searching)} style={{backgroundColor:C.paper,width:42,height:42,borderRadius:15,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:19}}>⌕</Text></Btn>:null}
-        {tab==='Chats'?<Btn onPress={()=>setAddOpen(true)} style={{backgroundColor:C.green,width:42,height:42,borderRadius:15,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:24,color:'#fff'}}>＋</Text></Btn>:null}
-        {tab==='Channels'?<Btn onPress={()=>setChannelJoinOpen(true)} style={{backgroundColor:C.mint,width:42,height:42,borderRadius:15,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:18,color:C.green}}>↗</Text></Btn>:null}
-        {tab==='Channels'?<Btn onPress={()=>setChannelCreateOpen(true)} style={{backgroundColor:C.green,width:42,height:42,borderRadius:15,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:24,color:'#fff'}}>＋</Text></Btn>:null}
+  return <SafeAreaView edges={['top','left','right']} style={{flex:1,backgroundColor:C.paper}}>
+    <StatusBar barStyle={tab==='Chats'?'light-content':'dark-content'} backgroundColor={tab==='Chats'?'#087e55':C.paper}/>
+    <View style={{backgroundColor:tab==='Chats'?'#078653':C.white,borderBottomLeftRadius:28,borderBottomRightRadius:28,overflow:'hidden',paddingHorizontal:18,paddingTop:13,paddingBottom:17}}>
+      {tab==='Chats'?<View pointerEvents="none" style={{position:'absolute',right:-28,top:-54,width:190,height:190,borderRadius:100,backgroundColor:'#16a765',opacity:.42}}/>:null}
+      <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}>
+        <View style={{flexDirection:'row',alignItems:'center',gap:11,flex:1}}>
+          {tab==='Chats'?<BrandLogo size={62}/>:tab==='You'?<Btn onPress={()=>setTab('Chats')}><Text style={{fontSize:27,color:C.green,fontWeight:'900'}}>‹</Text></Btn>:<BrandLogo size={42}/>}
+          <View style={{flex:1}}>
+            <Text style={{fontSize:29,fontWeight:'900',letterSpacing:-.8,color:tab==='Chats'?'#fff':C.ink}}>{pageTitle}</Text>
+            <Text style={{color:tab==='Chats'?'#e4fff1':C.muted,fontSize:12,marginTop:2}}>{tab==='Chats'?'Your real conversations':tab==='AI'?'Ask, write, translate and summarize':tab==='You'?'Manage your Guftin profile':tab==='Hub'?'Stores and communities':'Guftin'}</Text>
+          </View>
+        </View>
+        <View style={{flexDirection:'row',gap:8}}>
+          <Btn onPress={()=>setSettingsOpen(true)} style={{backgroundColor:tab==='Chats'?'#ffffff20':C.paper,width:43,height:43,borderRadius:22,alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:tab==='Chats'?'#ffffff30':C.line}}><Text style={{fontSize:21,color:tab==='Chats'?'#fff':C.green}}>⚙</Text></Btn>
+          {tab==='Chats'?<Btn onPress={()=>void openGroupCreator()} style={{backgroundColor:'#ffffff20',width:43,height:43,borderRadius:22,alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:'#ffffff30'}}><Text style={{fontSize:19,color:'#fff'}}>👥</Text></Btn>:null}
+          {tab==='Chats'?<Btn onPress={()=>setSearching(!searching)} style={{backgroundColor:'#ffffff20',width:43,height:43,borderRadius:22,alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:'#ffffff30'}}><Text style={{fontSize:22,color:'#fff'}}>⌕</Text></Btn>:null}
+        </View>
       </View>
     </View>
     {!isOnline?<View style={{backgroundColor:'#fff1d6',paddingHorizontal:16,paddingVertical:8}}><Text style={{color:'#815500',fontSize:11,fontWeight:'800',textAlign:'center'}}>Offline mode · Saved Guftin information is available. Messages and live updates need internet.</Text></View>:null}
     {tab==='Chats'?<>
       {searching?<TextInput value={search} onChangeText={setSearch} placeholder="Search your conversations..." autoFocus style={{marginHorizontal:20,marginBottom:12,padding:14,backgroundColor:C.paper,borderRadius:14,color:C.ink}}/>:null}
-      {loading&&chats.length===0?<View style={{flex:1,alignItems:'center',justifyContent:'center'}}><ActivityIndicator color={C.green}/><Text style={{color:C.muted,marginTop:10}}>Loading your conversations…</Text></View>:
-        <FlatList data={visible} keyExtractor={x=>x.id} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={C.green}/>} contentContainerStyle={{paddingHorizontal:13,paddingBottom:25,flexGrow:1}}
+      {loading&&chats.length===0?<View style={{flex:1,alignItems:'center',justifyContent:'center'}}><GuftinLoader color={C.green}/><Text style={{color:C.muted,marginTop:10}}>Loading your conversations…</Text></View>:
+        <FlatList data={[...visible,...(aiChats.length&&!aiChatRowDismissed?[{id:'__karaboz_ai__',name:'Karaboz AI',avatar:'✦',color:C.green,online:true,avatarUrl:null,last:aiChats[0]?.title||'Your Guftin AI assistant',time:'',unread:0,__karaboz:true} as any]:[])]} keyExtractor={x=>x.id} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={C.green}/>} contentContainerStyle={{paddingHorizontal:13,paddingTop:8,paddingBottom:24,flexGrow:1}}
           ListHeaderComponent={<View style={{paddingTop:4,paddingBottom:12}}>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{gap:8,paddingBottom:12}}>
               <Btn onPress={()=>setActiveFolderId(null)} style={{paddingHorizontal:14,paddingVertical:9,borderRadius:20,backgroundColor:activeFolderId===null?C.green:C.paper}}><Text style={{color:activeFolderId===null?'#fff':C.ink,fontWeight:'900',fontSize:11}}>All chats</Text></Btn>
               {chatFolders.map((folder:any)=><Btn key={folder.id} onPress={()=>setActiveFolderId(folder.id)} style={{paddingHorizontal:14,paddingVertical:9,borderRadius:20,backgroundColor:activeFolderId===folder.id?C.green:C.paper}}><Text style={{color:activeFolderId===folder.id?'#fff':C.ink,fontWeight:'900',fontSize:11}}>{folder.title}</Text></Btn>)}
               <Btn onPress={()=>{setFolderTargetChat(null);setFolderTitle('');setFolderModalVisible(true);}} style={{paddingHorizontal:14,paddingVertical:9,borderRadius:20,backgroundColor:C.mint}}><Text style={{color:C.green,fontWeight:'900',fontSize:11}}>＋ Folder</Text></Btn>
             </ScrollView>
-            <Btn onPress={()=>setAddOpen(true) style={{flexDirection:'row',alignItems:'center',gap:12,padding:13,borderRadius:16,backgroundColor:C.mint}}>
+            <Btn onPress={()=>setAddOpen(true)} style={{flexDirection:'row',alignItems:'center',gap:12,padding:13,borderRadius:16,backgroundColor:C.mint}}>
               <View style={{width:42,height:42,borderRadius:14,backgroundColor:C.green,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:26,color:'#fff',fontWeight:'700'}}>＋</Text></View>
               <View style={{flex:1}}>
                 <Text style={{fontSize:14,fontWeight:'900',color:C.green}}>Add a new contact</Text>
@@ -4571,9 +5704,16 @@ function GuftinApp() {
             </Btn>
           </View>}
           ListEmptyComponent={<View style={{alignItems:'center',padding:35,marginTop:34}}><BrandLogo size={64}/><Text style={{fontSize:17,fontWeight:'900',color:C.ink,marginTop:15}}>No conversations yet</Text><Text style={{color:C.muted,textAlign:'center',marginTop:7,lineHeight:20}}>Add a contact above using their username, verified email address or verified mobile number. Your chat appears when you send the first message or start a call.</Text></View>}
-          renderItem={({item})=><Btn onPress={()=>openChat(item)} onLongPress={()=>Alert.alert('Chat options',item.name,[{text:'Add to folder',onPress:()=>chooseChatFolder(item)},{text:'Delete chat for me',style:'destructive',onPress:()=>void hideChat(item)},{text:'Cancel',style:'cancel'}])} style={{flexDirection:'row',alignItems:'center',padding:10,gap:12,borderRadius:17}}>
+          ListFooterComponent={chats.length>0?<View style={{alignItems:'center',paddingTop:30,paddingBottom:8}}>
+            <View style={{width:116,height:76,alignItems:'center',justifyContent:'center',marginBottom:7}}>
+              <Text style={{fontSize:45,color:'#b9efd0'}}>▰</Text><Text style={{fontSize:25,color:'#a7e8c2',position:'absolute',right:9,bottom:0}}>▰</Text>
+            </View>
+            <Text style={{fontSize:18,color:'#28785b',fontWeight:'800',fontStyle:'italic'}}>Chat Freely · Connect Always</Text>
+            <View style={{width:90,height:3,borderRadius:3,backgroundColor:'#8bd9ad',marginTop:10}}/>
+          </View>:null}
+          renderItem={({item})=>item.__karaboz?<Btn onPress={()=>openKarabozAI()} onLongPress={()=>Alert.alert('Karaboz AI', 'Remove Karaboz AI from this chat list? The floating AI shortcut will remain available.',[{text:'Cancel',style:'cancel'},{text:'Remove from list',style:'destructive',onPress:()=>setAiChatRowDismissed(true)}])} style={{flexDirection:'row',alignItems:'center',paddingHorizontal:12,paddingVertical:13,gap:12,borderRadius:22,backgroundColor:C.mint,marginBottom:9,borderWidth:1,borderColor:'#c8efd5'}}><View style={{width:48,height:48,borderRadius:24,backgroundColor:C.green,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:26,color:'#fff',fontWeight:'900'}}>✦</Text></View><View style={{flex:1}}><Text style={{fontWeight:'900',color:C.ink,fontSize:14}}>Karaboz AI</Text><Text numberOfLines={1} style={{fontSize:12,color:C.muted,marginTop:5}}>{item.last}</Text></View><Text style={{fontSize:20,color:C.green,fontWeight:'900'}}>›</Text></Btn>:<Btn onPress={()=>openChat(item)} onLongPress={()=>Alert.alert('Chat options',item.name,[{text:'Add to folder',onPress:()=>chooseChatFolder(item)},{text:'Delete chat for me',style:'destructive',onPress:()=>void hideChat(item)},{text:'Cancel',style:'cancel'}])} style={{flexDirection:'row',alignItems:'center',paddingHorizontal:12,paddingVertical:13,gap:12,borderRadius:22,backgroundColor:item.unread>0?'#d9f8e3':C.white,marginBottom:9,borderWidth:1,borderColor:item.unread>0?'#c8efd5':C.line}}>
             <Avatar label={item.avatar} color={item.color} online={item.online} uri={item.avatarUrl}/>
-            <View style={{flex:1,borderBottomWidth:1,borderColor:C.line,paddingBottom:14,paddingTop:2}}>
+            <View style={{flex:1,paddingBottom:2,paddingTop:2}}>
               <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center'}}><View style={{flexDirection:'row',alignItems:'center',gap:4,flex:1}}><Text numberOfLines={1} style={{fontWeight:'800',color:C.ink,fontSize:14}}>{item.name}</Text>{<>{item.isOfficial?<Text style={{fontSize:9,color:'#2387e8',fontWeight:'900'}}>OFFICIAL</Text>:null}{item.isVerified?<VerifiedBadge label={item.isOfficial?'Verified Guftin Official account':'Verified channel'}/>:null}</>}</View><Text style={{fontSize:10,color:C.muted}}>{item.time}</Text></View>
               <View style={{flexDirection:'row',alignItems:'center',gap:8,marginTop:6}}>
                 <Text numberOfLines={1} style={{fontSize:12,color:C.muted,flex:1}}>{item.last}</Text>
@@ -4594,50 +5734,99 @@ function GuftinApp() {
         </Btn>
       </View>
       <Text style={{fontSize:16,fontWeight:'900',color:C.ink,marginBottom:4}}>Recent updates</Text>
-      <Text style={{fontSize:11,color:C.muted,marginBottom:10}}>{new Set(statuses.map((item:any)=>item.user_id)).size} people · {statuses.length} updates shared in the last 24 hours</Text>
-      {statuses.length===0?<Text style={{color:C.muted,textAlign:'center',padding:30}}>No active statuses from your contacts yet.</Text>:statuses.map((status:any)=><View key={status.id} style={{padding:14,borderBottomWidth:1,borderColor:C.line,flexDirection:'row',gap:12}}>
-        <Avatar label={initials(status.display_name)} color={colorFor(status.user_id)} size={46} uri={status.avatar_signed_url}/>
-        <View style={{flex:1}}>
-          <View style={{flexDirection:'row',alignItems:'center',gap:5,flexWrap:'wrap'}}><Text style={{fontWeight:'900',color:C.ink}}>{status.user_id===session.user.id?'You':status.display_name}{status.username?'  @'+status.username:''}</Text>{status.is_verified?<VerifiedBadge label="Verified Guftin Official account"/>:null}</View>
-          <Text style={{color:status.viewed_by_me?C.muted:C.green,fontSize:11,fontWeight:'900',marginTop:8}}>{status.media_url?(status.viewed_by_me?'Viewed · Tap to replay':'New status · Tap to view'):'Text status · Tap to read'}</Text>
-          <Btn onPress={()=>void openStatus(status)} disabled={statusOpening} style={{alignSelf:'flex-start',marginTop:7,paddingHorizontal:11,paddingVertical:6,borderRadius:9,backgroundColor:C.mint}}><Text style={{fontSize:10,color:C.green,fontWeight:'900'}}>View status</Text></Btn>
-          {status.caption?<Text numberOfLines={2} style={{color:C.ink,lineHeight:20,marginTop:5}}>{status.caption}</Text>:null}
-          <Text style={{color:C.muted,fontSize:10,marginTop:5}}>{timeLabel(status.created_at)} · {status.status_count} status update{status.status_count===1?'':'s'} from this person</Text>
-          {status.user_id===session.user.id?<View style={{marginTop:8,padding:10,borderRadius:12,backgroundColor:C.paper}}>
-            <Text style={{fontSize:11,color:C.green,fontWeight:'900'}}>◉ {status.view_count||0} views  ·  ♥ {status.like_count||0} likes</Text>
-            {status.viewer_names?.length?<Text style={{fontSize:10,color:C.muted,marginTop:4}}>Seen by: {status.viewer_names.join(', ')}</Text>:null}
-            {status.liker_names?.length?<Text style={{fontSize:10,color:C.muted,marginTop:4}}>Liked by: {status.liker_names.join(', ')}</Text>:null}
-          </View>:<Btn onPress={()=>void toggleStatusLike(status)} style={{alignSelf:'flex-start',marginTop:9,paddingHorizontal:12,paddingVertical:7,borderRadius:12,backgroundColor:status.liked_by_me?'#ffe8ed':C.mint}}>
-            <Text style={{fontSize:11,fontWeight:'900',color:status.liked_by_me?'#c74768':C.green}}>{status.liked_by_me?'♥ Liked':'♡ Like status'}</Text>
-          </Btn>}
+      <Text style={{fontSize:11,color:C.muted,marginBottom:12}}>{new Set(statuses.map((item:any)=>item.user_id)).size} people · {statuses.length} updates shared in the last 24 hours</Text>
+      {statuses.length===0?<Text style={{color:C.muted,textAlign:'center',padding:24}}>No active statuses from your contacts yet.</Text>:<ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{paddingRight:8,paddingBottom:8}}>
+        {statuses.map((status:any)=><View key={status.id} style={{width:220,marginRight:10,padding:10,borderRadius:17,backgroundColor:C.white,borderWidth:1,borderColor:status.viewed_by_me?C.line:C.green}}>
+          <Btn onPress={()=>void openStatus(status)} disabled={statusOpening} style={{flexDirection:'row',alignItems:'center',gap:9,padding:0,backgroundColor:'transparent'}}>
+            <View style={{width:42,height:42,borderRadius:21,borderWidth:2,borderColor:status.viewed_by_me?C.line:C.green,padding:2}}>
+              <Avatar label={initials(status.display_name)} color={colorFor(status.user_id)} size={36} uri={status.avatar_signed_url}/>
+            </View>
+            <View style={{flex:1}}>
+              <Text numberOfLines={1} style={{fontSize:12,fontWeight:'900',color:C.ink}}>{status.user_id===session.user.id?'Your status':status.display_name}</Text>
+              <Text style={{fontSize:9,color:C.muted,marginTop:3}}>{timeLabel(status.created_at)} · {status.media_url?(status.viewed_by_me?'Viewed':'New status'):'Text update'}</Text>
+            </View>
+          </Btn>
+          <Btn onPress={()=>void openStatus(status)} disabled={statusOpening} style={{marginTop:8,padding:0,backgroundColor:'transparent',alignItems:'stretch'}}>
+            {status.media_preview_url?<Image source={{uri:status.media_preview_url}} resizeMode="cover" style={{width:'100%',height:86,borderRadius:11,backgroundColor:C.paper}}/>:
+              <View style={{height:64,borderRadius:11,backgroundColor:C.paper,justifyContent:'center',padding:10}}><Text numberOfLines={2} style={{fontSize:11,color:C.ink}}>{status.text_content||status.body||'Text status · Tap to view'}</Text></View>}
+          </Btn>
+          <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginTop:7}}>
+            {status.user_id===session.user.id?<Text style={{fontSize:9,color:C.green,fontWeight:'900'}}>◉ {status.view_count||0} · ♥ {status.like_count||0}</Text>:<Btn onPress={()=>void toggleStatusLike(status)} style={{paddingHorizontal:9,paddingVertical:5,borderRadius:10,backgroundColor:status.liked_by_me?'#ffe8ed':C.mint}}><Text style={{fontSize:10,fontWeight:'900',color:status.liked_by_me?'#c74768':C.green}}>{status.liked_by_me?'♥ Liked':'♡ Like'}</Text></Btn>}
+          </View>
+        </View>)}
+      </ScrollView>}
+      <View style={{height:1,backgroundColor:C.line,marginTop:18,marginBottom:18}}/>
+      <View style={{marginBottom:12,flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}>
+        <View style={{flex:1,paddingRight:8}}>
+          <Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>Channels</Text>
+          <Text style={{fontSize:11,color:C.muted,marginTop:3}}>Follow updates from Guftin Official and creators</Text>
         </View>
-      </View>)}
-    </ScrollView>:null}
-    {tab==='Channels'?<ScrollView contentContainerStyle={{padding:18,paddingBottom:30}}>
-      <View style={{backgroundColor:C.paper,borderRadius:20,padding:18,marginBottom:16}}>
-        <Text style={{fontSize:19,fontWeight:'900',color:C.ink}}>Guftin Channels</Text>
-        <Text style={{fontSize:12,color:C.muted,lineHeight:18,marginTop:6}}>Create a broadcast channel, invite people with a link, and publish photos, videos or updates. Followers can view posts but cannot publish.</Text>
-        <View style={{flexDirection:'row',gap:9,marginTop:14}}>
-          <Btn onPress={()=>setChannelCreateOpen(true)} style={{flex:1,backgroundColor:C.green,padding:13,borderRadius:13,alignItems:'center'}}><Text style={{color:'#fff',fontWeight:'900'}}>＋ Create channel</Text></Btn>
-          <Btn onPress={()=>setChannelJoinOpen(true)} style={{flex:1,backgroundColor:C.mint,padding:13,borderRadius:13,alignItems:'center'}}><Text style={{color:C.green,fontWeight:'900'}}>Join by link</Text></Btn>
+        <View style={{flexDirection:'row',gap:7}}>
+          <Btn onPress={()=>setChannelJoinOpen(true)} style={{backgroundColor:C.mint,padding:10,borderRadius:11}}><Text style={{color:C.green,fontWeight:'900'}}>Join</Text></Btn>
+          <Btn onPress={()=>setChannelCreateOpen(true)} style={{backgroundColor:C.green,padding:10,borderRadius:11}}><Text style={{color:'#fff',fontWeight:'900'}}>＋ Create</Text></Btn>
         </View>
       </View>
-      {channelsLoading&&channels.length===0?<View style={{padding:30,alignItems:'center'}}><ActivityIndicator color={C.green}/><Text style={{color:C.muted,marginTop:8}}>Loading channels…</Text></View>:null}
-      <TextInput value={channelSearch} onChangeText={setChannelSearch} placeholder="Search public channels by name..." autoCapitalize="none" returnKeyType="search" style={{backgroundColor:C.paper,borderRadius:14,padding:14,color:C.ink,marginBottom:15}}/>
-      <Text style={{fontSize:16,fontWeight:'900',color:C.ink,marginBottom:9}}>Your channels</Text>
-      {ownChannels.length===0?<Text style={{fontSize:12,color:C.muted,marginBottom:16}}>{channelQuery?'No channel you own matches this name.':'You have not created a channel yet.'}</Text>:ownChannels.map(channel=><View key={channel.conversation_id} style={{backgroundColor:C.white,borderRadius:17,padding:13,marginBottom:9,borderWidth:1,borderColor:C.line}}>
-        <View style={{flexDirection:'row',alignItems:'center',gap:11}}><Avatar label={initials(channel.title||'C')} color={C.green} size={46} uri={channel.logo_signed_url}/><View style={{flex:1}}><Text style={{fontSize:14,fontWeight:'900',color:C.ink}}>{channel.title||'My channel'}{channel.is_verified?<VerifiedBadge label="Verified channel"/>:null}</Text><Text style={{fontSize:10,color:C.muted,marginTop:3}}>{channel.is_public?'Public channel':'Private · invite link only'} · Owner</Text></View><Btn onPress={()=>void shareChannelInvite(channel)} style={{padding:9,borderRadius:11,backgroundColor:C.mint}}><Text style={{fontSize:11,color:C.green,fontWeight:'900'}}>Invite ↗</Text></Btn></View>
-        <Text numberOfLines={2} style={{fontSize:11,color:C.muted,lineHeight:16,marginTop:8}}>{channel.description||'No channel description'}</Text>
-        <Btn onPress={()=>openChannelChat(channel)} style={{marginTop:10,backgroundColor:C.paper,padding:10,borderRadius:11,alignItems:'center'}}><Text style={{fontSize:11,color:C.green,fontWeight:'900'}}>Open channel ›</Text></Btn>
-      </View>)}
-      <Text style={{fontSize:16,fontWeight:'900',color:C.ink,marginTop:13,marginBottom:9}}>Discover channels</Text>
-      <Text style={{fontSize:11,color:C.muted,marginBottom:9}}>Search by channel name and follow any public channel. Private channels remain invite-only.</Text>
-      {discoverChannels.length===0?<Text style={{fontSize:12,color:C.muted}}>{channelQuery?'No public channels match that name.':'No public channels to discover yet. Share your channel link to invite followers.'}</Text>:discoverChannels.map(channel=><View key={channel.conversation_id} style={{flexDirection:'row',alignItems:'center',gap:11,padding:12,borderBottomWidth:1,borderColor:C.line}}>
-        <Avatar label={initials(channel.title||'C')} color={C.green} size={44} uri={channel.logo_signed_url}/><View style={{flex:1}}><Text style={{fontSize:13,fontWeight:'900',color:C.ink}}>{channel.title||'Guftin channel'}{channel.is_verified?<VerifiedBadge label="Verified channel"/>:null}</Text><Text numberOfLines={2} style={{fontSize:10,color:C.muted,marginTop:3}}>{channel.description||'Public channel'}</Text></View>
-        {channel.isFollowing?<Btn onPress={()=>openChannelChat(channel)} style={{paddingHorizontal:13,paddingVertical:9,borderRadius:11,backgroundColor:C.mint}}><Text style={{color:C.green,fontWeight:'900',fontSize:11}}>Open</Text></Btn>:<Btn disabled={channelBusy} onPress={()=>void followPublicChannel(channel)} style={{paddingHorizontal:13,paddingVertical:9,borderRadius:11,backgroundColor:C.green}}><Text style={{color:'#fff',fontWeight:'900',fontSize:11}}>Follow</Text></Btn>}
-      </View>)}
-      <Text style={{fontSize:10,color:C.muted,lineHeight:16,marginTop:18}}>Channel posts are broadcast content. They are visible to followers and are not end-to-end encrypted like private one-to-one messages.</Text>
+      <TextInput value={channelSearch} onChangeText={setChannelSearch} placeholder="Search public channels..." autoCapitalize="none" style={{backgroundColor:C.paper,borderRadius:13,padding:13,color:C.ink,marginBottom:10}}/>
+      {channelsLoading&&channels.length===0?<Text style={{color:C.muted,padding:8}}>Loading channels…</Text>:null}
+      {ownChannels.map(channel=><View key={channel.conversation_id} style={{backgroundColor:C.white,borderRadius:15,padding:12,marginBottom:8,borderWidth:1,borderColor:C.line}}><View style={{flexDirection:'row',alignItems:'center',gap:10}}><Avatar label={initials(channel.title||'C')} color={C.green} size={43} uri={channel.logo_signed_url}/><View style={{flex:1}}><Text style={{fontWeight:'900',color:C.ink}}>{channel.title||'My channel'}</Text><Text style={{fontSize:10,color:C.muted}}>{channel.is_public?'Public':'Private'} · Owner</Text></View><Btn onPress={()=>void shareChannelInvite(channel)} style={{padding:9,backgroundColor:C.mint,borderRadius:10}}><Text style={{color:C.green,fontWeight:'900'}}>Invite</Text></Btn><Btn onPress={()=>openChannelChat(channel)} style={{padding:9,backgroundColor:C.paper,borderRadius:10}}><Text style={{color:C.green,fontWeight:'900'}}>Open</Text></Btn></View></View>)}
+      {discoverChannels.map(channel=><View key={channel.conversation_id} style={{flexDirection:'row',alignItems:'center',gap:10,backgroundColor:C.white,padding:11,borderRadius:14,marginBottom:7}}><Avatar label={initials(channel.title||'C')} color={C.green} size={42} uri={channel.logo_signed_url}/><View style={{flex:1}}><Text style={{fontWeight:'900',color:C.ink}}>{channel.title||'Guftin channel'}</Text><Text numberOfLines={2} style={{fontSize:10,color:C.muted}}>{channel.description||'Public channel'}</Text></View>{channel.isFollowing?<Btn onPress={()=>openChannelChat(channel)}><Text style={{color:C.green,fontWeight:'900'}}>Open</Text></Btn>:<Btn disabled={channelBusy} onPress={()=>void followPublicChannel(channel)} style={{padding:9,backgroundColor:C.green,borderRadius:10}}><Text style={{color:'#fff',fontWeight:'900'}}>Follow</Text></Btn>}</View>)}
+      {!channelsLoading&&!ownChannels.length&&!discoverChannels.length?<Text style={{color:C.muted,textAlign:'center',padding:24}}>No channels found yet. Create one or search for a public channel.</Text>:null}
+      <Text style={{fontSize:10,color:C.muted,marginTop:6}}>Channel broadcasts are separate from private encrypted chats.</Text>
     </ScrollView>:null}
+    {tab==='Hub'?<ScrollView contentContainerStyle={{padding:20,paddingBottom:30}}>
+      <View style={{backgroundColor:C.paper,borderRadius:18,padding:16,marginBottom:14}}>
+        <Text style={{fontSize:18,fontWeight:'900',color:C.ink}}>Business & Communities</Text>
+        <Text style={{fontSize:11,color:C.muted,marginTop:4}}>Your stores, published products and communities</Text>
+      </View>
+      <View style={{marginTop:14,marginBottom:10}}><Text style={{fontSize:16,fontWeight:'900',color:C.ink}}>Business Directory</Text><Text style={{fontSize:11,color:C.muted,marginTop:3}}>Public Guftin stores from businesses across the app</Text></View>{hubBusinessStores.length?hubBusinessStores.map(store=><View key={store.user_id} style={{backgroundColor:C.white,borderRadius:14,padding:12,marginBottom:8,borderWidth:1,borderColor:C.line}}><Text style={{fontWeight:'900',color:C.ink}}>{store.store_name}</Text><Text style={{fontSize:11,color:C.muted,marginTop:4}} numberOfLines={2}>{store.description||'Guftin business store'}</Text><Btn onPress={()=>void openBusinessStore(store.user_id)} style={{backgroundColor:C.mint,padding:9,borderRadius:10,alignSelf:'flex-start',marginTop:8}}><Text style={{color:C.green,fontWeight:'900'}}>Open store</Text></Btn></View>):<Text style={{fontSize:11,color:C.muted}}>No public stores are listed yet.</Text>}<View style={{marginTop:22,marginBottom:10,flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}><View style={{flex:1}}><Text style={{fontSize:18,fontWeight:'900',color:C.ink}}>Business</Text><Text style={{fontSize:11,color:C.muted}}>Stores and published products on Guftin</Text></View><Btn onPress={()=>{setBusinessDraftName(myBusinessProfile?.store_name||'');setBusinessDraftDescription(myBusinessProfile?.description||'');setBusinessDraftEmail(myBusinessProfile?.contact_email||'');setBusinessDraftPhone(myBusinessProfile?.contact_username?'@'+myBusinessProfile.contact_username:(myBusinessProfile?.contact_phone||''));setBusinessLogoAsset(null);setBusinessSetupOpen(true);}} style={{backgroundColor:C.green,padding:10,borderRadius:11}}><Text style={{color:'#fff',fontWeight:'900'}}>{myBusinessProfile?'Edit store':'Set up store'}</Text></Btn></View>
+      {myBusinessProfile?<View style={{backgroundColor:C.mint,borderRadius:15,padding:13,marginBottom:10}}><View style={{flexDirection:'row',alignItems:'center',gap:10}}><Avatar label={initials(myBusinessProfile.store_name||'S')} color={C.green} size={48} uri={myBusinessProfile.logo_signed_url}/><View style={{flex:1}}><Text style={{fontWeight:'900',fontSize:14,color:C.green}}>{myBusinessProfile.store_name}</Text><Text style={{fontSize:10,color:C.muted}}>{myBusinessProfile.contact_phone||'No contact number added'}</Text></View></View><Text style={{fontSize:11,color:C.ink,marginTop:4}}>{myBusinessProfile.description||'Your business profile'}</Text><Text style={{fontSize:10,color:C.muted,marginTop:5}}>{myBusinessProfile.contact_email||'No contact email added'}</Text><Btn onPress={()=>void openBusinessStore(session.user.id)} style={{backgroundColor:C.white,padding:9,borderRadius:10,alignSelf:'flex-start',marginTop:9}}><Text style={{color:C.green,fontWeight:'900'}}>Open my store</Text></Btn></View>:<Text style={{fontSize:11,color:C.muted,marginBottom:10}}>Set up a business profile to start a Guftin store.</Text>}
+      {hubBusinessProducts.length?hubBusinessProducts.map(p=><View key={p.id} style={{backgroundColor:C.white,borderRadius:14,padding:12,marginBottom:8}}><Text style={{fontWeight:'900',color:C.ink}}>{p.title}</Text><Text style={{fontSize:11,color:C.muted,marginTop:4}}>{p.description||'Business listing'}</Text><Text style={{fontSize:12,color:C.green,fontWeight:'900',marginTop:6}}>{p.price==null?'Contact business':String(p.currency_code||'PKR')+' '+String(p.price)}</Text><Btn onPress={()=>void openBusinessStore(p.owner_id)} style={{backgroundColor:C.mint,padding:8,borderRadius:10,alignSelf:'flex-start',marginTop:8}}><Text style={{color:C.green,fontWeight:'900'}}>Open business</Text></Btn></View>):<Text style={{fontSize:11,color:C.muted}}>No published products are available yet.</Text>}
+      <View style={{marginTop:22,marginBottom:10,flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}><View style={{flex:1}}><Text style={{fontSize:18,fontWeight:'900',color:C.ink}}>Communities</Text><Text style={{fontSize:11,color:C.muted}}>Bring your Guftin groups together</Text></View><Btn onPress={()=>setCommunityCreateOpen(true)} style={{backgroundColor:C.green,padding:10,borderRadius:11}}><Text style={{color:'#fff',fontWeight:'900'}}>＋ Create</Text></Btn></View>
+      {hubLoading?<Text style={{fontSize:11,color:C.muted,padding:8}}>Loading your business and communities…</Text>:null}
+      {hubCommunities.length?hubCommunities.map(x=><View key={x.id} style={{backgroundColor:C.white,borderRadius:14,padding:12,marginBottom:8,borderWidth:1,borderColor:C.line}}><View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}><View style={{flex:1}}><Text style={{fontWeight:'900',color:C.ink}}>{x.title}</Text><Text style={{fontSize:10,color:C.muted,marginTop:4}}>{x.role==='owner'?'Community owner':x.role==='admin'?'Community admin':'Community member'} · {timeLabel(x.created_at)}</Text></View>{x.owner_id==='44d4fbd7-fec0-4d68-9643-32d3e95da162'?<Text style={{fontSize:9,color:C.green,fontWeight:'900',marginRight:8}}>OFFICIAL</Text>:null}<Btn onPress={()=>void loadCommunityDetails(x)} style={{backgroundColor:C.green,padding:9,borderRadius:10}}><Text style={{color:'#fff',fontWeight:'900'}}>Open</Text></Btn></View></View>):<Text style={{fontSize:11,color:C.muted}}>Your joined communities will appear here.</Text>}
+
+    </ScrollView>:null}
+    {tab==='Magic'?<MagicMomentsScreen userId={session.user.id} chats={chats} getDeviceIdentity={ensureDeviceIdentity} onBack={()=>setTab('Chats')} onOpenChat={(chat:any)=>openChat(chat)}/>:null}
+    {tab==='AI'?<View style={{flex:1,paddingHorizontal:14,paddingTop:14,paddingBottom:10}}>
+      <View style={{backgroundColor:C.mint,borderRadius:18,padding:15,marginBottom:10}}>
+        <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}>
+          <View style={{flex:1}}>
+            <Text style={{fontSize:18,fontWeight:'900',color:C.green}}>✦ Karaboz AI</Text>
+            <Text style={{fontSize:11,color:C.ink,marginTop:4}}>Your Guftin assistant · Urdu, Hindi and English</Text>
+          </View>
+          <Btn onPress={startNewAIChat} style={{backgroundColor:C.white,paddingHorizontal:12,paddingVertical:9,borderRadius:12}}><Text style={{color:C.green,fontWeight:'900'}}>＋ New</Text></Btn>
+          <Btn onPress={()=>void loadAIChats()} style={{backgroundColor:C.white,paddingHorizontal:12,paddingVertical:9,borderRadius:12,marginLeft:6}}><Text style={{color:C.green,fontWeight:'900'}}>History</Text></Btn>
+        </View>
+      </View>
+      <View style={{flexDirection:'row',flexWrap:'wrap',gap:7,marginBottom:10}}>
+        {([['chat','Ask AI'],['write','Write'],['translate','Translate'],['summarize','Summarize'],['reply','Suggest reply']] as Array<[typeof aiMode,string]>).map(([mode,label])=><Btn key={mode} onPress={()=>setAiMode(mode)} style={{paddingHorizontal:12,paddingVertical:8,borderRadius:18,backgroundColor:aiMode===mode?C.green:C.white,borderWidth:1,borderColor:aiMode===mode?C.green:C.line}}><Text style={{fontSize:11,fontWeight:'900',color:aiMode===mode?'#fff':C.ink}}>{label}</Text></Btn>)}
+      </View>
+      {aiHistoryOpen?<View style={{backgroundColor:C.white,borderRadius:15,padding:10,marginBottom:10,maxHeight:160}}>
+        <Text style={{fontWeight:'900',color:C.ink,marginBottom:7}}>Recent AI chats</Text>
+        <ScrollView>
+          {aiChats.length?aiChats.map((chat:any)=><Btn key={chat.id} onPress={()=>void openAIChat(chat.id)} style={{paddingVertical:9,borderBottomWidth:1,borderColor:C.line,alignItems:'flex-start'}}><Text numberOfLines={1} style={{color:C.ink,fontWeight:'700'}}>{chat.title||'New chat'}</Text><Text style={{fontSize:10,color:C.muted}}>{chat.message_count||0} messages</Text></Btn>):<Text style={{color:C.muted,fontSize:11,padding:8}}>No saved AI chats yet.</Text>}
+        </ScrollView>
+      </View>:null}
+      <ScrollView style={{flex:1}} contentContainerStyle={{paddingBottom:12,gap:10}}>
+        {aiMessages.length===0?<View style={{alignItems:'center',paddingHorizontal:18,paddingVertical:34}}>
+          <View style={{width:66,height:66,borderRadius:23,backgroundColor:C.mint,alignItems:'center',justifyContent:'center',marginBottom:14}}><Text style={{fontSize:32,color:C.green}}>✦</Text></View>
+          <Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>How can I help?</Text>
+          <Text style={{fontSize:12,color:C.muted,textAlign:'center',lineHeight:18,marginTop:7}}>Ask a question, write a message, translate text or get help replying to someone.</Text>
+          <View style={{flexDirection:'row',flexWrap:'wrap',justifyContent:'center',gap:8,marginTop:18}}>
+            {['Explain something simply','Write a polite message','Translate into Urdu','Suggest a friendly reply'].map((hint,i)=><Btn key={hint} onPress={()=>{setAiMode((['chat','write','translate','reply'] as any)[i]);setAiDraft(hint+': ');}} style={{backgroundColor:C.white,borderWidth:1,borderColor:C.line,borderRadius:13,padding:11}}><Text style={{fontSize:11,color:C.green,fontWeight:'800'}}>{hint}</Text></Btn>)}
+          </View>
+        </View>:aiMessages.map((item,index)=><View key={index} style={{alignSelf:item.role==='user'?'flex-end':'flex-start',maxWidth:'90%',backgroundColor:item.role==='user'?C.mint:C.white,borderRadius:16,padding:13,borderWidth:1,borderColor:C.line}}>
+          <Text style={{fontSize:10,fontWeight:'900',color:C.green,marginBottom:5}}>{item.role==='user'?'You':'Karaboz AI'}</Text>
+          <Text selectable style={{fontSize:13,color:C.ink,lineHeight:20}}>{item.content}</Text>
+        </View>)}
+        {aiBusy?<View style={{alignSelf:'flex-start',backgroundColor:C.white,borderRadius:14,padding:12}}><Text style={{fontSize:12,color:C.muted}}>Karaboz AI is thinking…</Text></View>:null}
+      </ScrollView>
+      <View style={{backgroundColor:C.white,borderRadius:18,padding:9,borderWidth:1,borderColor:C.line,flexDirection:'row',alignItems:'flex-end',gap:8}}>
+        <TextInput value={aiDraft} onChangeText={setAiDraft} placeholder={aiMode==='translate'?'Text to translate…':aiMode==='write'?'What message should I write?':aiMode==='reply'?'Paste a message to get reply ideas…':'Message Karaboz AI…'} multiline maxLength={4000} style={{flex:1,minHeight:44,maxHeight:120,paddingHorizontal:9,paddingVertical:8,color:C.ink,textAlignVertical:'center'}}/>
+        <Btn disabled={aiBusy||!aiDraft.trim()} onPress={()=>void sendAIMessage()} style={{width:43,height:43,borderRadius:14,backgroundColor:aiBusy||!aiDraft.trim()?C.line:C.green,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:18,color:'#fff',fontWeight:'900'}}>➤</Text></Btn>
+      </View>
+      <Text style={{fontSize:9,color:C.muted,textAlign:'center',marginTop:6}}>AI can make mistakes. Review suggested messages before sending.</Text>
+    </View>:null}
     {tab==='Calls'?<ScrollView contentContainerStyle={{padding:18,paddingBottom:30}}>
       <View style={{backgroundColor:C.paper,borderRadius:18,padding:16,marginBottom:16}}>
         <Text style={{fontSize:18,fontWeight:'900',color:C.ink}}>Call history</Text>
@@ -4664,18 +5853,13 @@ function GuftinApp() {
       <Text style={{fontWeight:'800',color:C.ink,marginTop:25,marginBottom:8}}>Display name</Text>
       <TextInput value={profileName} onChangeText={setProfileName} placeholder="Your name" maxLength={40} style={{backgroundColor:C.paper,borderRadius:14,padding:15,color:C.ink}}/>
       <Text style={{fontWeight:'800',color:C.ink,marginTop:15,marginBottom:8}}>Username</Text>
-      {profile?.username&&googleUsernameChangeAvailable?
-        <View>
-          <TextInput value={profileUsername} onChangeText={v=>setProfileUsername(v.toLowerCase().replace(/[^a-z0-9_]/g,''))} placeholder="Choose your one-time new username" autoCapitalize="none" maxLength={24} style={{backgroundColor:C.paper,borderRadius:14,padding:15,color:C.ink}}/>
-          <Text style={{color:C.green,fontSize:11,marginTop:6}}>Google account benefit: you can change this username once. Saving it will lock it permanently.</Text>
-        </View>
-        :<View style={{backgroundColor:C.paper,borderRadius:14,padding:15,borderWidth:1,borderColor:C.line}}>
+      {<View style={{backgroundColor:C.paper,borderRadius:14,padding:15,borderWidth:1,borderColor:C.line}}>
           <Text style={{color:C.ink,fontWeight:'900'}}>@{profile?.username||'Not set'}</Text>
           <Text style={{color:C.muted,fontSize:11,marginTop:5}}>Your Guftin ID is permanent and cannot be changed.</Text>
         </View>}
       <Text style={{fontWeight:'800',color:C.ink,marginTop:15,marginBottom:8}}>About</Text>
       <TextInput value={about} onChangeText={setAbout} placeholder="A little about you" maxLength={160} multiline style={{backgroundColor:C.paper,borderRadius:14,padding:15,color:C.ink,minHeight:75,textAlignVertical:'top'}}/>
-      <Btn disabled={savingProfile||profileUploading} onPress={saveProfile} style={{backgroundColor:C.green,padding:15,borderRadius:14,alignItems:'center',marginTop:10}}>{savingProfile?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'800'}}>Save profile</Text>}</Btn>
+      <Btn disabled={savingProfile||profileUploading} onPress={saveProfile} style={{backgroundColor:C.green,padding:15,borderRadius:14,alignItems:'center',marginTop:10}}>{savingProfile?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'800'}}>Save profile</Text>}</Btn>
       <View style={{padding:15,backgroundColor:C.mint,borderRadius:14,marginTop:18}}>
         <Text style={{fontWeight:'900',color:C.green}}>🔒 Message encryption</Text>
         <Text style={{color:C.ink,fontSize:12,lineHeight:18,marginTop:6}}>{e2eeStatus==='ready'?'This device has a private key stored locally. New text messages are encrypted for each registered conversation device before upload.':'This device encryption key is not available yet. Secure text sending is paused.'}</Text>
@@ -4692,6 +5876,7 @@ function GuftinApp() {
       </View>
 <Btn onPress={()=>supabase.auth.signOut()} style={{padding:18}}><Text style={{color:C.red,fontWeight:'800'}}>Sign out</Text></Btn>
     </ScrollView>:null}
+    {tab==='Chats'?<Btn onPress={openKarabozAI} style={{position:'absolute',right:18,bottom:Math.max(insets.bottom,5)+158,width:58,height:58,borderRadius:29,backgroundColor:C.green,alignItems:'center',justifyContent:'center',elevation:12,shadowColor:'#064b31',shadowOpacity:.28,shadowRadius:9,shadowOffset:{width:0,height:4},borderWidth:3,borderColor:'#d8f8e5'}}><Text style={{fontSize:29,color:'#fff',fontWeight:'900'}}>✦</Text></Btn>:null}
     {adsReady&&tab!=='You'?<View style={{alignItems:'center',justifyContent:'center',backgroundColor:C.white,minHeight:50,paddingTop:4}}>
       <BannerAd
         unitId={__DEV__?TestIds.BANNER:(process.env.EXPO_PUBLIC_ADMOB_BANNER_UNIT_ID||'ca-app-pub-3116820002792089/9054692427')}
@@ -4700,18 +5885,22 @@ function GuftinApp() {
         onAdFailedToLoad={error=>console.warn('AdMob banner failed:',error?.message||error)}
       />
     </View>:null}
-    <View style={{height:66+insets.bottom,paddingTop:5,paddingBottom:Math.max(insets.bottom,6),borderTopWidth:1,borderColor:C.line,flexDirection:'row',alignItems:'center',justifyContent:'space-around',backgroundColor:C.white,elevation:8}}>
-      {([['Chats','▤'],['Updates','◉'],['Channels','◈'],['Calls','⌕'],['You','●']] as string[][]).map(([t,icon])=><Btn key={t} onPress={()=>setTab(t)} style={{alignItems:'center',minWidth:58}}><Text style={{fontSize:19,color:tab===t?C.green:C.muted}}>{icon}</Text><Text style={{fontSize:10,fontWeight:tab===t?'900':'600',color:tab===t?C.green:C.muted,marginTop:3}}>{t}</Text></Btn>)}
+    <View style={{marginHorizontal:7,marginBottom:Math.max(insets.bottom,5),height:66,paddingTop:5,paddingBottom:5,borderRadius:27,borderWidth:1,borderColor:C.line,flexDirection:'row',alignItems:'center',justifyContent:'space-around',backgroundColor:C.white,elevation:10,shadowColor:'#123d2d',shadowOpacity:.09,shadowRadius:12,shadowOffset:{width:0,height:4}}}>
+      {([['Chats','▤'],['Updates','◉'],['Magic','✧'],['Hub','⌂'],['Calls','☎']] as string[][]).map(([t,icon])=><Btn key={t} onPress={()=>setTab(t)} style={{alignItems:'center',justifyContent:'center',minWidth:48,paddingHorizontal:2,paddingVertical:4}}>
+        <Text style={{fontSize:20,color:tab===t?C.green:C.muted,fontWeight:'900'}}>{icon}</Text>
+        <Text style={{fontSize:10,fontWeight:tab===t?'900':'600',color:tab===t?C.green:C.muted,marginTop:3}}>{t==='Hub'?'Business':t}</Text>
+        {tab===t?<View style={{height:3,width:24,borderRadius:3,backgroundColor:C.green,marginTop:3}}/>:null}
+      </Btn>)}
     </View>
 
-    <Modal visible={groupCreateOpen} transparent animationType="slide" onRequestClose={()=>setGroupCreateOpen(false)}>
+    <Modal visible={groupCreateOpen} transparent animationType="slide" onRequestClose={()=>{setGroupCreateOpen(false);setCommunityGroupTarget(null);}}>
       <View style={{flex:1,backgroundColor:'#0008',justifyContent:'flex-end'}}>
         <View style={{backgroundColor:C.white,borderTopLeftRadius:24,borderTopRightRadius:24,padding:20,maxHeight:'88%'}}>
           <Text style={{fontSize:21,fontWeight:'900',color:C.ink}}>Create a group</Text>
           <Text style={{fontSize:12,color:C.muted,marginTop:5}}>Choose a name and add people from your saved contacts.</Text>
           <TextInput value={groupName} onChangeText={setGroupName} placeholder="Group name" maxLength={60} style={{backgroundColor:C.paper,borderRadius:14,padding:14,marginTop:15,color:C.ink}}/>
           <Text style={{fontSize:13,fontWeight:'900',color:C.ink,marginTop:16,marginBottom:8}}>Members ({selectedGroupIds.length})</Text>
-          {groupContactsLoading?<ActivityIndicator color={C.green} style={{padding:24}}/>:groupContacts.length===0?
+          {groupContactsLoading?<GuftinLoader color={C.green} style={{padding:24}}/>:groupContacts.length===0?
             <Text style={{color:C.muted,padding:20,textAlign:'center'}}>No saved contacts yet. Add contacts by username first.</Text>:
             <FlatList data={groupContacts} keyExtractor={(item:any)=>item.id} style={{maxHeight:300}} renderItem={({item}:any)=>{
               const selected=selectedGroupIds.includes(item.id);
@@ -4722,9 +5911,9 @@ function GuftinApp() {
               </Btn>;
             }}/>}
           <View style={{flexDirection:'row',justifyContent:'flex-end',gap:10,marginTop:18}}>
-            <Btn onPress={()=>setGroupCreateOpen(false)} style={{padding:13}}><Text style={{color:C.muted,fontWeight:'700'}}>Cancel</Text></Btn>
+            <Btn onPress={()=>{setGroupCreateOpen(false);setCommunityGroupTarget(null);}} style={{padding:13}}><Text style={{color:C.muted,fontWeight:'700'}}>Cancel</Text></Btn>
             <Btn disabled={groupCreating||groupContactsLoading||selectedGroupIds.length===0} onPress={()=>void createGroup()} style={{backgroundColor:C.green,paddingHorizontal:18,paddingVertical:13,borderRadius:13}}>
-              {groupCreating?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Create group</Text>}
+              {groupCreating?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Create group</Text>}
             </Btn>
           </View>
         </View>
@@ -4732,7 +5921,7 @@ function GuftinApp() {
     </Modal>
 
     <Modal visible={appLocked} transparent animationType="fade" onRequestClose={()=>{}}>
-      <View style={{flex:1,backgroundColor:C.white,justifyContent:'center',alignItems:'center',padding:24}}><Text style={{fontSize:25,fontWeight:'900',color:C.ink,marginBottom:12}}>Guftin is locked</Text><Btn onPress={()=>startPinFlow('unlock-app')} style={{backgroundColor:C.green,padding:15,borderRadius:13,width:'100%'}}><Text style={{color:'#fff',fontWeight:'900',textAlign:'center'}}>Enter App PIN</Text></Btn></View>
+      <View style={{flex:1,backgroundColor:C.white,justifyContent:'center',alignItems:'center',padding:24}}><Text style={{fontSize:25,fontWeight:'900',color:C.ink,marginBottom:12}}>Guftin is locked</Text>{biometricLockEnabled&&biometricAvailable?<Btn disabled={biometricBusy} onPress={()=>void runBiometricUnlock()} style={{backgroundColor:C.green,padding:15,borderRadius:13,width:'100%',marginBottom:10}}>{biometricBusy?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900',textAlign:'center'}}>Use fingerprint / face unlock</Text>}</Btn>:null}<Btn onPress={()=>startPinFlow('unlock-app')} style={{backgroundColor:C.mint,padding:15,borderRadius:13,width:'100%'}}><Text style={{color:C.green,fontWeight:'900',textAlign:'center'}}>Enter App PIN</Text></Btn></View>
     </Modal>
     <Modal visible={pinModalVisible} transparent animationType="fade" onRequestClose={()=>{if(pinMode==='unlock-app'||pinMode==='unlock-chat')return;setPinModalVisible(false);}}>
       <View style={{flex:1,backgroundColor:'#0009',justifyContent:'center',padding:24}}><View style={{backgroundColor:C.white,borderRadius:22,padding:22,gap:12}}>
@@ -4756,7 +5945,7 @@ function GuftinApp() {
           <Btn onPress={()=>setDeviceManagerOpen(false)} style={{padding:8}}><Text style={{fontSize:24,color:C.ink}}>×</Text></Btn>
         </View>
         <ScrollView contentContainerStyle={{padding:16,gap:10}}>
-          {devicesLoading?<ActivityIndicator color={C.green}/>:null}
+          {devicesLoading?<GuftinLoader color={C.green}/>:null}
           {registeredDevices.map((device:any)=><View key={device.id} style={{backgroundColor:C.white,borderRadius:14,padding:14,borderWidth:1,borderColor:C.line}}>
             <Text style={{fontWeight:'900',color:C.ink}}>{device.device_label||'Guftin device'} {device.id===deviceIdentity?.deviceId?'· This device':''}</Text>
             <Text style={{fontSize:11,color:C.muted,marginTop:4}}>{String(device.platform||'unknown').toUpperCase()} · Added {timeLabel(device.created_at)} · Last active {timeLabel(device.last_active_at||device.created_at)}</Text>
@@ -4778,13 +5967,104 @@ function GuftinApp() {
       </View>
     </Modal>
 
+    {editModalVisible?<View style={{position:'absolute',left:0,right:0,top:0,bottom:0,zIndex:1201,elevation:30,backgroundColor:C.paper}}>
+      <View style={{flex:1,backgroundColor:'#0009',justifyContent:'center',padding:22}}>
+        <View style={{backgroundColor:C.white,borderRadius:20,padding:18}}>
+          <Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>Edit message</Text>
+          <Text style={{fontSize:11,color:C.muted,marginTop:5,marginBottom:12}}>Encrypted again for every active device. Editing is available for 15 minutes after sending.</Text>
+          <TextInput value={editDraft} onChangeText={setEditDraft} multiline maxLength={4000} autoFocus style={{minHeight:110,maxHeight:190,backgroundColor:C.paper,borderRadius:13,padding:13,color:C.ink,textAlignVertical:'top'}}/>
+          <View style={{flexDirection:'row',justifyContent:'flex-end',gap:10,marginTop:14}}>
+            <Btn disabled={editBusy} onPress={()=>setEditModalVisible(false)} style={{padding:12}}><Text style={{color:C.muted,fontWeight:'800'}}>Cancel</Text></Btn>
+            <Btn disabled={editBusy||!editDraft.trim()} onPress={()=>void saveEditedMessage()} style={{backgroundColor:C.green,paddingHorizontal:17,paddingVertical:12,borderRadius:11}}>{editBusy?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Save edit</Text>}</Btn>
+          </View>
+        </View>
+      </View>
+    </View>:null}
+
+    {editHistoryVisible?<View style={{position:'absolute',left:0,right:0,top:0,bottom:0,zIndex:1202,elevation:30,backgroundColor:C.paper}}>
+      <SafeAreaView style={{flex:1,backgroundColor:C.paper}}>
+        <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',padding:18,backgroundColor:C.white,borderBottomWidth:1,borderColor:C.line}}>
+          <Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>Message edit history</Text>
+          <Btn onPress={()=>setEditHistoryVisible(false)} style={{padding:8}}><Text style={{fontSize:25,color:C.ink}}>×</Text></Btn>
+        </View>
+        {editHistoryLoading?<GuftinLoader color={C.green} style={{marginTop:25}}/>:null}
+        <ScrollView contentContainerStyle={{padding:16,gap:10}}>
+          {!editHistoryRows.length&&!editHistoryLoading?<Text style={{color:C.muted,textAlign:'center',padding:25}}>No previous edits were found.</Text>:null}
+          {editHistoryRows.map(row=><View key={row.id} style={{backgroundColor:C.white,borderRadius:13,padding:14,borderWidth:1,borderColor:C.line}}>
+            <Text style={{color:C.muted,fontSize:10,fontWeight:'800'}}>EDITED {timeLabel(row.edited_at)}</Text>
+            <Text style={{color:C.red,fontSize:11,fontWeight:'900',marginTop:9}}>PREVIOUS VERSION</Text>
+            <Text style={{color:C.ink,marginTop:4}}>{row.previous}</Text>
+            <Text style={{color:C.green,fontSize:11,fontWeight:'900',marginTop:10}}>UPDATED VERSION</Text>
+            <Text style={{color:C.ink,marginTop:4}}>{row.updated}</Text>
+          </View>)}
+        </ScrollView>
+      </SafeAreaView>
+    </View>:null}
+
+    {pollCreateVisible?<View style={{position:'absolute',left:0,right:0,top:0,bottom:0,zIndex:1203,elevation:30,backgroundColor:C.paper}}>
+      <View style={{flex:1,backgroundColor:'#0009',justifyContent:'center',padding:22}}>
+        <View style={{backgroundColor:C.white,borderRadius:20,padding:18}}>
+          <Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>Create group poll</Text>
+          <Text style={{fontSize:11,color:C.muted,marginTop:5,marginBottom:12}}>The question and every option are encrypted for group devices.</Text>
+          <TextInput value={pollQuestion} onChangeText={setPollQuestion} placeholder="Ask a question" maxLength={300} style={{backgroundColor:C.paper,borderRadius:12,padding:12,color:C.ink,marginBottom:9}}/>
+          <TextInput value={pollOptionsText} onChangeText={setPollOptionsText} placeholder={'Option 1\nOption 2\nOption 3'} multiline maxLength={1200} style={{minHeight:110,backgroundColor:C.paper,borderRadius:12,padding:12,color:C.ink,textAlignVertical:'top'}}/>
+          <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingVertical:10}}><View style={{flex:1}}><Text style={{color:C.ink,fontWeight:'800'}}>Allow multiple choices</Text><Text style={{color:C.muted,fontSize:10}}>Members may vote for more than one option</Text></View><Switch value={pollAllowsMultiple} onValueChange={setPollAllowsMultiple} trackColor={{true:C.green}}/></View>
+          <View style={{flexDirection:'row',justifyContent:'flex-end',gap:10,marginTop:8}}><Btn disabled={pollBusy} onPress={()=>setPollCreateVisible(false)} style={{padding:12}}><Text style={{color:C.muted,fontWeight:'800'}}>Cancel</Text></Btn><Btn disabled={pollBusy||!pollQuestion.trim()||pollOptionsText.split('\n').filter(x=>x.trim()).length<2} onPress={()=>void createGroupPoll()} style={{backgroundColor:C.green,paddingHorizontal:16,paddingVertical:12,borderRadius:11}}>{pollBusy?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Create poll</Text>}</Btn></View>
+        </View>
+      </View>
+    </View>:null}
+
+    {eventCreateVisible?<View style={{position:'absolute',left:0,right:0,top:0,bottom:0,zIndex:1204,elevation:30,backgroundColor:C.paper}}>
+      <View style={{flex:1,backgroundColor:'#0009',justifyContent:'center',padding:22}}>
+        <View style={{backgroundColor:C.white,borderRadius:20,padding:18}}>
+          <Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>Create group event</Text>
+          <Text style={{fontSize:11,color:C.muted,marginTop:5,marginBottom:12}}>Event title and details are encrypted for group devices.</Text>
+          <TextInput value={eventTitle} onChangeText={setEventTitle} placeholder="Event title" maxLength={120} style={{backgroundColor:C.paper,borderRadius:12,padding:12,color:C.ink,marginBottom:8}}/>
+          <TextInput value={eventDetails} onChangeText={setEventDetails} placeholder="Details (optional)" multiline maxLength={1500} style={{minHeight:70,backgroundColor:C.paper,borderRadius:12,padding:12,color:C.ink,textAlignVertical:'top',marginBottom:8}}/>
+          <TextInput value={eventStartsAt} onChangeText={setEventStartsAt} placeholder="Local date/time: 2026-11-25 18:30" autoCapitalize="none" style={{backgroundColor:C.paper,borderRadius:12,padding:12,color:C.ink}}/>
+          <Text style={{color:C.ink,fontWeight:'800',marginTop:12}}>Reminder before event</Text>
+          <View style={{flexDirection:'row',gap:7,marginTop:8}}>{[0,15,60,1440].map(minutes=><Btn key={minutes} onPress={()=>setEventReminderMinutes(minutes)} style={{flex:1,padding:9,borderRadius:9,backgroundColor:eventReminderMinutes===minutes?C.green:C.paper,alignItems:'center'}}><Text style={{fontSize:10,fontWeight:'900',color:eventReminderMinutes===minutes?'#fff':C.ink}}>{minutes===0?'Off':minutes===1440?'1 day':minutes+' min'}</Text></Btn>)}</View>
+          <View style={{flexDirection:'row',justifyContent:'flex-end',gap:10,marginTop:14}}><Btn disabled={eventBusy} onPress={()=>setEventCreateVisible(false)} style={{padding:12}}><Text style={{color:C.muted,fontWeight:'800'}}>Cancel</Text></Btn><Btn disabled={eventBusy||!eventTitle.trim()||!eventStartsAt.trim()} onPress={()=>void createGroupEvent()} style={{backgroundColor:C.green,paddingHorizontal:16,paddingVertical:12,borderRadius:11}}>{eventBusy?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Create event</Text>}</Btn></View>
+        </View>
+      </View>
+    </View>:null}
+
+    {scheduledMessagesOpen?<View style={{position:'absolute',left:0,right:0,top:0,bottom:0,zIndex:1206,elevation:30,backgroundColor:C.paper}}>
+      <SafeAreaView style={{flex:1,backgroundColor:C.paper}}>
+        <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',padding:18,backgroundColor:C.white,borderBottomWidth:1,borderColor:C.line}}><View><Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>Scheduled messages</Text><Text style={{fontSize:11,color:C.muted,marginTop:3}}>Encrypted messages waiting for delivery</Text></View><Btn onPress={()=>setScheduledMessagesOpen(false)} style={{padding:8}}><Text style={{fontSize:25,color:C.ink}}>×</Text></Btn></View>
+        <Btn onPress={()=>void loadScheduledMessages()} disabled={scheduledMessagesLoading} style={{margin:14,backgroundColor:C.green,padding:12,borderRadius:11,alignItems:'center'}}>{scheduledMessagesLoading?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Refresh</Text>}</Btn>
+        <ScrollView contentContainerStyle={{padding:14,paddingTop:0,gap:10}}>
+          {!scheduledMessagesLoading&&!scheduledMessages.length?<Text style={{color:C.muted,textAlign:'center',padding:30}}>No scheduled messages.</Text>:null}
+          {scheduledMessages.map(item=><View key={item.id} style={{backgroundColor:C.white,borderRadius:14,borderWidth:1,borderColor:C.line,padding:14}}><Text style={{color:C.ink,fontWeight:'900'}}>{new Date(item.scheduled_at).toLocaleString()}</Text><Text style={{color:item.delivery_status==='failed'?C.red:C.green,fontSize:11,fontWeight:'900',marginTop:5}}>{String(item.delivery_status).toUpperCase()}</Text>{item.last_error?<Text style={{color:C.red,fontSize:11,marginTop:5}}>{item.last_error}</Text>:null}{item.delivery_status==='queued'||item.delivery_status==='failed'?<Btn onPress={()=>void cancelScheduledMessage(item.id)} style={{alignSelf:'flex-end',paddingHorizontal:12,paddingVertical:8,backgroundColor:'#fde8e8',borderRadius:9,marginTop:8}}><Text style={{color:C.red,fontWeight:'900',fontSize:11}}>Cancel</Text></Btn>:null}</View>)}
+        </ScrollView>
+      </SafeAreaView>
+    </View>:null}
+
+    <Modal visible={advancedCenterOpen} animationType="slide" onRequestClose={()=>setAdvancedCenterOpen(false)}>
+      <SafeAreaView style={{flex:1,backgroundColor:C.paper}}>
+        <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',padding:18,backgroundColor:C.white,borderBottomWidth:1,borderColor:C.line}}>
+          <View><Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>Advanced features</Text><Text style={{fontSize:11,color:C.muted,marginTop:3}}>Connected Guftin account data</Text></View>
+          <Btn onPress={()=>setAdvancedCenterOpen(false)} style={{padding:8}}><Text style={{fontSize:25,color:C.ink}}>×</Text></Btn>
+        </View>
+        <ScrollView contentContainerStyle={{padding:16,gap:10}}>
+          <Btn onPress={()=>void loadAdvancedFeatureCenter()} disabled={advancedCenterLoading} style={{backgroundColor:C.green,padding:13,borderRadius:12,alignItems:'center'}}>{advancedCenterLoading?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Refresh feature data</Text>}</Btn>
+          {advancedCenterRows.map(row=><View key={row.label} style={{backgroundColor:C.white,borderRadius:13,padding:14,borderWidth:1,borderColor:C.line,flexDirection:'row',alignItems:'center',gap:10}}>
+            <View style={{flex:1}}><Text style={{color:C.ink,fontWeight:'900'}}>{row.label}</Text><Text style={{color:C.muted,fontSize:11,marginTop:3}}>{row.ok?row.detail:row.detail}</Text></View>
+            <Text style={{color:row.ok?C.green:C.red,fontWeight:'900'}}>{row.ok?row.count+' saved':'Unavailable'}</Text>
+          </View>)}
+          {!advancedCenterRows.length&&!advancedCenterLoading?<Text style={{color:C.muted,textAlign:'center',padding:25}}>Tap refresh to check which feature data is connected to your account.</Text>:null}
+          <Text style={{color:C.muted,fontSize:11,lineHeight:17,marginTop:8}}>This page checks stored feature data only. Features that need message encryption, delivery services, transcription/translation providers, or call screen-sharing still require their own complete workflows and tests.</Text>
+        </ScrollView>
+      </SafeAreaView>
+    </Modal>
+
     <Modal visible={savedItemsOpen} animationType="slide" onRequestClose={()=>setSavedItemsOpen(false)}>
       <SafeAreaView style={{flex:1,backgroundColor:C.paper}}>
         <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',padding:18,borderBottomWidth:1,borderColor:C.line,backgroundColor:C.white}}>
           <View><Text style={{fontSize:21,fontWeight:'900',color:C.ink}}>Saved Items</Text><Text style={{fontSize:11,color:C.muted,marginTop:3}}>Your saved messages and attachments</Text></View>
           <Btn onPress={()=>setSavedItemsOpen(false)} style={{padding:8}}><Text style={{fontSize:25,color:C.ink}}>×</Text></Btn>
         </View>
-        {savedItemsLoading?<ActivityIndicator color={C.green} style={{marginTop:30}}/>:null}
+        {savedItemsLoading?<GuftinLoader color={C.green} style={{marginTop:30}}/>:null}
         <ScrollView contentContainerStyle={{padding:16,gap:10}}>
           {!savedItemsLoading&&!savedItems.length?<Text style={{textAlign:'center',color:C.muted,padding:30}}>No saved items yet. Long-press a message and choose Save to Saved Items.</Text>:null}
           {savedItems.map((item:any)=><View key={item.id} style={{backgroundColor:C.white,borderRadius:14,padding:14,borderWidth:1,borderColor:C.line}}>
@@ -4799,13 +6079,27 @@ function GuftinApp() {
       </SafeAreaView>
     </Modal>
 
-    <Modal visible={settingsOpen} transparent animationType="slide" onRequestClose={()=>setSettingsOpen(false)}>
-      <View style={{flex:1,backgroundColor:'#0008',justifyContent:'flex-end'}}><View style={{backgroundColor:C.white,borderTopLeftRadius:24,borderTopRightRadius:24,padding:22}}>
+    
+
+    <Modal visible={settingsOpen} transparent animationType="fade" onRequestClose={()=>setSettingsOpen(false)}>
+      <View style={{flex:1,backgroundColor:'#0005',alignItems:'flex-end',justifyContent:'flex-start',paddingTop:insets.top+8,paddingHorizontal:10}}><TouchableOpacity activeOpacity={1} onPress={()=>setSettingsOpen(false)} style={{position:'absolute',top:0,left:0,right:0,bottom:0}}/><View style={{backgroundColor:'#fffdf8',borderRadius:22,padding:15,width:320,maxWidth:'92%',maxHeight:'78%',borderWidth:1,borderColor:'#e6f2e9',elevation:20,shadowColor:'#064b32',shadowOpacity:.24,shadowRadius:20,shadowOffset:{width:0,height:9}}}><View style={{height:4,width:42,borderRadius:3,backgroundColor:'#08a66a',alignSelf:'flex-end',marginBottom:10}}/><ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
         <Text style={{fontSize:21,fontWeight:'900',color:C.ink}}>Guftin settings</Text>
+        <Btn onPress={()=>{setSettingsOpen(false);setTab('You');}} style={{backgroundColor:C.mint,borderRadius:14,padding:13,marginTop:12,marginBottom:14,flexDirection:'row',alignItems:'center',gap:12,borderWidth:1,borderColor:'#cce9d9'}}>
+          <Avatar label={initials(profile?.display_name||session.user.email||'G')} color={C.green} size={46} uri={profileAvatarUrl}/>
+          <View style={{flex:1}}>
+            <Text style={{color:C.green,fontWeight:'900',fontSize:15}}>My Profile</Text>
+            <Text style={{color:C.muted,fontSize:11,marginTop:3}}>Photo, name, username, About and profile details</Text>
+          </View>
+          <Text style={{fontSize:22,color:C.green,fontWeight:'900'}}>›</Text>
+        </Btn>
         <Text style={{color:C.muted,fontSize:12,marginTop:5,marginBottom:15}}>Privacy and connection preferences</Text>
+        <Btn onPress={()=>{setSettingsOpen(false);setAdvancedCenterOpen(true);void loadAdvancedFeatureCenter();}} style={{backgroundColor:C.mint,borderRadius:12,padding:13,marginBottom:12}}><Text style={{color:C.green,fontWeight:'900'}}>✦  Advanced features center</Text></Btn>
+        <Btn onPress={()=>{setSettingsOpen(false);setScheduledMessagesOpen(true);void loadScheduledMessages();}} style={{backgroundColor:C.mint,borderRadius:12,padding:13,marginBottom:12}}><Text style={{color:C.green,fontWeight:'900'}}>◷  Scheduled messages</Text></Btn>
         <Btn onPress={()=>{setSettingsOpen(false);setSavedItemsOpen(true);void loadSavedItems();}} style={{backgroundColor:C.mint,borderRadius:12,padding:13,marginBottom:12}}>
           <Text style={{color:C.green,fontWeight:'900'}}>★  Open Saved Items</Text>
         </Btn>
+        <Btn onPress={()=>{setBlockedUsersOpen(v=>!v);if(!blockedUsersOpen)void loadBlockedUsers();}} style={{backgroundColor:C.mint,borderRadius:12,padding:13,marginBottom:12}}><Text style={{color:C.green,fontWeight:'900'}}>Manage blocked users　›</Text></Btn>
+        {blockedUsersOpen?<View style={{backgroundColor:C.white,borderRadius:12,padding:12,marginBottom:12,borderWidth:1,borderColor:C.line}}><Text style={{color:C.ink,fontWeight:'900',marginBottom:8}}>Blocked accounts ({blockedUsers.length})</Text>{blockedUsersLoading?<GuftinLoader color={C.green}/>:blockedUsers.length===0?<Text style={{color:C.muted,fontSize:12}}>You have not blocked anyone.</Text>:blockedUsers.map(item=><View key={item.blocked_user_id} style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingVertical:8,borderBottomWidth:1,borderColor:C.line}}><Text numberOfLines={1} style={{color:C.ink,flex:1,fontSize:11}}>{item.blocked_user_id}</Text><Btn onPress={()=>void unblockContact(item.blocked_user_id)} style={{paddingHorizontal:12,paddingVertical:7,backgroundColor:C.paper,borderRadius:9}}><Text style={{color:C.green,fontWeight:'900'}}>Unblock</Text></Btn></View>)}</View>:null}
         <Btn onPress={()=>{setSettingsOpen(false);setDeviceManagerOpen(true);void loadRegisteredDevices();}} style={{backgroundColor:C.mint,borderRadius:12,padding:13,marginBottom:12}}>
           <Text style={{color:C.green,fontWeight:'900'}}>⌁  Linked encryption devices</Text>
         </Btn>
@@ -4816,7 +6110,7 @@ function GuftinApp() {
             <TextInput value={accountEmailInput} onChangeText={setAccountEmailInput} placeholder="Add Gmail / email address" keyboardType="email-address" autoCapitalize="none" autoComplete="email" style={{backgroundColor:C.white,borderRadius:11,padding:12,marginTop:10,color:C.ink}}/>
             <TextInput value={accountEmailPassword} onChangeText={setAccountEmailPassword} placeholder="Create password (at least 8 characters)" secureTextEntry autoCapitalize="none" style={{backgroundColor:C.white,borderRadius:11,padding:12,marginTop:8,color:C.ink}}/>
             <Btn disabled={accountEmailBusy} onPress={()=>void linkEmailToAccount()} style={{backgroundColor:C.green,padding:12,borderRadius:11,alignItems:'center',marginTop:9}}>
-              {accountEmailBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Link email and password</Text>}
+              {accountEmailBusy?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Link email and password</Text>}
             </Btn>
             {accountEmailNotice?<Text style={{color:C.ink,fontSize:11,lineHeight:16,marginTop:7}}>{accountEmailNotice}</Text>:null}
           </>:null}
@@ -4832,11 +6126,12 @@ function GuftinApp() {
             await loadProfile();
             setPhoneVerifyError('Mobile number saved. No verification is required.');
           })()} style={{backgroundColor:C.green,padding:12,borderRadius:11,alignItems:'center',marginTop:8}}>
-            {phoneBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Save optional mobile number</Text>}
+            {phoneBusy?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Save optional mobile number</Text>}
           </Btn>
           {phoneVerifyError?<Text style={{color:C.ink,fontSize:11,lineHeight:16,marginTop:6}}>{phoneVerifyError}</Text>:null}
         </View>
         <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingVertical:12}}><View style={{flex:1,paddingRight:12}}><Text style={{color:C.ink,fontWeight:'800'}}>App Lock</Text><Text style={{color:C.muted,fontSize:11}}>Require a PIN to open Guftin</Text></View><Switch value={appLockEnabled} onValueChange={async enabled=>{if(enabled){startPinFlow('set-app');}else{await AsyncStorage.removeItem('guftin-app-lock-enabled');setAppLockEnabled(false);}}} trackColor={{true:C.green}}/></View>
+        <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingVertical:12}}><View style={{flex:1,paddingRight:12}}><Text style={{color:C.ink,fontWeight:'800'}}>Fingerprint / Face Unlock</Text><Text style={{color:C.muted,fontSize:11}}>{biometricAvailable?'Use phone biometrics with PIN fallback':'Requires enrolled biometrics and an App PIN'}</Text></View><Switch value={biometricLockEnabled} disabled={!appLockEnabled} onValueChange={value=>void setBiometricLock(value)} trackColor={{true:C.green}}/></View>
         <Btn onPress={()=>{setSettingsOpen(false);setPermissionSetupStep(0);setPermissionSetupAutoSave(mediaAutoDownload);setPermissionSetupFullScreenOpened(false);setPermissionSetupNotice('');setPermissionSetupVisible(true);}} style={{backgroundColor:C.mint,padding:12,borderRadius:13,marginBottom:7}}>
           <Text style={{color:C.green,fontWeight:'900',textAlign:'center'}}>Review app permissions</Text>
         </Btn>
@@ -4866,6 +6161,7 @@ function GuftinApp() {
         <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingVertical:12}}><View style={{flex:1,paddingRight:12}}><Text style={{color:C.ink,fontWeight:'800'}}>Show online status</Text><Text style={{color:C.muted,fontSize:11}}>Let contacts see when you are online</Text></View><Switch value={onlineVisibility} onValueChange={async value=>{if(await savePrivacyPreferences({online_visibility:value?'everyone':'nobody'}))setOnlineVisibility(value);}} trackColor={{true:C.green}}/></View>
         <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingVertical:12}}><View style={{flex:1,paddingRight:12}}><Text style={{color:C.ink,fontWeight:'800'}}>Read receipts</Text><Text style={{color:C.muted,fontSize:11}}>Show seen status on messages</Text></View><Switch value={showReadReceipts} onValueChange={async value=>{if(await savePrivacyPreferences({read_receipts_enabled:value}))setShowReadReceipts(value);}} trackColor={{true:C.green}}/></View>
         <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingVertical:12}}><View style={{flex:1,paddingRight:12}}><Text style={{color:C.ink,fontWeight:'800'}}>Push notifications on this phone</Text><Text style={{color:C.muted,fontSize:11}}>Messages, status likes/views, and incoming call alerts with Accept/Decline</Text></View><Switch value={pushEnabled} disabled={pushBusy} onValueChange={enabled=>enabled?void enablePushNotifications():void disablePushNotifications()} trackColor={{true:C.green}}/></View>
+        <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingVertical:12,borderBottomWidth:1,borderColor:C.line}}><View style={{flex:1,paddingRight:12}}><Text style={{color:C.ink,fontWeight:'800'}}>Background calls</Text><Text style={{color:C.muted,fontSize:11}}>Receive incoming voice/video call alerts when Guftin is in the background or closed. Requires push notifications and Android call-screen permissions.</Text></View><Switch value={backgroundCallsEnabled} onValueChange={setBackgroundCallsEnabled} trackColor={{true:C.green}}/></View>
         <Btn disabled={pushBusy||!session} onPress={()=>void testPushNotifications()} style={{backgroundColor:C.mint,padding:12,borderRadius:13,marginTop:2,marginBottom:7,opacity:pushBusy ? .55 : 1}}>
           <Text style={{color:C.green,fontWeight:'900',textAlign:'center'}}>{pushBusy?'Checking notification service…':'Send test notification to this phone'}</Text>
         </Btn>
@@ -4881,10 +6177,96 @@ function GuftinApp() {
         </View>
         <Text style={{fontSize:10,color:C.muted,marginTop:10}}>Gallery access is requested only when you save media or enable auto-save.</Text>
         <Text style={{color:C.ink,fontWeight:'800',marginTop:10}}>Sync interval</Text><View style={{flexDirection:'row',gap:8,marginTop:10}}>{[15,30,60].map(seconds=><Btn key={seconds} onPress={()=>setSyncIntervalSeconds(seconds)} style={{flex:1,padding:12,borderRadius:12,backgroundColor:syncIntervalSeconds===seconds?C.green:C.paper,alignItems:'center'}}><Text style={{color:syncIntervalSeconds===seconds?'#fff':C.ink,fontWeight:'800'}}>{seconds}s</Text></Btn>)}</View>
-        <Btn onPress={()=>setSettingsOpen(false)} style={{backgroundColor:C.green,padding:15,borderRadius:14,alignItems:'center',marginTop:20}}><Text style={{color:'#fff',fontWeight:'900'}}>Done</Text></Btn>
-      </View></View>
+        {(session?.user?.email||'').toLowerCase()==='guftinofficle@gmail.com'?<Btn onPress={()=>{setSettingsOpen(false);setOfficialUsersOpen(true);void loadOfficialUserMetrics();}} style={{backgroundColor:C.mint,padding:13,borderRadius:13,alignItems:'center',marginTop:10,borderWidth:1,borderColor:'#b9e4cd'}}><Text style={{color:C.green,fontWeight:'900'}}>My Users</Text></Btn>:null}
+        <Btn onPress={()=>setSettingsOpen(false)} style={{backgroundColor:C.green,padding:13,borderRadius:14,alignItems:'center',marginTop:16}}><Text style={{color:'#fff',fontWeight:'900'}}>Done</Text></Btn>
+      </ScrollView></View></View>
     </Modal>
 
+    <Modal visible={officialUsersOpen} animationType="slide" onRequestClose={()=>setOfficialUsersOpen(false)}>
+      <SafeAreaView style={{flex:1,backgroundColor:C.paper}}>
+        <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',padding:18,backgroundColor:C.white,borderBottomWidth:1,borderColor:C.line}}>
+          <View><Text style={{fontSize:21,fontWeight:'900',color:C.ink}}>My Users</Text><Text style={{fontSize:11,color:C.muted,marginTop:3}}>Guftin Official account overview</Text></View>
+          <Btn onPress={()=>setOfficialUsersOpen(false)} style={{padding:8}}><Text style={{fontSize:24,color:C.ink}}>×</Text></Btn>
+        </View>
+        <ScrollView contentContainerStyle={{padding:18,gap:12}}>
+          {officialMetricsLoading?<GuftinLoader color={C.green} style={{marginTop:24}}/>:null}
+          {officialMetricsError?<Text style={{color:C.red,fontSize:12}}>{officialMetricsError}</Text>:null}
+          <View style={{backgroundColor:C.white,borderRadius:16,padding:18,borderWidth:1,borderColor:C.line}}>
+            <Text style={{color:C.muted,fontSize:12,fontWeight:'800'}}>REGISTERED ACCOUNTS</Text>
+            <Text style={{color:C.ink,fontSize:34,fontWeight:'900',marginTop:6}}>{officialMetrics?.registered_accounts??'—'}</Text>
+          </View>
+          <View style={{backgroundColor:C.white,borderRadius:16,padding:18,borderWidth:1,borderColor:C.line}}>
+            <Text style={{color:C.muted,fontSize:12,fontWeight:'800'}}>ACTIVE NOW</Text>
+            <Text style={{color:C.green,fontSize:34,fontWeight:'900',marginTop:6}}>{officialMetrics?.active_now??'—'}</Text>
+            <Text style={{color:C.muted,fontSize:11,marginTop:5}}>Accounts marked online and seen within the last 5 minutes.</Text>
+          </View>
+          <Text style={{color:C.muted,fontSize:11,lineHeight:17}}>This overview shows aggregate account activity only. Private message content and personal chat relationships are not displayed.</Text>
+          <Btn onPress={()=>void loadOfficialUserMetrics()} style={{backgroundColor:C.green,padding:13,borderRadius:12,alignItems:'center'}}><Text style={{color:'#fff',fontWeight:'900'}}>Refresh</Text></Btn>
+        </ScrollView>
+      </SafeAreaView>
+    </Modal>
+
+    <Modal visible={!!communityInvitePreview||communityInvitePreviewLoading} transparent animationType="fade" onRequestClose={()=>{setCommunityInvitePreview(null);setPendingCommunityInvite(null);}}><View style={{flex:1,backgroundColor:'#0008',justifyContent:'center',padding:22}}><View style={{backgroundColor:C.white,borderRadius:20,padding:18}}><Text style={{fontSize:19,fontWeight:'900',color:C.ink}}>Community invitation</Text>{communityInvitePreviewLoading?<Text style={{color:C.muted,marginTop:10}}>Loading community…</Text>:<><Text style={{fontSize:16,fontWeight:'800',color:C.green,marginTop:12}}>{communityInvitePreview?.title||'Guftin community'}</Text><Text style={{fontSize:12,color:C.muted,marginTop:6}}>You have been invited to this community. Join to see its members and community groups.</Text><View style={{flexDirection:'row',justifyContent:'flex-end',gap:10,marginTop:18}}><Btn onPress={()=>{setCommunityInvitePreview(null);setPendingCommunityInvite(null);}} style={{padding:11}}><Text style={{color:C.muted}}>Not now</Text></Btn><Btn disabled={communityMemberBusy} onPress={()=>void joinCommunityFromInvite()} style={{backgroundColor:C.green,padding:12,borderRadius:11}}><Text style={{color:'#fff',fontWeight:'900'}}>{communityMemberBusy?'Joining…':'Join Community'}</Text></Btn></View></>}</View></View></Modal><Modal visible={communityCreateOpen} transparent animationType="fade" onRequestClose={()=>setCommunityCreateOpen(false)}><View style={{flex:1,backgroundColor:'#0007',justifyContent:'center',padding:22}}><View style={{backgroundColor:C.white,borderRadius:20,padding:18}}><Text style={{fontSize:18,fontWeight:'900',color:C.ink}}>Create community</Text><TextInput value={communityDraftTitle} onChangeText={setCommunityDraftTitle} placeholder="Community name" maxLength={80} style={{backgroundColor:C.paper,borderRadius:12,padding:13,color:C.ink,marginTop:13}}/><TextInput value={communityDraftMembers} onChangeText={setCommunityDraftMembers} placeholder="Guftin usernames to add (optional, separate with commas)" autoCapitalize="none" multiline maxLength={1200} style={{backgroundColor:C.paper,borderRadius:12,padding:13,color:C.ink,marginTop:10,minHeight:70,textAlignVertical:'top'}}/><Text style={{fontSize:10,color:C.muted,marginTop:6}}>You can add up to 50 existing Guftin usernames now, or invite people later with a shareable link.</Text><View style={{flexDirection:'row',justifyContent:'flex-end',gap:10,marginTop:14}}><Btn onPress={()=>setCommunityCreateOpen(false)} style={{padding:12}}><Text style={{color:C.muted}}>Cancel</Text></Btn><Btn disabled={communityBusy||!communityDraftTitle.trim()} onPress={()=>void createHubCommunity()} style={{backgroundColor:C.green,padding:12,borderRadius:11}}><Text style={{color:'#fff',fontWeight:'900'}}>Create</Text></Btn></View></View></View></Modal>
+    <Modal visible={!!selectedCommunity} transparent animationType="slide" onRequestClose={()=>setSelectedCommunity(null)}>
+      <View style={{flex:1,backgroundColor:C.white,justifyContent:'flex-start'}}><View style={{backgroundColor:C.white,padding:18,height:'100%'}}>
+        <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginBottom:10}}><View style={{flex:1}}><Text style={{fontSize:19,fontWeight:'900',color:C.ink}}>{selectedCommunity?.title||'Community'}</Text><Text style={{fontSize:11,color:C.muted,marginTop:3}}>{communityMembers.length} members · {selectedCommunity?.role==='owner'?'Owner':selectedCommunity?.role==='admin'?'Admin':'Member'}</Text></View><Btn onPress={()=>setSelectedCommunity(null)} style={{padding:9}}><Text style={{fontSize:20,color:C.ink}}>✕</Text></Btn></View>
+        <View style={{backgroundColor:'#eaf8ef',borderWidth:1,borderColor:'#bfe8cf',borderRadius:16,padding:14,marginBottom:12}}>
+          <View style={{flexDirection:'row',alignItems:'center',gap:10}}><View style={{width:44,height:44,borderRadius:15,backgroundColor:C.green,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:23,color:'#fff'}}>📢</Text></View><View style={{flex:1}}><Text style={{fontWeight:'900',fontSize:15,color:C.green}}>Announcements</Text><Text style={{fontSize:10,color:C.muted,marginTop:3}}>Community-wide important updates</Text></View><Text style={{fontSize:10,fontWeight:'900',color:C.green}}>TOP</Text></View>
+          <Text style={{fontSize:11,color:C.ink,lineHeight:17,marginTop:9}}>Only the community owner and admins can post here. All community members can read announcements.</Text>
+          <Btn disabled={!communityAnnouncementConversationId||communityDetailsLoading} onPress={()=>void openCommunityAnnouncement()} style={{backgroundColor:C.green,padding:12,borderRadius:11,alignItems:'center',marginTop:11}}><Text style={{color:'#fff',fontWeight:'900'}}>{communityAnnouncementConversationId?'Open announcements':'Preparing announcements…'}</Text></Btn>
+        </View>
+        {(selectedCommunity?.role==='owner'||selectedCommunity?.role==='admin')?<View style={{backgroundColor:C.mint,borderRadius:14,padding:12,marginBottom:12}}><Text style={{fontWeight:'900',color:C.green}}>Invite people</Text><Text style={{fontSize:11,color:C.ink,marginTop:4}}>Share this invitation link with anyone you want to join. You can also add a Guftin username directly.</Text><Btn disabled={!communityInviteCode} onPress={()=>void shareCommunityInvite()} style={{backgroundColor:C.green,padding:11,borderRadius:11,alignItems:'center',marginTop:9}}><Text style={{color:'#fff',fontWeight:'900'}}>Share invitation link</Text></Btn><View style={{flexDirection:'row',gap:7,marginTop:10}}><TextInput value={communityMemberUsername} onChangeText={setCommunityMemberUsername} placeholder="Guftin username (e.g. @ali)" autoCapitalize="none" style={{flex:1,backgroundColor:C.white,borderRadius:10,padding:11,color:C.ink}}/><Btn disabled={communityMemberBusy||!communityMemberUsername.trim()} onPress={()=>void addCommunityMember()} style={{backgroundColor:C.green,paddingHorizontal:13,justifyContent:'center',borderRadius:10}}><Text style={{color:'#fff',fontWeight:'900'}}>{communityMemberBusy?'…':'Add'}</Text></Btn></View></View>:null}
+        {communityDetailsLoading?<Text style={{color:C.muted,padding:10}}>Loading community…</Text>:null}
+        <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginTop:6,marginBottom:7}}><Text style={{fontWeight:'900',fontSize:16,color:C.ink}}>Community groups</Text>{(selectedCommunity?.role==='owner'||selectedCommunity?.role==='admin')?<Btn onPress={()=>{const communityId=selectedCommunity.id;setSelectedCommunity(null);void openGroupCreator(communityId);}} style={{backgroundColor:C.green,paddingHorizontal:11,paddingVertical:8,borderRadius:9}}><Text style={{color:'#fff',fontWeight:'900',fontSize:11}}>＋ Create group</Text></Btn>:null}</View>
+        <ScrollView style={{maxHeight:210}}>{communityGroups.length?communityGroups.map((group:any)=><View key={group.id} style={{flexDirection:'row',alignItems:'center',backgroundColor:C.paper,borderRadius:11,padding:10,marginBottom:7}}><View style={{flex:1}}><Text style={{fontWeight:'800',color:C.ink}}>{group.title||'Community group'}</Text><Text style={{fontSize:10,color:C.muted}}>Open this group chat</Text></View><Btn onPress={()=>void openCommunityGroup(group)} style={{backgroundColor:C.green,padding:9,borderRadius:9}}><Text style={{color:'#fff',fontWeight:'900'}}>Open</Text></Btn></View>):<Text style={{fontSize:11,color:C.muted}}>No group chats yet. Create one to start conversations.</Text>}</ScrollView>
+        <Text style={{fontWeight:'900',color:C.ink,marginTop:14,marginBottom:7}}>Members ({communityMembers.length})</Text>
+        <ScrollView style={{maxHeight:145}}>{communityMembers.map((member:any)=><View key={member.user_id} style={{flexDirection:'row',alignItems:'center',paddingVertical:8,borderBottomWidth:1,borderColor:C.line}}><Avatar label={initials(member.display_name||member.username||'G')} color={C.green} size={35} uri={member.avatar_url}/><View style={{marginLeft:9,flex:1}}><Text style={{fontWeight:'800',color:C.ink}}>{member.display_name||member.username||'Guftin member'}</Text><Text style={{fontSize:10,color:C.muted}}>{member.username?'@'+member.username:'Guftin account'} · {member.role}</Text></View></View>)}</ScrollView>
+      </View></View>
+    </Modal>
+    <Modal visible={!!selectedBusinessStore} transparent animationType="slide" onRequestClose={()=>setSelectedBusinessStore(null)}>
+      <View style={{flex:1,backgroundColor:C.white,justifyContent:'flex-start'}}><View style={{backgroundColor:C.white,padding:18,height:'100%'}}>
+        <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginBottom:10}}><View style={{flex:1,flexDirection:'row',alignItems:'center',gap:10}}><Avatar label={initials(selectedBusinessStore?.store_name||'S')} color={C.green} size={52} uri={selectedBusinessStore?.logo_signed_url}/><View style={{flex:1}}><Text style={{fontSize:19,fontWeight:'900',color:C.ink}}>{selectedBusinessStore?.store_name||'Business store'}</Text><Text style={{fontSize:11,color:C.muted,marginTop:3}}>Guftin business storefront</Text></View></View><View style={{flexDirection:'row',alignItems:'center',gap:6}}><Btn onPress={()=>void shareBusinessStore()} style={{padding:9,backgroundColor:C.mint,borderRadius:10}}><Text style={{color:C.green,fontWeight:'900',fontSize:11}}>Share</Text></Btn><Btn onPress={()=>setSelectedBusinessStore(null)} style={{padding:9}}><Text style={{fontSize:20,color:C.ink}}>✕</Text></Btn></View></View>
+        {businessStoreLoading?<Text style={{color:C.muted,padding:10}}>Loading store…</Text>:null}
+        <ScrollView><Text style={{fontSize:12,color:C.ink,lineHeight:19}}>{selectedBusinessStore?.description||'Welcome to this Guftin business store.'}</Text>{selectedBusinessStore?.contact_phone?<Text style={{fontSize:11,color:C.green,marginTop:7}}>Contact number: {selectedBusinessStore.contact_phone}</Text>:null}{selectedBusinessStore?.contact_username?<Text style={{fontSize:11,color:C.green,marginTop:7}}>Guftin username: @{selectedBusinessStore.contact_username}</Text>:null}{selectedBusinessStore?.contact_email?<Text style={{fontSize:11,color:C.green,marginTop:4}}>Email: {selectedBusinessStore.contact_email}</Text>:null}{selectedBusinessStore?.user_id===session?.user?.id?<Btn onPress={()=>openProductEditor()} style={{backgroundColor:C.green,padding:12,borderRadius:11,alignSelf:'flex-start',marginTop:14}}><Text style={{color:'#fff',fontWeight:'900'}}>＋ Add new product</Text></Btn>:null}<Text style={{fontWeight:'900',color:C.ink,marginTop:16,marginBottom:8}}>Products</Text>{businessStoreProducts.length?businessStoreProducts.map((product:any)=><View key={product.id} style={{backgroundColor:C.paper,borderRadius:12,padding:10,marginBottom:9}}><Btn onPress={()=>setSelectedBusinessProduct({...product,store_owner_id:selectedBusinessStore?.user_id})} style={{alignItems:'stretch'}}><View style={{flexDirection:'row',gap:10,alignItems:'center'}}>{product.image_signed_url?<Image source={{uri:product.image_signed_url}} style={{width:88,height:76,borderRadius:10}}/>:<View style={{width:88,height:76,borderRadius:10,backgroundColor:C.mint,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:26}}>🛍️</Text></View>}<View style={{flex:1}}><Text style={{fontWeight:'900',color:C.ink}}>{product.title}</Text><Text numberOfLines={2} style={{fontSize:11,color:C.muted,marginTop:4}}>{product.description||'Business listing'}</Text><Text style={{fontSize:12,color:C.green,fontWeight:'900',marginTop:6}}>{String(product.currency_code||'PKR')+' '+String(product.price)}</Text><Text style={{fontSize:10,color:C.muted,marginTop:3}}>{product.availability||'available'}{product.is_published===false?' · Draft':''}</Text></View></View></Btn>{selectedBusinessStore?.user_id===session?.user?.id?<Btn onPress={()=>openProductEditor(product)} style={{alignSelf:'flex-end',padding:7,marginTop:5}}><Text style={{color:C.green,fontWeight:'900'}}>Edit product</Text></Btn>:null}</View>):<Text style={{fontSize:11,color:C.muted}}>This store has no products yet.</Text>}</ScrollView>
+      </View></View>
+    </Modal>
+    <Modal visible={productEditorOpen} transparent animationType="slide" onRequestClose={()=>setProductEditorOpen(false)}>
+      <KeyboardAvoidingView behavior={Platform.OS==='ios'?'padding':undefined} style={{flex:1,backgroundColor:'#0008',justifyContent:'flex-end'}}>
+        <View style={{backgroundColor:C.white,borderTopLeftRadius:24,borderTopRightRadius:24,padding:20,maxHeight:'92%'}}>
+          <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}><Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>{productEditing?'Edit product':'Add new product'}</Text><Btn onPress={()=>setProductEditorOpen(false)}><Text style={{fontSize:20,color:C.ink}}>✕</Text></Btn></View>
+          <ScrollView keyboardShouldPersistTaps="handled">
+            <Btn onPress={()=>void chooseProductImage()} style={{alignSelf:'center',alignItems:'center',marginTop:14,marginBottom:8}}>
+              {productImageAsset?.uri?<Image source={{uri:productImageAsset.uri}} style={{width:150,height:112,borderRadius:14}}/>:productEditing?.image_signed_url?<Image source={{uri:productEditing.image_signed_url}} style={{width:150,height:112,borderRadius:14}}/>:<View style={{width:150,height:112,borderRadius:14,backgroundColor:C.mint,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:30}}>📷</Text></View>}
+              <Text style={{fontSize:11,color:C.green,fontWeight:'900',marginTop:7}}>Choose product photo</Text>
+            </Btn>
+            <TextInput value={productDraftTitle} onChangeText={setProductDraftTitle} placeholder="Product name" maxLength={120} style={{backgroundColor:C.paper,borderRadius:12,padding:13,color:C.ink,marginTop:9}}/>
+            <TextInput value={productDraftDescription} onChangeText={setProductDraftDescription} placeholder="Product details and description" maxLength={2000} multiline style={{backgroundColor:C.paper,borderRadius:12,padding:13,color:C.ink,marginTop:9,minHeight:90,textAlignVertical:'top'}}/>
+            <TextInput value={productDraftPrice} onChangeText={setProductDraftPrice} placeholder="Price in PKR" keyboardType="decimal-pad" style={{backgroundColor:C.paper,borderRadius:12,padding:13,color:C.ink,marginTop:9}}/>
+            <Text style={{fontWeight:'900',color:C.ink,marginTop:14,marginBottom:7}}>Availability</Text>
+            <View style={{flexDirection:'row',gap:7,flexWrap:'wrap'}}>
+              {([['available','Available'],['out_of_stock','Out of stock'],['preorder','Pre-order']] as const).map(([value,label])=><Btn key={value} onPress={()=>setProductDraftAvailability(value)} style={{padding:9,borderRadius:10,backgroundColor:productDraftAvailability===value?C.green:C.paper}}><Text style={{fontSize:11,fontWeight:'800',color:productDraftAvailability===value?'#fff':C.ink}}>{label}</Text></Btn>)}
+            </View>
+            <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginTop:15}}><View style={{flex:1,paddingRight:12}}><Text style={{fontWeight:'900',color:C.ink}}>Publish product</Text><Text style={{fontSize:10,color:C.muted}}>Published products appear in your public store.</Text></View><Switch value={productDraftPublished} onValueChange={setProductDraftPublished} trackColor={{true:C.green}}/></View>
+          </ScrollView>
+          <View style={{flexDirection:'row',justifyContent:'flex-end',gap:10,marginTop:12}}><Btn onPress={()=>setProductEditorOpen(false)} style={{padding:12}}><Text style={{color:C.muted}}>Cancel</Text></Btn><Btn disabled={productBusy||!productDraftTitle.trim()||!productDraftPrice.trim()} onPress={()=>void saveBusinessProduct()} style={{backgroundColor:C.green,padding:12,borderRadius:11}}>{productBusy?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Save product</Text>}</Btn></View>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+    <Modal visible={!!selectedBusinessProduct} transparent animationType="slide" onRequestClose={()=>setSelectedBusinessProduct(null)}>
+      <View style={{flex:1,backgroundColor:C.white,justifyContent:'flex-start'}}><View style={{backgroundColor:C.white,padding:18,height:'100%'}}>
+        <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}><Text style={{fontSize:19,fontWeight:'900',color:C.ink,flex:1}}>Product details</Text><Btn onPress={()=>setSelectedBusinessProduct(null)}><Text style={{fontSize:20,color:C.ink}}>✕</Text></Btn></View>
+        <ScrollView>
+          {selectedBusinessProduct?.image_signed_url?<Image source={{uri:selectedBusinessProduct.image_signed_url}} style={{width:'100%',height:240,borderRadius:15,marginTop:12}} resizeMode="cover"/>:null}
+          <Text style={{fontSize:20,fontWeight:'900',color:C.ink,marginTop:14}}>{selectedBusinessProduct?.title}</Text>
+          <Text style={{fontSize:17,fontWeight:'900',color:C.green,marginTop:7}}>{String(selectedBusinessProduct?.currency_code||'PKR')+' '+String(selectedBusinessProduct?.price??'')}</Text>
+          <Text style={{fontSize:12,color:C.muted,marginTop:7}}>{selectedBusinessProduct?.availability||'available'}</Text>
+          <Text style={{fontSize:13,color:C.ink,lineHeight:20,marginTop:12}}>{selectedBusinessProduct?.description||'Contact the store for more information.'}</Text>
+          <Btn disabled={selectedBusinessProduct?.availability==='out_of_stock'} onPress={()=>void contactBusinessSeller(selectedBusinessProduct)} style={{backgroundColor:selectedBusinessProduct?.availability==='out_of_stock'?C.line:C.green,padding:14,borderRadius:12,alignItems:'center',marginTop:18}}><Text style={{color:'#fff',fontWeight:'900'}}>{selectedBusinessProduct?.availability==='out_of_stock'?'Currently unavailable':'Buy / Contact seller'}</Text></Btn>
+          <Text style={{fontSize:10,color:C.muted,textAlign:'center',marginTop:7}}>This opens the seller's saved contact number, Guftin username or email. Payment is arranged directly with the seller.</Text>
+        </ScrollView>
+      </View></View>
+    </Modal>
+    <Modal visible={businessSetupOpen} transparent animationType="fade" onRequestClose={()=>setBusinessSetupOpen(false)}><KeyboardAvoidingView behavior={Platform.OS==='ios'?'padding':undefined} style={{flex:1,backgroundColor:'#0007',justifyContent:'center',padding:22}}><View style={{backgroundColor:C.white,borderRadius:20,padding:18}}><Text style={{fontSize:18,fontWeight:'900',color:C.ink}}>Business profile</Text><TextInput value={businessDraftName} onChangeText={setBusinessDraftName} placeholder="Store or business name" maxLength={80} style={{backgroundColor:C.paper,borderRadius:12,padding:13,color:C.ink,marginTop:12}}/><TextInput value={businessDraftDescription} onChangeText={setBusinessDraftDescription} placeholder="Describe your business" maxLength={1200} multiline style={{backgroundColor:C.paper,borderRadius:12,padding:13,color:C.ink,marginTop:9,minHeight:82}}/><Btn onPress={()=>void chooseBusinessLogo()} style={{alignSelf:'center',alignItems:'center',marginTop:14,marginBottom:6}}><Avatar label={initials(businessDraftName||'S')} color={C.green} size={76} uri={businessLogoAsset?.uri||myBusinessProfile?.logo_signed_url}/><Text style={{fontSize:11,fontWeight:'900',color:C.green,marginTop:7}}>{businessLogoAsset?'Change selected logo':'Choose store logo'}</Text></Btn><Text style={{fontSize:10,color:C.muted,marginTop:7}}>You can add your contact number or Guftin username here.</Text><TextInput value={businessDraftPhone} onChangeText={setBusinessDraftPhone} placeholder="Contact number or Guftin username (optional)" keyboardType="default" autoCapitalize="none" autoCorrect={false} style={{backgroundColor:C.paper,borderRadius:12,padding:13,color:C.ink,marginTop:9}}/><TextInput value={businessDraftEmail} onChangeText={setBusinessDraftEmail} placeholder="Business contact email (optional)" keyboardType="email-address" autoCapitalize="none" style={{backgroundColor:C.paper,borderRadius:12,padding:13,color:C.ink,marginTop:9}}/><View style={{flexDirection:'row',justifyContent:'flex-end',gap:10,marginTop:14}}><Btn onPress={()=>setBusinessSetupOpen(false)} style={{padding:12}}><Text style={{color:C.muted}}>Cancel</Text></Btn><Btn disabled={businessBusy||!businessDraftName.trim()} onPress={()=>void saveBusinessProfile()} style={{backgroundColor:C.green,padding:12,borderRadius:11}}><Text style={{color:'#fff',fontWeight:'900'}}>Save store</Text></Btn></View></View></KeyboardAvoidingView></Modal>
     <Modal visible={!!selectedStatus} transparent animationType="fade" onRequestClose={()=>setSelectedStatus(null)}>
       <View style={{flex:1,backgroundColor:'#000e',justifyContent:'center',padding:18}}>
         <View style={{backgroundColor:C.white,borderRadius:22,padding:18,maxHeight:'88%'}}>
@@ -4910,7 +6292,7 @@ function GuftinApp() {
           <Text style={{color:C.muted,fontSize:10,marginTop:7,textAlign:'right'}}>{statusText.length}/700</Text>
           <View style={{flexDirection:'row',justifyContent:'flex-end',gap:10,marginTop:15}}>
             <Btn onPress={()=>setStatusComposer(false)} style={{padding:13}}><Text style={{color:C.muted,fontWeight:'700'}}>Cancel</Text></Btn>
-            <Btn disabled={publishingStatus||(!statusText.trim()&&!statusAsset)} onPress={publishStatus} style={{backgroundColor:C.green,paddingHorizontal:18,paddingVertical:13,borderRadius:13}}>{publishingStatus?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'800'}}>Share status</Text>}</Btn>
+            <Btn disabled={publishingStatus||(!statusText.trim()&&!statusAsset)} onPress={publishStatus} style={{backgroundColor:C.green,paddingHorizontal:18,paddingVertical:13,borderRadius:13}}>{publishingStatus?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'800'}}>Share status</Text>}</Btn>
           </View>
         </View>
       </View>
@@ -4931,7 +6313,7 @@ function GuftinApp() {
           <View style={{flexDirection:'row',justifyContent:'flex-end',gap:10,marginTop:18}}>
             <Btn disabled={channelEditBusy} onPress={()=>setChannelEditOpen(false)} style={{padding:13}}><Text style={{color:C.muted,fontWeight:'700'}}>Cancel</Text></Btn>
             <Btn disabled={channelEditBusy} onPress={()=>void saveChannelBranding()} style={{backgroundColor:C.green,paddingHorizontal:18,paddingVertical:13,borderRadius:13}}>
-              {channelEditBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Save changes</Text>}
+              {channelEditBusy?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Save changes</Text>}
             </Btn>
           </View>
         </View>
@@ -4951,7 +6333,7 @@ function GuftinApp() {
           </View>
           <View style={{flexDirection:'row',justifyContent:'flex-end',gap:10,marginTop:20}}>
             <Btn onPress={()=>setChannelCreateOpen(false)} style={{padding:13}}><Text style={{color:C.muted,fontWeight:'700'}}>Cancel</Text></Btn>
-            <Btn disabled={channelBusy||channelTitle.trim().length<2} onPress={()=>void createChannel()} style={{backgroundColor:C.green,paddingHorizontal:18,paddingVertical:13,borderRadius:13}}>{channelBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Create channel</Text>}</Btn>
+            <Btn disabled={channelBusy||channelTitle.trim().length<2} onPress={()=>void createChannel()} style={{backgroundColor:C.green,paddingHorizontal:18,paddingVertical:13,borderRadius:13}}>{channelBusy?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Create channel</Text>}</Btn>
           </View>
         </View>
       </View>
@@ -4964,40 +6346,37 @@ function GuftinApp() {
           <TextInput value={channelInviteCode} onChangeText={setChannelInviteCode} autoCapitalize="none" placeholder="Invite code" style={{backgroundColor:C.paper,borderRadius:14,padding:15,color:C.ink}}/>
           <View style={{flexDirection:'row',justifyContent:'flex-end',gap:10,marginTop:18}}>
             <Btn onPress={()=>setChannelJoinOpen(false)} style={{padding:13}}><Text style={{color:C.muted,fontWeight:'700'}}>Cancel</Text></Btn>
-            <Btn disabled={channelBusy||!channelInviteCode.trim()} onPress={()=>void joinChannelByInvite(channelInviteCode)} style={{backgroundColor:C.green,paddingHorizontal:18,paddingVertical:13,borderRadius:13}}>{channelBusy?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Join channel</Text>}</Btn>
+            <Btn disabled={channelBusy||!channelInviteCode.trim()} onPress={()=>void joinChannelByInvite(channelInviteCode)} style={{backgroundColor:C.green,paddingHorizontal:18,paddingVertical:13,borderRadius:13}}>{channelBusy?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900'}}>Join channel</Text>}</Btn>
           </View>
         </View>
       </View>
     </Modal>
-    <Modal visible={addOpen} transparent animationType="fade" onRequestClose={()=>setAddOpen(false)}>
-      <View style={{flex:1,backgroundColor:'#0008',justifyContent:'center',padding:22}}>
-        <View style={{backgroundColor:C.white,borderRadius:22,padding:20,maxHeight:'88%'}}>
-          <Text style={{fontSize:20,fontWeight:'900',color:C.ink}}>Add a new Guftin contact</Text>
-          <Text style={{color:C.muted,lineHeight:19,marginTop:7,marginBottom:12}}>Search by Guftin username, Gmail/email address, or the mobile number linked to that account.</Text>
-          <TextInput value={contactUsername} onChangeText={setContactUsername} autoCapitalize="none" autoCorrect={false} placeholder="Username, email or mobile number" style={{backgroundColor:C.paper,borderRadius:14,padding:15,color:C.ink}}/>
-          <Text style={{color:C.muted,fontSize:11,lineHeight:16,marginTop:8}}>Search by username, verified email address, or an optional mobile number added to the account. Mobile numbers are not verified by Guftin.</Text>
-          <Btn disabled={phoneContactsLoading} onPress={()=>void findPhoneContacts()} style={{backgroundColor:C.mint,padding:13,borderRadius:13,marginTop:12,alignItems:'center'}}>
-            {phoneContactsLoading?<ActivityIndicator color={C.green}/>:<Text style={{color:C.green,fontWeight:'900'}}>Find Guftin accounts in phone contacts</Text>}
-          </Btn>
-          <Text style={{color:C.muted,fontSize:10,lineHeight:15,marginTop:6}}>Guftin checks phone numbers only after you tap this button. It returns matching account details, not other people's phone numbers, and does not upload or save your address-book names.</Text>
-          {phoneContactMatches.length>0?<ScrollView style={{maxHeight:230,marginTop:8}} keyboardShouldPersistTaps="handled">
-            {phoneContactMatches.map((item:any)=><Btn key={item.contact_id} onPress={()=>openPhoneContactChat(item)} style={{flexDirection:'row',alignItems:'center',gap:10,paddingVertical:10,borderBottomWidth:1,borderColor:C.line}}>
-              {item.avatar_signed_url?<Avatar label={initials(item.display_name||'G')} color={colorFor(item.contact_id)} size={43} uri={item.avatar_signed_url}/>:<View style={{width:43,height:43,borderRadius:15,backgroundColor:C.mint,alignItems:'center',justifyContent:'center'}}><BrandLogo size={30}/></View>}
-              <View style={{flex:1}}>
-                <Text style={{fontWeight:'900',color:C.ink}}>{item.display_name||item.local_contact_name||'Guftin member'}</Text>
-                <Text style={{fontSize:11,color:C.muted,marginTop:2}}>@{item.username||'member'} · Saved as {item.local_contact_name||'Phone contact'}</Text>
-                <Text style={{fontSize:10,color:C.green,fontWeight:'900',marginTop:3}}>GUFTIN ACCOUNT</Text>
-              </View>
-              <Text style={{fontSize:20,color:C.green,fontWeight:'900'}}>›</Text>
-            </Btn>)}
-          </ScrollView>:null}
-          <Btn onPress={()=>{setAddOpen(false);void openGroupCreator();}} style={{padding:10,alignSelf:'flex-start',marginTop:8}}><Text style={{color:C.green,fontWeight:'800'}}>👥 Create a group instead</Text></Btn>
-          <View style={{flexDirection:'row',justifyContent:'flex-end',gap:10,marginTop:12}}>
-            <Btn onPress={()=>setAddOpen(false)} style={{padding:13}}><Text style={{color:C.muted,fontWeight:'700'}}>Cancel</Text></Btn>
-            <Btn disabled={adding} onPress={addContact} style={{backgroundColor:C.green,paddingHorizontal:18,paddingVertical:13,borderRadius:13}}>{adding?<ActivityIndicator color="#fff"/>:<Text style={{color:'#fff',fontWeight:'800'}}>Find and open chat</Text>}</Btn>
+    <Modal visible={addOpen} animationType="slide" onRequestClose={()=>setAddOpen(false)}>
+      <SafeAreaView style={{flex:1,backgroundColor:C.paper}}>
+        <View style={{backgroundColor:C.white,paddingHorizontal:18,paddingTop:12,paddingBottom:16,borderBottomWidth:1,borderColor:C.line}}>
+          <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}>
+            <View><Text style={{fontSize:22,fontWeight:'900',color:C.ink}}>Find a Guftin user</Text><Text style={{fontSize:11,color:C.muted,marginTop:4}}>Connect with someone you know</Text></View>
+            <Btn onPress={()=>setAddOpen(false)} style={{width:40,height:40,borderRadius:20,backgroundColor:C.paper,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:22,color:C.ink}}>×</Text></Btn>
           </View>
         </View>
-      </View>
+        <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{padding:18,paddingBottom:30}}>
+          <View style={{backgroundColor:C.white,borderRadius:20,padding:17,borderWidth:1,borderColor:C.line}}>
+            <View style={{width:48,height:48,borderRadius:16,backgroundColor:C.mint,alignItems:'center',justifyContent:'center',marginBottom:12}}><Text style={{fontSize:25,color:C.green}}>⌕</Text></View>
+            <Text style={{fontSize:16,fontWeight:'900',color:C.ink}}>Search by any one detail</Text>
+            <Text style={{fontSize:12,color:C.muted,lineHeight:18,marginTop:5}}>Enter the person's Guftin username, full email address, or the contact number they saved in their Guftin profile.</Text>
+            <TextInput value={contactUsername} onChangeText={setContactUsername} autoCapitalize="none" autoCorrect={false} autoComplete="off" returnKeyType="search" onSubmitEditing={()=>void addContact()} placeholder="Username, email or contact number" placeholderTextColor="#8b9b91" style={{backgroundColor:'#f5fbf7',borderRadius:14,padding:15,color:C.ink,marginTop:16,borderWidth:1,borderColor:'#d9eee1'}}/>
+            <Text style={{fontSize:10,color:C.muted,lineHeight:15,marginTop:8}}>Examples: @ali_123 · ali@gmail.com · +92 300 1234567</Text>
+            <Btn disabled={adding||!contactUsername.trim()} onPress={()=>void addContact()} style={{backgroundColor:C.green,padding:15,borderRadius:13,alignItems:'center',marginTop:15}}>{adding?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontWeight:'900',fontSize:14}}>Search Guftin</Text>}</Btn>
+          </View>
+          <View style={{backgroundColor:C.white,borderRadius:18,padding:15,marginTop:14,borderWidth:1,borderColor:C.line}}>
+            <Text style={{fontSize:14,fontWeight:'900',color:C.ink}}>Or find people in your phone contacts</Text>
+            <Text style={{fontSize:11,color:C.muted,lineHeight:17,marginTop:5}}>Guftin checks your phone contacts only after you choose this option. Your address-book names are not uploaded.</Text>
+            <Btn disabled={phoneContactsLoading} onPress={()=>void findPhoneContacts()} style={{backgroundColor:C.mint,padding:13,borderRadius:12,marginTop:12,alignItems:'center'}}>{phoneContactsLoading?<GuftinLoader color={C.green}/>:<Text style={{color:C.green,fontWeight:'900'}}>Find my Guftin contacts</Text>}</Btn>
+            {phoneContactMatches.length>0?<View style={{marginTop:10}}>{phoneContactMatches.map((item:any)=><Btn key={item.contact_id} onPress={()=>openPhoneContactChat(item)} style={{flexDirection:'row',alignItems:'center',gap:10,paddingVertical:10,borderBottomWidth:1,borderColor:C.line}}>{item.avatar_signed_url?<Avatar label={initials(item.display_name||'G')} color={colorFor(item.contact_id)} size={43} uri={item.avatar_signed_url}/>:<View style={{width:43,height:43,borderRadius:15,backgroundColor:C.mint,alignItems:'center',justifyContent:'center'}}><BrandLogo size={30}/></View>}<View style={{flex:1}}><Text style={{fontWeight:'900',color:C.ink}}>{item.display_name||item.local_contact_name||'Guftin member'}</Text><Text style={{fontSize:11,color:C.muted,marginTop:2}}>@{item.username||'member'}</Text></View><Text style={{fontSize:20,color:C.green,fontWeight:'900'}}>›</Text></Btn>)}</View>:null}
+          </View>
+          <Btn onPress={()=>{setAddOpen(false);void openGroupCreator();}} style={{padding:14,alignItems:'center',marginTop:8}}><Text style={{color:C.green,fontWeight:'900'}}>＋ Create a group instead</Text></Btn>
+        </ScrollView>
+      </SafeAreaView>
     </Modal>
   </SafeAreaView>;
 }

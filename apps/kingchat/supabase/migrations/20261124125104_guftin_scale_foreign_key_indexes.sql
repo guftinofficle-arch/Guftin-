@@ -1,0 +1,30 @@
+-- Add indexes for foreign-key columns identified by Supabase performance advisors.
+-- These indexes reduce scans during joins and parent-row updates/deletes.
+create index if not exists idx_guftin_site_settings_updated_by_fk on public.guftin_site_settings(updated_by);
+create index if not exists idx_kc_call_recordings_requested_by_fk on public.kc_call_recordings(requested_by);
+create index if not exists idx_kc_channel_analytics_actor_id_fk on public.kc_channel_analytics_events(actor_id);
+create index if not exists idx_kc_channel_analytics_message_id_fk on public.kc_channel_analytics_events(message_id);
+create index if not exists idx_kc_chat_folder_items_conversation_id_fk on public.kc_chat_folder_items(conversation_id);
+create index if not exists idx_kc_communities_owner_id_fk on public.kc_communities(owner_id);
+create index if not exists idx_kc_community_groups_added_by_fk on public.kc_community_groups(added_by);
+create index if not exists idx_kc_community_members_user_id_fk on public.kc_community_members(user_id);
+create index if not exists idx_kc_group_event_rsvps_user_id_fk on public.kc_group_event_rsvps(user_id);
+create index if not exists idx_kc_group_events_creator_id_fk on public.kc_group_events(creator_id);
+create index if not exists idx_kc_message_edit_history_editor_id_fk on public.kc_message_edit_history(editor_id);
+create index if not exists idx_kc_message_transcriptions_user_id_fk on public.kc_message_transcriptions(user_id);
+create index if not exists idx_kc_message_translations_user_id_fk on public.kc_message_translations(user_id);
+create index if not exists idx_kc_poll_votes_user_id_fk on public.kc_poll_votes(user_id);
+create index if not exists idx_kc_polls_conversation_id_fk on public.kc_polls(conversation_id);
+create index if not exists idx_kc_polls_creator_id_fk on public.kc_polls(creator_id);
+create index if not exists idx_kc_privacy_exceptions_target_user_id_fk on public.kc_privacy_exceptions(target_user_id);
+create index if not exists idx_kc_saved_items_conversation_id_fk on public.kc_saved_items(conversation_id);
+create index if not exists idx_kc_saved_items_message_id_fk on public.kc_saved_items(message_id);
+create index if not exists idx_kc_scheduled_messages_conversation_id_fk on public.kc_scheduled_messages(conversation_id);
+create index if not exists idx_kc_scheduled_messages_sent_message_id_fk on public.kc_scheduled_messages(sent_message_id);
+create index if not exists idx_kc_spam_appeals_appellant_id_fk on public.kc_spam_appeals(appellant_id);
+create index if not exists idx_kc_spam_reports_message_id_fk on public.kc_spam_reports(message_id);
+create index if not exists idx_kc_spam_reports_reporter_id_fk on public.kc_spam_reports(reporter_id);
+create index if not exists idx_kc_spam_reports_target_user_id_fk on public.kc_spam_reports(target_user_id);
+create index if not exists idx_kc_user_blocks_blocked_user_id_fk on public.kc_user_blocks(blocked_user_id);
+create index if not exists idx_kc_web_conversations_created_by_fk on public.kc_web_conversations(created_by);
+create index if not exists idx_kc_web_conversations_user_high_fk on public.kc_web_conversations(user_high);

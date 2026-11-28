@@ -91,6 +91,26 @@ module.exports = ({ config }) => ({
         autoVerify: false,
         data: [{ scheme: "kingchat", host: "channel" }],
         category: ["BROWSABLE", "DEFAULT"]
+      },
+      {
+        action: "VIEW",
+        autoVerify: true,
+        data: [
+          { scheme: "https", host: "guftin-official.pages.dev", pathPrefix: "/community" },
+          { scheme: "https", host: "guftin-official.pages.dev", pathPrefix: "/business" },
+          { scheme: "https", host: "guftin-official.pages.dev", pathPrefix: "/store" }
+        ],
+        category: ["BROWSABLE", "DEFAULT"]
+      },
+      {
+        action: "VIEW",
+        autoVerify: false,
+        data: [
+          { scheme: "kingchat", host: "community" },
+          { scheme: "kingchat", host: "business" },
+          { scheme: "kingchat", host: "store" }
+        ],
+        category: ["BROWSABLE", "DEFAULT"]
       }
     ],
     adaptiveIcon: {
@@ -120,6 +140,7 @@ module.exports = ({ config }) => ({
     buildNumber: "18",
     icon: "./assets/guftin-icon.png",
     supportsTablet: true,
+    associatedDomains: ["applinks:guftin-official.pages.dev"],
     infoPlist: {
       ...config.ios?.infoPlist,
       NSCameraUsageDescription: "Guftin uses the camera for photos and video calls.",

@@ -7,6 +7,7 @@ on:
     branches:
       - release/guftin-v1.5.8-no-email-verification
       - release/guftin-v1.5.7-no-email-verification
+      - feature/guftin-20-feature-upgrade
     paths:
       - "apps/kingchat/**"
       - ".github/workflows/guftin-android-apk.yml"
@@ -16,7 +17,7 @@ permissions:
 
 concurrency:
   group: guftin-android-qa-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   build-and-smoke-test:
@@ -101,12 +102,32 @@ jobs:
         working-directory: apps/kingchat
         run: npx expo prebuild --platform android --no-install
 
+      - name: Configure Gradle memory for Android release build
+        working-directory: apps/kingchat/android
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("gradle.properties")
+          current = p.read_text() if p.exists() else ""
+          settings = {
+              "org.gradle.jvmargs": "-Xmx4g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8",
+              "org.gradle.workers.max": "2",
+              "org.gradle.parallel": "false",
+              "kotlin.daemon.jvmargs": "-Xmx1536m",
+          }
+          lines = [line for line in current.splitlines() if not any(line.startswith(key + "=") for key in settings)]
+          lines.extend(f"{key}={value}" for key, value in settings.items())
+          p.write_text("\n".join(lines) + "\n")
+          print(p.read_text())
+          PY
+
       - name: Compile self-contained Android release APK
         working-directory: apps/kingchat/android
         shell: bash
         run: |
           chmod +x ./gradlew
-          ./gradlew --no-daemon --stacktrace assembleRelease
+          ./gradlew --no-daemon --max-workers=2 --stacktrace assembleRelease
 
       - name: Verify APK output and package metadata
         working-directory: apps/kingchat

@@ -1,0 +1,33 @@
+name: Guftin TypeScript Check
+
+on:
+  push:
+    branches:
+      - feature/guftin-20-feature-upgrade
+    paths:
+      - "apps/kingchat/**"
+      - ".github/workflows/guftin-typecheck.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  typecheck:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: apps/kingchat
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          ref: feature/guftin-20-feature-upgrade
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: TypeScript validation
+        run: npm run typecheck
