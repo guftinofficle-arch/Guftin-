@@ -6098,7 +6098,7 @@ function GuftinApp() {
       </KeyboardAvoidingView>
     </Modal>
     <Modal visible={!!selectedBusinessProduct} transparent animationType="slide" onRequestClose={()=>setSelectedBusinessProduct(null)}>
-      <View style={{flex:1,backgroundColor:'#0009',justifyContent:'flex-end'}}><View style={{backgroundColor:C.white,borderTopLeftRadius:24,borderTopRightRadius:24,padding:18,maxHeight:'90%'}}>
+      <View style={{flex:1,backgroundColor:C.white,justifyContent:'flex-start'}}><View style={{backgroundColor:C.white,padding:18,height:'100%'}}>
         <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}><Text style={{fontSize:19,fontWeight:'900',color:C.ink,flex:1}}>Product details</Text><Btn onPress={()=>setSelectedBusinessProduct(null)}><Text style={{fontSize:20,color:C.ink}}>✕</Text></Btn></View>
         <ScrollView>
           {selectedBusinessProduct?.image_signed_url?<Image source={{uri:selectedBusinessProduct.image_signed_url}} style={{width:'100%',height:240,borderRadius:15,marginTop:12}} resizeMode="cover"/>:null}
@@ -6106,7 +6106,7 @@ function GuftinApp() {
           <Text style={{fontSize:17,fontWeight:'900',color:C.green,marginTop:7}}>{String(selectedBusinessProduct?.currency_code||'PKR')+' '+String(selectedBusinessProduct?.price??'')}</Text>
           <Text style={{fontSize:12,color:C.muted,marginTop:7}}>{selectedBusinessProduct?.availability||'available'}</Text>
           <Text style={{fontSize:13,color:C.ink,lineHeight:20,marginTop:12}}>{selectedBusinessProduct?.description||'Contact the store for more information.'}</Text>
-          <Btn onPress={()=>void contactBusinessSeller(selectedBusinessProduct)} style={{backgroundColor:C.green,padding:14,borderRadius:12,alignItems:'center',marginTop:18}}><Text style={{color:'#fff',fontWeight:'900'}}>Buy / Contact seller</Text></Btn>
+          <Btn disabled={selectedBusinessProduct?.availability==='out_of_stock'} onPress={()=>void contactBusinessSeller(selectedBusinessProduct)} style={{backgroundColor:selectedBusinessProduct?.availability==='out_of_stock'?C.line:C.green,padding:14,borderRadius:12,alignItems:'center',marginTop:18}}><Text style={{color:'#fff',fontWeight:'900'}}>{selectedBusinessProduct?.availability==='out_of_stock'?'Currently unavailable':'Buy / Contact seller'}</Text></Btn>
           <Text style={{fontSize:10,color:C.muted,textAlign:'center',marginTop:7}}>This opens the seller's saved WhatsApp number or email. Payment is arranged directly with the seller.</Text>
         </ScrollView>
       </View></View>
