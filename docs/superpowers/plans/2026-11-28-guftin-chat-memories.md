@@ -42,12 +42,12 @@
 - Produces: shouldShowChatInFolder(chat, folder): boolean.
 - Unread uses chat.unread > 0; Friends includes only kind === direct; Groups includes only kind === group; Important and user-created folders use explicit membership.
 
-- [ ] Write tests for Friends, Groups, Unread, Important and custom folders.
-- [ ] Run node --test tests/chat-folder-filters.test.mjs; confirm the expected missing behavior fails before implementation.
-- [ ] Implement the pure helper and declaration file.
-- [ ] Replace the inline App.tsx filter with the tested helper.
-- [ ] Add the test script and branch-scoped CI workflow.
-- [ ] Run targeted tests and npm run typecheck.
+- [x] Write tests for Friends, Groups, Unread, Important and custom folders.
+- [x] Run node --test tests/chat-folder-filters.test.mjs; confirm the expected missing behavior fails before implementation.
+- [x] Implement the pure helper and declaration file.
+- [x] Replace the inline App.tsx filter with the tested helper.
+- [x] Add the test script and branch-scoped CI workflow.
+- [x] Run targeted tests and npm run typecheck.
 
 ### Task 2: Group photo gallery and animated chat feedback
 
@@ -58,10 +58,10 @@
 - Consumes: existing MessageRow[], kc_message_reactions, kc_message_effects, and sticker callbacks.
 - Produces: a group-only Photo Gallery section and animated reaction/effect presentation.
 
-- [ ] Add a group-only gallery tab and a photo grid sourced from decrypted, currently loaded conversation messages.
-- [ ] Animate reaction feedback after a successful save; animate existing send-effect metadata.
-- [ ] Keep group reactions available for text, image/sticker and file messages.
-- [ ] Run npm run typecheck.
+- [x] Add a group-only gallery tab and a photo grid sourced from decrypted, currently loaded conversation messages.
+- [x] Animate reaction feedback after a successful save; animate existing send-effect metadata.
+- [x] Keep group reactions available for text, image/sticker and file messages.
+- [x] Run npm run typecheck.
 
 ### Task 3: HoloSpace timeline gallery
 
@@ -73,11 +73,11 @@
 - Consumes: holospace_rooms, holospace_members, holospace_memories, holospace_gallery, private bucket holospace-gallery.
 - Produces: HolospaceTimelineScreen({ userId, onClose }).
 
-- [ ] Add a HoloSpace entry point from the Magic Moments home screen.
-- [ ] Load owned rooms and accepted memberships; deduplicate room IDs.
-- [ ] Load memories and gallery records in reverse chronological order; create one-hour signed URLs only for media paths returned under RLS.
-- [ ] Render a timeline with memory cards, photo/video cards, room labels and a useful empty state.
-- [ ] Run npm run typecheck.
+- [x] Add a HoloSpace entry point from the Magic Moments home screen.
+- [x] Load owned rooms and accepted memberships; deduplicate room IDs.
+- [x] Load memories and gallery records in reverse chronological order; create one-hour signed URLs only for media paths returned under RLS.
+- [x] Render a timeline with memory cards, photo/video cards, room labels and a useful empty state.
+- [x] Run npm run typecheck.
 
 ### Task 4: Magic Moments reveal countdown and animation
 
@@ -91,13 +91,13 @@
 - Produces: getMagicMomentCountdown(revealAt, now): { isReady, days, hours, minutes, seconds } | null.
 - Reveal writes status='revealed' and revealed_at only for the current creator, only after reveal_at <= now().
 
-- [ ] Write tests for invalid, future and elapsed dates.
-- [ ] Run node --test tests/magic-moment-countdown.test.mjs; confirm the date-helper behavior is missing before implementation.
-- [ ] Implement the date helper.
-- [ ] Add a 1-second countdown update while a scheduled moment is open.
-- [ ] Add a creator-only reveal button when the countdown ends and an animated reveal state after the DB update.
-- [ ] Keep recipients' scheduled content governed by existing RLS.
-- [ ] Run targeted tests and npm run typecheck.
+- [x] Write tests for invalid, future and elapsed dates.
+- [x] Run node --test tests/magic-moment-countdown.test.mjs; confirm the date-helper behavior is missing before implementation.
+- [x] Implement the date helper.
+- [x] Add a 1-second countdown update while a scheduled moment is open.
+- [x] Add a creator-only reveal button when the countdown ends and an animated reveal state after the DB update.
+- [x] Keep recipients' scheduled content governed by existing RLS.
+- [x] Run targeted tests and npm run typecheck.
 
 ### Task 5: Database migration hardening and final validation
 
@@ -105,7 +105,19 @@
 - Modify: apps/kingchat/supabase/migrations/20261128160000_guftin_chat_libraries_and_defaults.sql
 - Review: apps/kingchat/supabase/migrations/20261128150000_guftin_chat_experience.sql
 
-- [ ] Revoke direct execute on the public security-definer folder seed and signup trigger functions; keep trigger behavior intact.
-- [ ] Verify all new chat and LIVEVERSE tables remain RLS-enabled with membership/ownership constraints.
-- [ ] Run node --test tests/*.test.mjs and npm run typecheck.
-- [ ] Review the final diff and report that live Supabase migration application and APK builds remain separate deployment steps unless explicitly requested.
+- [x] Revoke direct execute on the public security-definer folder seed and signup trigger functions; keep trigger behavior intact.
+- [x] Verify all new chat and LIVEVERSE tables remain RLS-enabled with membership/ownership constraints.
+- [x] Run node --test tests/*.test.mjs and npm run typecheck.
+- [x] Review the final diff and report that live Supabase migration application and APK builds remain separate deployment steps unless explicitly requested.
+
+
+## Completion and verification record
+
+- Implementation is committed on `feature/guftin-chat-memories-2026-11-28`.
+- GitHub Actions run `46153980309` completed successfully on commit `febaf2bf0e612d742ade87caa80cd1f1e763f056`: focused Node feature tests and `npm run typecheck` both passed.
+- Three original chat notification WAV assets are generated by `scripts/prepare-chat-notification-sounds.js` during Expo config resolution and registered in the `expo-notifications` config plugin.
+- Per-chat Android channels use the selected custom sound and vibration profile. Per-recipient push delivery honors notification mute and preview visibility, and iOS push payloads receive the selected bundled sound.
+- HoloSpace media stays in the existing private `holospace-gallery` bucket; the timeline uses RLS-visible rows and one-hour signed URLs only.
+- Group photo gallery and chat search/library operate on decrypted conversation messages currently loaded by the client. They do not bypass E2EE or scan encrypted database envelopes.
+- The two chat schema migrations and updated push Edge Function are included in this branch but have not been applied/deployed to the live Supabase project. Apply the migrations before deploying the updated push function; the function retains legacy push behavior if the preference table is not yet deployed.
+- Android/iOS binaries have not been built. Custom notification sounds are build-time assets, so a new native app build is required before those sounds can play on devices.
