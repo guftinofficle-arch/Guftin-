@@ -32,6 +32,21 @@ jobs:
         with:
           node-version: "22"
 
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+
+      - name: Install Android 36 SDK and NDK
+        run: |
+          sdkmanager --install "platforms;android-36" "build-tools;36.0.0" "ndk;27.1.12297006"
+
       - name: Validate release metadata
         working-directory: apps/kingchat
         run: |
@@ -74,20 +89,21 @@ jobs:
           npx --yes eas-cli@latest whoami
           npx --yes eas-cli@latest project:info
 
-      - name: Build Google Play Store AAB with EAS
+      - name: Build signed Google Play Store AAB locally with EAS
         working-directory: apps/kingchat
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
           CI: "1"
-        run: npx --yes eas-cli@latest build --platform android --profile play-store --non-interactive
-
-      - name: Download completed AAB
-        working-directory: apps/kingchat
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EAS_LOCAL_BUILD_ARTIFACTS_DIR: ${{ github.workspace }}/apps/kingchat/dist
         run: |
           mkdir -p dist
-          npx --yes eas-cli@latest build:download --latest --platform android --output ./dist/guftin-1.6.2-play-store.aab
+          npx --yes eas-cli@latest build --platform android --profile play-store --local --non-interactive
+          AAB_PATH="$(find dist -maxdepth 2 -type f -name '*.aab' -print -quit)"
+          if [ -z "$AAB_PATH" ]; then
+            echo "::error::EAS local build did not produce an AAB artifact."
+            exit 1
+          fi
+          cp "$AAB_PATH" ./dist/guftin-1.6.2-play-store.aab
           test -s ./dist/guftin-1.6.2-play-store.aab
           file ./dist/guftin-1.6.2-play-store.aab
           ls -lh ./dist/guftin-1.6.2-play-store.aab
