@@ -280,6 +280,7 @@ const THEMES:any = {
 type Chat = { id:string; name:string; avatar:string; avatarUrl?:string; color:string; last:string; time:string; unread:number; online:boolean; kind:string; lastAt:number; isOfficial?:boolean; isVerified?:boolean; isChannelOwner?:boolean; inviteCode?:string; isPublic?:boolean; ownerId?:string; description?:string; hasConversationActivity?:boolean; hasCallActivity?:boolean; pendingContactId?:string; hasPendingActivity?:boolean };
 type Message = { id:string; conversation_id:string; sender_id:string|null; body:string|null; message_type:string; attachment_url?:string|null; created_at:string; edited_at?:string|null; mine:boolean; deleted_at?:string|null; pending?:boolean };
 const sortInboxChats=(items:Chat[])=>items.slice().sort((a,b)=>(Number(!!b.isOfficial)-Number(!!a.isOfficial))||((Number(b.lastAt)||0)-(Number(a.lastAt)||0)));
+const isGuftinUuid=(value:any):value is string=>typeof value==='string'&&/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(value);
 const normalizeGuftinPhone=(value:string):string|null=>{
   const raw=String(value||'').trim();
   if(!raw)return null;
@@ -2721,7 +2722,8 @@ function GuftinApp() {
   },[session,respondToCall,acceptCallWhenReady,loadInbox,joinCall,backgroundCallsEnabled]);
 
   const loadMessages=useCallback(async(conversationId:string)=>{
-    if(!session||clearingConversationIds.current.has(conversationId))return;
+    // Local pending IDs are not Postgres UUIDs; never query message history with them.
+    if(!session||!isGuftinUuid(conversationId)||clearingConversationIds.current.has(conversationId))return;
     const loadGeneration=clearGenerationByConversation.current.get(conversationId)||0;
     const messageCacheKey='guftin-cache-messages:'+session.user.id+':'+conversationId;
     let cachedMessages:Message[]=[];
@@ -2860,7 +2862,7 @@ function GuftinApp() {
   loadMessagesRef.current=loadMessages;
 
   useEffect(()=>{
-    if(session&&active&&!active.pendingContactId)void loadMessages(active.id);
+    if(session&&active&&!active.pendingContactId&&isGuftinUuid(active.id))void loadMessages(active.id);
   },[session?.user?.id,deviceIdentity?.deviceId,active?.id,loadMessages]);
 
   const refresh=async()=>{
@@ -2943,12 +2945,19 @@ function GuftinApp() {
   };
 
   const ensureActiveDirectConversation=async(chat:Chat):Promise<Chat>=>{
-    if(!chat.pendingContactId)return chat;
+    // Older cached contacts may contain only the local pending:<user UUID> id.
+    // Resolve that placeholder before any message, media, or call flow reaches Postgres.
+    const pendingContactId=chat.pendingContactId||(chat.id.startsWith('pending:')?chat.id.slice('pending:'.length):undefined);
+    if(!pendingContactId){
+      if(!isGuftinUuid(chat.id))throw new Error('This chat has an outdated temporary ID. Reopen the contact and try again.');
+      return chat;
+    }
+    if(!isGuftinUuid(pendingContactId))throw new Error('This contact reference is invalid. Reopen the contact and try again.');
     if(!session?.user?.id)throw new Error('Sign in required to start this conversation.');
-    const {data,error}=await supabase.rpc('kc_start_direct_conversation',{p_contact_id:chat.pendingContactId});
+    const {data,error}=await supabase.rpc('kc_start_direct_conversation',{p_contact_id:pendingContactId});
     if(error)throw error;
     const conversationId=typeof data==='string'?data:Array.isArray(data)?data[0]:data?.conversation_id;
-    if(typeof conversationId!=='string'||!conversationId)throw new Error('Guftin could not create the conversation. Please try again.');
+    if(!isGuftinUuid(conversationId))throw new Error('Guftin could not create a valid conversation. Please try again.');
     const ready:Chat={
       ...chat,id:conversationId,pendingContactId:undefined,
       last:'No messages yet',time:'',lastAt:Date.now(),
@@ -3502,6 +3511,29 @@ function GuftinApp() {
         if(clearingConversationIds.current.has(pending.conversation_id))continue;
         if(!force&&Number(pending.nextAttemptAt||0)>Date.now()){remaining.push(pending);continue;}
         try{
+          const legacyConversationId=String(pending.conversation_id||'');
+          if(legacyConversationId.startsWith('pending:')){
+            const contactId=legacyConversationId.slice('pending:'.length);
+            if(!isGuftinUuid(contactId))throw new Error('This saved message has an invalid temporary chat reference. Reopen the contact and resend it.');
+            const {data:resolvedData,error:resolveError}=await supabase.rpc('kc_start_direct_conversation',{p_contact_id:contactId});
+            if(resolveError)throw resolveError;
+            const resolvedConversationId=typeof resolvedData==='string'?resolvedData:Array.isArray(resolvedData)?resolvedData[0]:resolvedData?.conversation_id;
+            if(!isGuftinUuid(resolvedConversationId))throw new Error('The saved message could not be linked to a valid conversation.');
+            for(const queued of queue){if(queued.conversation_id===legacyConversationId)queued.conversation_id=resolvedConversationId;}
+            pending.conversation_id=resolvedConversationId;
+            await AsyncStorage.setItem(queueKey,JSON.stringify(queue));
+            setMessages(prev=>{
+              const migrated=(prev[legacyConversationId]||[]).map(item=>({...item,conversation_id:resolvedConversationId}));
+              return {...prev,[resolvedConversationId]:[...(prev[resolvedConversationId]||[]),...migrated],[legacyConversationId]:[]};
+            });
+            setActive(prev=>prev?.id===legacyConversationId?{...prev,id:resolvedConversationId,pendingContactId:undefined}:prev);
+            setChats(prev=>{
+              const next=sortInboxChats(prev.map(chat=>chat.id===legacyConversationId?{...chat,id:resolvedConversationId,pendingContactId:undefined}:chat));
+              void AsyncStorage.setItem('guftin-cache-inbox:'+session.user.id,JSON.stringify(next)).catch(()=>{});
+              return next;
+            });
+          }
+          if(!isGuftinUuid(pending.conversation_id))throw new Error('This saved message does not have a valid conversation. Reopen the contact and resend it.');
           const {data:members,error:membersError}=await supabase.from('kc_conversation_members')
             .select('user_id').eq('conversation_id',pending.conversation_id);
           if(membersError)throw membersError;
@@ -3609,6 +3641,25 @@ function GuftinApp() {
         let plainBytes:Uint8Array|undefined;
         let outboundCipher:Uint8Array|undefined;
         try{
+          const legacyConversationId=String(pending.conversation_id||'');
+          if(legacyConversationId.startsWith('pending:')){
+            const contactId=legacyConversationId.slice('pending:'.length);
+            if(!isGuftinUuid(contactId))throw new Error('This saved attachment has an invalid temporary chat reference. Reopen the contact and resend it.');
+            const {data:resolvedData,error:resolveError}=await supabase.rpc('kc_start_direct_conversation',{p_contact_id:contactId});
+            if(resolveError)throw resolveError;
+            const resolvedConversationId=typeof resolvedData==='string'?resolvedData:Array.isArray(resolvedData)?resolvedData[0]:resolvedData?.conversation_id;
+            if(!isGuftinUuid(resolvedConversationId))throw new Error('The saved attachment could not be linked to a valid conversation.');
+            for(const queued of queue){if(queued.conversation_id===legacyConversationId)queued.conversation_id=resolvedConversationId;}
+            pending.conversation_id=resolvedConversationId;
+            await AsyncStorage.setItem(queueKey,JSON.stringify(queue));
+            setActive(prev=>prev?.id===legacyConversationId?{...prev,id:resolvedConversationId,pendingContactId:undefined}:prev);
+            setChats(prev=>{
+              const next=sortInboxChats(prev.map(chat=>chat.id===legacyConversationId?{...chat,id:resolvedConversationId,pendingContactId:undefined}:chat));
+              void AsyncStorage.setItem('guftin-cache-inbox:'+session.user.id,JSON.stringify(next)).catch(()=>{});
+              return next;
+            });
+          }
+          if(!isGuftinUuid(pending.conversation_id))throw new Error('This saved attachment does not have a valid conversation. Reopen the contact and resend it.');
           let outboundBody=pending.outboundBody as string|undefined;
           let outboundFileUri=pending.outboundFileUri as string|undefined;
           let objectPath=pending.objectPath as string|undefined;
