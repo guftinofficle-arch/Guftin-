@@ -90,7 +90,13 @@ export function MagicMomentsScreen({userId,chats=[],getDeviceIdentity,onBack,onO
  useEffect(()=>{
   if(!userId)return;
   const channel=supabase.channel('magic-moments-'+userId)
-   .on('postgres_changes',{event:'*',schema:'public',table:'magic_moments'},()=>void load())
+   .on('postgres_changes',{event:'*',schema:'public',table:'magic_moments'},(payload:any)=>{
+    void load();
+    const changed=payload.new as Moment;
+    if(selected&&changed?.id===selected.id&&changed.status==='revealed'){
+     void openMoment({...selected,...changed});
+    }
+   })
    .on('postgres_changes',{event:'*',schema:'public',table:'magic_moment_items'},()=>{if(selected)void openMoment(selected);})
    .on('postgres_changes',{event:'*',schema:'public',table:'magic_moment_notifications',filter:'recipient_id=eq.'+userId},()=>void load())
    .subscribe();
