@@ -3319,6 +3319,7 @@ function GuftinApp() {
     const phone=String(selectedBusinessStore?.contact_phone||'').replace(/[^0-9]/g,'');
     const username=String(selectedBusinessStore?.contact_username||'').trim().replace(/^@/,'');
     const email=String(selectedBusinessStore?.contact_email||'').trim();
+    const message=encodeURIComponent('Hello, I am interested in '+(product?.title||'your products')+' on your Guftin store.');
     try{
       if(username){
         const {data,error}=await supabase.rpc('kc_save_contact_by_username',{p_username:username});
