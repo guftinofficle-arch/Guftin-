@@ -1194,7 +1194,20 @@ function GuftinApp() {
   const [businessDraftName,setBusinessDraftName]=useState('');
   const [businessDraftDescription,setBusinessDraftDescription]=useState('');
   const [businessDraftEmail,setBusinessDraftEmail]=useState('');
+  const [businessDraftPhone,setBusinessDraftPhone]=useState('');
+  const [businessLogoAsset,setBusinessLogoAsset]=useState<any>(null);
   const [businessBusy,setBusinessBusy]=useState(false);
+  const [productEditorOpen,setProductEditorOpen]=useState(false);
+  const [productDraftTitle,setProductDraftTitle]=useState('');
+  const [productDraftDescription,setProductDraftDescription]=useState('');
+  const [productDraftPrice,setProductDraftPrice]=useState('');
+  const [productDraftAvailability,setProductDraftAvailability]=useState<'available'|'out_of_stock'|'preorder'>('available');
+  const [productDraftPublished,setProductDraftPublished]=useState(true);
+  const [productImageAsset,setProductImageAsset]=useState<any>(null);
+  const [productEditing,setProductEditing]=useState<any>(null);
+  const [productBusy,setProductBusy]=useState(false);
+  const [selectedBusinessProduct,setSelectedBusinessProduct]=useState<any>(null);
+  const [communityGroupTarget,setCommunityGroupTarget]=useState<string|null>(null);
   const [pendingChannelInvite,setPendingChannelInvite]=useState<string|null>(null);
   const [pendingCommunityInvite,setPendingCommunityInvite]=useState<string|null>(null);
   const [communityInvitePreview,setCommunityInvitePreview]=useState<any>(null);
@@ -1247,6 +1260,11 @@ function GuftinApp() {
     if(error||!data?.signedUrl)return null;
     signedMediaCache.current.set(path,{url:data.signedUrl,expiresAt:Date.now()+23*60*60*1000});
     return data.signedUrl;
+  },[]);
+  const getSignedBusinessMediaUrl=useCallback(async(path:string):Promise<string|null>=>{
+    if(!path)return null;
+    const {data,error}=await supabase.storage.from('business-store-media').createSignedUrl(path,60*60*24);
+    return error||!data?.signedUrl?null:data.signedUrl;
   },[]);
 
   useEffect(()=>{
@@ -2986,15 +3004,18 @@ function GuftinApp() {
     try{
       const [cm,pr,bp,stores]=await Promise.all([
         supabase.from('kc_community_members').select('community_id,role,joined_at,kc_communities!inner(id,title,owner_id,created_at)').eq('user_id',session.user.id).order('joined_at',{ascending:false}).limit(60),
-        supabase.from('kc_business_products').select('id,owner_id,title,description,price,currency_code,availability,is_published,created_at').eq('is_published',true).order('created_at',{ascending:false}).limit(40),
-        supabase.from('kc_business_profiles').select('user_id,store_name,description,contact_email,currency_code').eq('user_id',session.user.id).maybeSingle(),
-        supabase.from('kc_business_profiles').select('user_id,store_name,description,contact_email,currency_code,created_at').order('created_at',{ascending:false}).limit(100)
+        supabase.from('kc_business_products').select('id,owner_id,title,description,price,currency_code,availability,is_published,image_path,created_at').eq('is_published',true).order('created_at',{ascending:false}).limit(40),
+        supabase.from('kc_business_profiles').select('user_id,store_name,description,contact_email,contact_phone,currency_code,logo_path,tagline').eq('user_id',session.user.id).maybeSingle(),
+        supabase.from('kc_business_profiles').select('user_id,store_name,description,contact_email,contact_phone,currency_code,logo_path,tagline,created_at').order('created_at',{ascending:false}).limit(100)
       ]);
       if(cm.error)throw cm.error;if(pr.error)throw pr.error;if(bp.error)throw bp.error;if(stores.error)throw stores.error;
       setHubCommunities((cm.data||[]).map((r:any)=>({...((Array.isArray(r.kc_communities)?r.kc_communities[0]:r.kc_communities)||{}),role:r.role})).filter((x:any)=>x.id));
-      setHubBusinessProducts(pr.data||[]);setMyBusinessProfile(bp.data||null);setHubBusinessStores(stores.data||[]);
+      const productsWithImages=await Promise.all((pr.data||[]).map(async(row:any)=>({...row,image_signed_url:row.image_path?await getSignedBusinessMediaUrl(row.image_path):null})));
+      const storesWithLogos=await Promise.all((stores.data||[]).map(async(row:any)=>({...row,logo_signed_url:row.logo_path?await getSignedBusinessMediaUrl(row.logo_path):null})));
+      const myProfile=bp.data?{...bp.data,logo_signed_url:bp.data.logo_path?await getSignedBusinessMediaUrl(bp.data.logo_path):null}:null;
+      setHubBusinessProducts(productsWithImages);setMyBusinessProfile(myProfile);setHubBusinessStores(storesWithLogos);
     }catch(e:any){console.warn('Updates hub load:',e?.message||e);}finally{setHubLoading(false);}
-  },[session?.user?.id]);
+  },[session?.user?.id,getSignedBusinessMediaUrl]);
   const loadCommunityDetails=async(community:any)=>{
     if(!community?.id||!session?.user?.id)return;
     setSelectedCommunity(community);setCommunityDetailsLoading(true);setCommunityInviteCode('');
@@ -3061,12 +3082,15 @@ function GuftinApp() {
     setSelectedBusinessStore({user_id:ownerId,store_name:'Business store'});setBusinessStoreLoading(true);setBusinessStoreProducts([]);
     try{
       const [profileResult,productsResult]=await Promise.all([
-        supabase.from('kc_business_profiles').select('user_id,store_name,description,contact_email,currency_code').eq('user_id',ownerId).maybeSingle(),
+        supabase.from('kc_business_profiles').select('user_id,store_name,description,contact_email,contact_phone,currency_code,logo_path,tagline').eq('user_id',ownerId).maybeSingle(),
         supabase.from('kc_business_products').select('id,owner_id,title,description,price,currency_code,availability,image_path,created_at').eq('owner_id',ownerId).eq('is_published',true).order('created_at',{ascending:false}).limit(80)
       ]);
       if(profileResult.error)throw profileResult.error;if(productsResult.error)throw productsResult.error;
-      setSelectedBusinessStore(profileResult.data||{user_id:ownerId,store_name:'Business store',description:'No public store profile has been added yet.'});
-      setBusinessStoreProducts(productsResult.data||[]);
+      const profile=profileResult.data||{user_id:ownerId,store_name:'Business store',description:'No public store profile has been added yet.'};
+      const logoUrl=profile.logo_path?await getSignedBusinessMediaUrl(profile.logo_path):null;
+      setSelectedBusinessStore({...profile,logo_signed_url:logoUrl});
+      const products=await Promise.all((productsResult.data||[]).map(async(row:any)=>({...row,image_signed_url:row.image_path?await getSignedBusinessMediaUrl(row.image_path):null})));
+      setBusinessStoreProducts(products);
     }catch(error:any){Alert.alert('Business store could not open',error?.message||'Please try again.');setSelectedBusinessStore(null);}
     finally{setBusinessStoreLoading(false);}
   };
@@ -3091,12 +3115,84 @@ function GuftinApp() {
       Alert.alert('Community created','Your community is ready. You can add members now or share its invite link.');
     }catch(e:any){Alert.alert('Community not created',e?.message||'Please try again.');}finally{setCommunityBusy(false);}
   };
+  const chooseBusinessLogo=async()=>{
+    const permission=await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if(!permission.granted){Alert.alert('Permission needed','Allow photo access to choose your store logo.');return;}
+    const result=await ImagePicker.launchImageLibraryAsync({mediaTypes:['images'],allowsEditing:true,aspect:[1,1],quality:0.88});
+    if(!result.canceled&&result.assets?.[0])setBusinessLogoAsset(result.assets[0]);
+  };
+  const chooseProductImage=async()=>{
+    const permission=await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if(!permission.granted){Alert.alert('Permission needed','Allow photo access to choose a product photo.');return;}
+    const result=await ImagePicker.launchImageLibraryAsync({mediaTypes:['images'],allowsEditing:true,aspect:[4,3],quality:0.88});
+    if(!result.canceled&&result.assets?.[0])setProductImageAsset(result.assets[0]);
+  };
+  const uploadBusinessStoreImage=async(asset:any,folder:'store'|'products')=>{
+    if(!session?.user?.id||!asset?.uri)throw new Error('Choose an image first.');
+    const file=new File(asset.uri);
+    if(file.size>8*1024*1024)throw new Error('Store images must be under 8 MB.');
+    const bytes=new Uint8Array(await file.arrayBuffer());
+    const path=session.user.id+'/'+folder+'/'+Date.now()+'_'+ExpoCrypto.randomUUID()+'.jpg';
+    const {error}=await supabase.storage.from('business-store-media').upload(path,bytes,{contentType:'image/jpeg',upsert:false});
+    bytes.fill(0);
+    if(error)throw error;
+    return path;
+  };
   const saveBusinessProfile=async()=>{
     if(!session?.user?.id||!businessDraftName.trim()||businessBusy)return;setBusinessBusy(true);
     try{
-      const {data,error}=await supabase.from('kc_business_profiles').upsert({user_id:session.user.id,store_name:businessDraftName.trim().slice(0,80),description:businessDraftDescription.trim().slice(0,700)||null,contact_email:businessDraftEmail.trim()||null,currency_code:'PKR',updated_at:new Date().toISOString()},{onConflict:'user_id'}).select().single();
-      if(error)throw error;setMyBusinessProfile(data);setBusinessSetupOpen(false);Alert.alert('Business profile saved','Your Guftin business profile is now saved.');
+      let logoPath=myBusinessProfile?.logo_path||null;
+      if(businessLogoAsset)logoPath=await uploadBusinessStoreImage(businessLogoAsset,'store');
+      const phone=businessDraftPhone.trim();
+      if(phone&&!/^\+?[0-9 ()-]{7,24}$/.test(phone))throw new Error('Enter a valid contact number, including country code if needed.');
+      const {data,error}=await supabase.from('kc_business_profiles').upsert({
+        user_id:session.user.id,store_name:businessDraftName.trim().slice(0,100),
+        description:businessDraftDescription.trim().slice(0,1200)||null,
+        contact_email:businessDraftEmail.trim()||null,contact_phone:phone||null,
+        logo_path:logoPath,currency_code:'PKR',updated_at:new Date().toISOString()
+      },{onConflict:'user_id'}).select().single();
+      if(error)throw error;
+      const logoUrl=logoPath?await getSignedBusinessMediaUrl(logoPath):null;
+      setMyBusinessProfile({...data,logo_signed_url:logoUrl});setBusinessLogoAsset(null);setBusinessSetupOpen(false);
+      await loadUpdatesHub();
+      Alert.alert('Business profile saved','Your Guftin business profile is now saved.');
     }catch(e:any){Alert.alert('Business profile not saved',e?.message||'Please try again.');}finally{setBusinessBusy(false);}
+  };
+  const openProductEditor=(product?:any)=>{
+    setProductEditing(product||null);
+    setProductDraftTitle(product?.title||'');
+    setProductDraftDescription(product?.description||'');
+    setProductDraftPrice(product?.price==null?'':String(product.price));
+    setProductDraftAvailability(product?.availability||'available');
+    setProductDraftPublished(product?.is_published!==false);
+    setProductImageAsset(null);setProductEditorOpen(true);
+  };
+  const saveBusinessProduct=async()=>{
+    if(!session?.user?.id||productBusy)return;
+    const title=productDraftTitle.trim(),price=Number(productDraftPrice);
+    if(!title||!Number.isFinite(price)||price<0){Alert.alert('Product details needed','Enter a product name and a valid price.');return;}
+    setProductBusy(true);
+    try{
+      let imagePath=productEditing?.image_path||undefined;
+      if(productImageAsset)imagePath=await uploadBusinessStoreImage(productImageAsset,'products');
+      const patch={title,description:productDraftDescription.trim().slice(0,2000)||undefined,price,currency_code:'PKR',availability:productDraftAvailability,image_path:imagePath,is_published:productDraftPublished};
+      if(productEditing?.id)await upgrade20.updateBusinessProduct(productEditing.id,patch);
+      else await upgrade20.saveBusinessProduct(patch);
+      setProductEditorOpen(false);setProductEditing(null);setProductImageAsset(null);
+      await loadUpdatesHub();await openBusinessStore(session.user.id);
+      Alert.alert('Product saved',productDraftPublished?'Your product is now published in your store.':'Your product is saved as a draft.');
+    }catch(e:any){Alert.alert('Product not saved',e?.message||'Please try again.');}
+    finally{setProductBusy(false);}
+  };
+  const contactBusinessSeller=async(product?:any)=>{
+    const phone=String(selectedBusinessStore?.contact_phone||'').replace(/[^0-9]/g,'');
+    const email=String(selectedBusinessStore?.contact_email||'').trim();
+    const message=encodeURIComponent('Hello, I am interested in '+(product?.title||'your products')+' on your Guftin store.');
+    try{
+      if(phone){await Linking.openURL('https://wa.me/'+phone+'?text='+message);return;}
+      if(email){await Linking.openURL('mailto:'+email+'?subject='+encodeURIComponent('Guftin store enquiry')+'&body='+message);return;}
+      Alert.alert('Seller contact unavailable','This store has not added a contact number or email yet.');
+    }catch(e:any){Alert.alert('Could not open contact option',e?.message||'Please try again.');}
   };
   useEffect(()=>{if(tab==='Hub'&&session?.user?.id)void loadUpdatesHub();},[tab,session?.user?.id,loadUpdatesHub]);
   useEffect(()=>{
