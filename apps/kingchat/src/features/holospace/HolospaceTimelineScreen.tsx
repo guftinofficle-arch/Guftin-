@@ -89,6 +89,8 @@ export function HolospaceTimelineScreen({ userId, onClose }: {
           kind: 'memory' as const,
           body: row.body || '',
           media_path: row.media_path,
+          media_type: /\\.(mp4|mov|webm)$/i.test(String(row.media_path || '')) ? 'video' :
+            /\\.(jpe?g|png|webp|gif)$/i.test(String(row.media_path || '')) ? 'image' : null,
           created_at: row.created_at
         })),
         ...(galleryResult.data || []).map((row: any) => ({
