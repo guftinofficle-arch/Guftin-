@@ -15,6 +15,7 @@ import { CallControlButton } from './src/features/calls/CallControlButton';
 import { isStatusActive } from './src/features/status/statusUtils';
 import { saveMediaToGallery } from './src/features/media/saveMediaToGallery';
 import { ChatOptionsPopover } from './src/features/chat-menu/ChatOptionsPopover';
+import { ChatExperiencePanel } from './src/features/chat/ChatExperiencePanel';
 import { LiveverseScreen } from './src/features/liveverse/LiveverseScreen';
 import { MagicMomentsScreen } from './src/features/magic-moments/MagicMomentsScreen';
 import { getChannelAnalytics, recordChannelAnalyticsEvent } from './src/features/channels/channelAnalytics';
@@ -1015,6 +1016,8 @@ function GuftinApp() {
   const [officialMetricsLoading,setOfficialMetricsLoading]=useState(false);
   const [officialMetricsError,setOfficialMetricsError]=useState('');
   const [chatOptionsOpen,setChatOptionsOpen]=useState(false);
+  const [chatToolsOpen,setChatToolsOpen]=useState(false);
+  const [pendingMessageEffect,setPendingMessageEffect]=useState<'confetti'|'hearts'|'sparkle'|'fireworks'|'reveal'|null>(null);
   const [attachmentTrayOpen,setAttachmentTrayOpen]=useState(false);
   const [advancedCenterOpen,setAdvancedCenterOpen]=useState(false);
   const [advancedCenterLoading,setAdvancedCenterLoading]=useState(false);
@@ -3640,14 +3643,14 @@ function GuftinApp() {
     }
   },[pendingNotificationConversation,chats]);
 
-  const queueOfflineTextMessage=async(conversationId:string,text:string,chatForInbox?:Chat)=>{
+  const queueOfflineTextMessage=async(conversationId:string,text:string,chatForInbox?:Chat,effectKey?:string|null)=>{
     if(!session)return;
     if(clearingConversationIds.current.has(conversationId))throw new Error('This chat is being cleared. Please try again in a moment.');
     const id=ExpoCrypto.randomUUID();
     const localId='pending:'+id;
     const queueKey='guftin-pending-messages:'+session.user.id;
     const createdAt=new Date().toISOString();
-    const entry={id,localId,conversation_id:conversationId,text,created_at:createdAt};
+    const entry={id,localId,conversation_id:conversationId,text,created_at:createdAt,effect_key:effectKey||null};
     let queue:any[]=[];
     try{const raw=await AsyncStorage.getItem(queueKey);queue=raw?JSON.parse(raw):[];if(!Array.isArray(queue))queue=[];}catch{queue=[];}
     if(clearingConversationIds.current.has(conversationId))throw new Error('This chat is being cleared. Please try again in a moment.');
@@ -3735,6 +3738,10 @@ function GuftinApp() {
         if(error)throw error;
         const item:Message={...data,mine:true};
         setMessages(prev=>({...prev,[active.id]:[...(prev[active.id]||[]),item]}));
+        if(pendingMessageEffect){
+          try{await upgrade20.setMessageEffect(active.id,data.id,pendingMessageEffect);}catch(effectError:any){console.warn('Message send effect was not saved:',effectError?.message||effectError);}
+          setPendingMessageEffect(null);
+        }
         setDraft('');
         setChats(prev=>prev.map(chat=>chat.id===active.id?{...chat,last:body,time:timeLabel(data.created_at),lastAt:Date.now()}:chat));
         void dispatchPush(active.kind==='announcement'?'message':active.isOfficial?'official_broadcast':'message',data.id);
@@ -3749,7 +3756,8 @@ function GuftinApp() {
       const chatToSend=await ensureActiveDirectConversation(active);
       // Save locally first. The composer clears as soon as the message is safely queued;
       // server encryption, upload, and push delivery happen in the background.
-      await queueOfflineTextMessage(chatToSend.id,body,chatToSend);
+      await queueOfflineTextMessage(chatToSend.id,body,chatToSend,pendingMessageEffect);
+      setPendingMessageEffect(null);
       setSending(false);
       void flushPendingMessagesRef.current?.();
     }catch(error:any){
@@ -3821,6 +3829,10 @@ function GuftinApp() {
             }else throw inserted.error;
           }
           if(!saved)throw new Error('The queued message was not confirmed by the server.');
+          if(pending.effect_key&&['confetti','hearts','sparkle','fireworks','reveal'].includes(pending.effect_key)){
+            const {error:effectError}=await supabase.from('kc_message_effects').upsert({message_id:saved.id,conversation_id:pending.conversation_id,sender_id:session.user.id,effect_key:pending.effect_key},{onConflict:'message_id'});
+            if(effectError)console.warn('Queued message effect was not saved:',effectError.message);
+          }
           const sentItem:Message={...saved,body:pending.text,mine:true,pending:false};
           setMessages(prev=>({...prev,[pending.conversation_id]:[
             ...(prev[pending.conversation_id]||[]).filter(item=>item.id!==pending.localId&&item.id!==pending.id),sentItem
@@ -5268,7 +5280,18 @@ function GuftinApp() {
 
   useEffect(()=>{if(session?.user?.id)void loadChatFolders();else{setChatFolders([]);setActiveFolderId(null);}},[session?.user?.id]);
 
-  const visible=useMemo(()=>chats.filter(c=>c.name.toLowerCase().includes(search.toLowerCase())&&(!activeFolderId||chatFolders.some((folder:any)=>folder.id===activeFolderId&&folder.conversation_ids.includes(c.id)))),[chats,search,activeFolderId,chatFolders]);
+  const visible=useMemo(()=>chats.filter(c=>{
+    if(!c.name.toLowerCase().includes(search.toLowerCase()))return false;
+    if(!activeFolderId)return true;
+    const folder=chatFolders.find((item:any)=>item.id===activeFolderId);
+    if(!folder)return false;
+    const title=String(folder.title||'').toLowerCase();
+    const manuallyAdded=(folder.conversation_ids||[]).includes(c.id);
+    if(title==='unread')return Number(c.unread)>0;
+    if(title==='friends')return c.kind==='direct'&&manuallyAdded;
+    if(title==='groups')return c.kind==='group'&&manuallyAdded;
+    return manuallyAdded;
+  }),[chats,search,activeFolderId,chatFolders]);
   const invokeGuftinAI=async(body:any)=>{
     const {data,error}=await supabase.functions.invoke('ai-chat',{body});
     if(error)throw new Error(error.message||'Karaboz AI could not be reached.');
@@ -5521,6 +5544,7 @@ function GuftinApp() {
             <Text style={{fontSize:18,color:'#a4ffe0'}}>♫</Text><Text style={{fontSize:9,fontWeight:'900',color:'#a4ffe0'}}>LIVE</Text>
           </Btn>
         </>):null}
+        <Btn onPress={()=>setChatToolsOpen(true)} style={{backgroundColor:'#ffffff20',borderRadius:15,width:42,height:48,alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:'#ffffff35'}}><Text style={{fontSize:19,color:'#fff'}}>▦</Text><Text style={{fontSize:8,color:'#fff',fontWeight:'900'}}>TOOLS</Text></Btn>
         <Btn onPress={()=>active.kind==='channel'?showChannelOptions():setChatOptionsOpen(true)} style={{width:40,height:48,borderRadius:22,alignItems:'center',justifyContent:'center',backgroundColor:'#ffffff20'}}><Text style={{fontSize:25,fontWeight:'900',color:'#fff'}}>⋮</Text></Btn>
       </View>
       {!isOnline?<View style={{backgroundColor:'#fff1d6',paddingHorizontal:14,paddingVertical:8}}><Text style={{color:'#815500',fontSize:11,fontWeight:'800',textAlign:'center'}}>You are offline · Showing saved messages. Sending is unavailable.</Text></View>:null}
@@ -5560,6 +5584,11 @@ function GuftinApp() {
           </>}
       </View>
       {attachmentTrayOpen&&active.kind!=='channel'&&active.kind!=='announcement'?<View style={{flexDirection:'row',justifyContent:'space-around',alignItems:'center',paddingVertical:13,paddingHorizontal:5,backgroundColor:'#fff',borderTopWidth:1,borderColor:'#f0eee9',borderBottomLeftRadius:24,borderBottomRightRadius:24}}>{[{label:'Gallery',icon:'▧',color:'#7650d8',action:()=>void sendPhotosVideos()},{label:'Camera',icon:'◉',color:'#1878d8',action:()=>void (async()=>{const p=await ImagePicker.requestCameraPermissionsAsync();if(!p.granted){Alert.alert('Permission needed','Allow camera access to take a photo.');return;}const r=await ImagePicker.launchCameraAsync({mediaTypes:['images'],quality:.85});if(!r.canceled&&r.assets?.[0])await sendPhotosVideos(r.assets[0]);})()},{label:'Video',icon:'▶',color:'#dc4773',action:()=>void (async()=>{const p=await ImagePicker.requestCameraPermissionsAsync();if(!p.granted){Alert.alert('Permission needed','Allow camera access to record video.');return;}const r=await ImagePicker.launchCameraAsync({mediaTypes:['videos'],videoMaxDuration:60});if(!r.canceled&&r.assets?.[0])await sendPhotosVideos(r.assets[0]);})()},{label:'Voice',icon:'♩',color:'#12936b',action:()=>{setAttachmentTrayOpen(false);void (recording?stopVoiceRecording():startVoiceRecording());}},{label:'Stickers',icon:'☻',color:'#e88b16',action:()=>Alert.alert('Stickers','Choose an emoji sticker to send.',[{text:'😊',onPress:()=>{setDraft(v=>v+'😊');setAttachmentTrayOpen(false);}},{text:'❤️',onPress:()=>{setDraft(v=>v+'❤️');setAttachmentTrayOpen(false);}},{text:'😂',onPress:()=>{setDraft(v=>v+'😂');setAttachmentTrayOpen(false);}},{text:'Cancel',style:'cancel'}])}].map(item=><Btn key={item.label} onPress={()=>{setAttachmentTrayOpen(false);item.action();}} style={{alignItems:'center',minWidth:55}}><View style={{width:48,height:48,borderRadius:17,backgroundColor:item.color+'18',alignItems:'center',justifyContent:'center',marginBottom:5}}><Text style={{fontSize:23,color:item.color}}>{item.icon}</Text></View><Text style={{fontSize:11,color:C.ink,fontWeight:'700'}}>{item.label}</Text></Btn>)}</View>:null}
+    <ChatExperiencePanel visible={chatToolsOpen} conversationId={active?.id||''} conversationTitle={active?.name||''} conversationKind={active?.kind||'direct'} userId={session?.user?.id||''} messages={active?(messages[active.id]||[]):[]} onClose={()=>setChatToolsOpen(false)} onChooseEffect={effect=>setPendingMessageEffect(effect)} onSendSticker={sticker=>{
+      if(sticker.emoji){setDraft(value=>value+sticker.emoji);setChatToolsOpen(false);return;}
+      if(!sticker.url)return;
+      void (async()=>{try{const response=await fetch(sticker.url!);if(!response.ok)throw new Error('Sticker download failed.');const bytes=new Uint8Array(await response.arrayBuffer());const file=new File(Paths.document,'guftin-sticker-'+ExpoCrypto.randomUUID()+'.png');if(!file.exists)file.create();await file.write(bytes);bytes.fill(0);await sendPhotosVideos({uri:file.uri,type:'image',mimeType:'image/png',fileName:sticker.name+'.png'} as any);setChatToolsOpen(false);}catch(error:any){Alert.alert('Sticker not sent',error?.message||'Please try again.');}})();
+    }}/>
     {chatDetailsOpen?<View style={{position:'absolute',left:0,right:0,top:0,bottom:0,zIndex:1200,elevation:30,backgroundColor:C.paper}}>
       <SafeAreaView style={{flex:1,backgroundColor:C.paper}}>
         <StatusBar barStyle="dark-content"/>
