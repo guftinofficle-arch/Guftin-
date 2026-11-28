@@ -3462,8 +3462,10 @@ function GuftinApp() {
     }
   };
 
-  const sendMessage=async(bodyOverride?:string)=>{
-    const body=(bodyOverride??draft).trim();
+  const sendMessage=async(bodyOverride?:unknown)=>{
+    // TouchableOpacity.onPress passes a native press event. Only accept an explicit
+    // string override (used by the Schedule composer); otherwise send the draft.
+    const body=(typeof bodyOverride==='string'?bodyOverride:draft).trim();
     if(!body||!active||!session||sending||clearingConversationIds.current.has(active.id))return;
     if(active.kind==='channel'){
       if(!active.isChannelOwner){Alert.alert('Channel is read-only','Only the channel owner can publish updates.');return;}
@@ -5281,7 +5283,7 @@ function GuftinApp() {
             {active.kind!=='channel'?<Btn disabled={sending||recordingBusy} onPress={recording?stopVoiceRecording:startVoiceRecording} style={{width:42,height:42,borderRadius:15,backgroundColor:recording?'#fde8e8':C.paper,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:18,color:recording?C.red:C.green}}>{recording?'■':'🎙'}</Text></Btn>:null}
             <TextInput editable={true} value={draft} onChangeText={setDraft} onFocus={()=>requestAnimationFrame(()=>chatMessagesListRef.current?.scrollToEnd({animated:true}))} placeholder={!isOnline?'Offline · message will send when connected':active.kind==='channel'?'Write a channel update…':recording?'Recording… tap ■ to send':'Write a message...'} multiline maxLength={4000} style={{flex:1,minHeight:48,maxHeight:110,backgroundColor:'#f6f6f6',borderRadius:25,paddingHorizontal:15,paddingVertical:12,color:C.ink,textAlignVertical:'center',borderWidth:1,borderColor:'#f0eee9'}}/>
             {active.kind!=='channel'?<Btn disabled={scheduleBusy||sending} onPress={openScheduleComposer} style={{width:42,height:42,borderRadius:15,backgroundColor:'#f1f8f4',borderWidth:1,borderColor:'#d9eee2',alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:22,color:C.green}}>◷</Text></Btn>:null}
-            <Btn disabled={!draft.trim()||sending} onPress={sendMessage} style={{backgroundColor:'#08a96b',width:54,height:54,borderRadius:28,alignItems:'center',justifyContent:'center',elevation:3}}>
+            <Btn disabled={!draft.trim()||sending} onPress={()=>{void sendMessage();}} style={{backgroundColor:'#08a96b',width:54,height:54,borderRadius:28,alignItems:'center',justifyContent:'center',elevation:3}}>
               {sending?<GuftinLoader color="#fff"/>:<Text style={{color:'#fff',fontSize:20}}>➤</Text>}
             </Btn>
           </>}
