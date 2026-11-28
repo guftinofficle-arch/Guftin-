@@ -40,8 +40,8 @@ jobs:
           const pkg = require('./package.json');
           const config = fs.readFileSync('app.config.js', 'utf8');
           if (pkg.version !== '1.6.2' ||
-              !/versionCode:\\s*48/.test(config) ||
-              !/package:\\s*"com\\.guftin\\.app"/.test(config)) {
+              !config.includes('versionCode: 48') ||
+              !config.includes('package: "com.guftin.app"')) {
             throw new Error('Guftin Android release metadata mismatch.');
           }
           console.log('Guftin 1.6.2 / versionCode 48 / com.guftin.app');
