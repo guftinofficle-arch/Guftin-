@@ -3000,7 +3000,23 @@ function GuftinApp() {
   };
 
   const loadUpdatesHub=useCallback(async()=>{
-    if(!session?.user?.id)return;setHubLoading(true);
+    if(!session?.user?.id)return;
+    const hubCacheKey='guftin-cache-updates-hub:'+session.user.id;
+    try{
+      const cachedRaw=await AsyncStorage.getItem(hubCacheKey);
+      if(cachedRaw){
+        const cached=JSON.parse(cachedRaw);
+        if(cached&&Array.isArray(cached.communities)&&Array.isArray(cached.products)&&Array.isArray(cached.stores)){
+          setHubCommunities(cached.communities);
+          setHubBusinessProducts(cached.products);
+          setHubBusinessStores(cached.stores);
+          setMyBusinessProfile(cached.myProfile||null);
+          setHubLoading(false);
+        }
+      }
+    }catch(error:any){console.warn('Updates hub cache could not be read:',error?.message||error);}
+    if(!onlineRef.current){setHubLoading(false);return;}
+    setHubLoading(true);
     try{
       const [cm,pr,bp,stores]=await Promise.all([
         supabase.from('kc_community_members').select('community_id,role,joined_at,kc_communities!inner(id,title,owner_id,created_at)').eq('user_id',session.user.id).order('joined_at',{ascending:false}).limit(60),
@@ -3014,11 +3030,26 @@ function GuftinApp() {
       const storesWithLogos=await Promise.all((stores.data||[]).map(async(row:any)=>({...row,logo_signed_url:row.logo_path?await getSignedBusinessMediaUrl(row.logo_path):null})));
       const myProfile=bp.data?{...bp.data,logo_signed_url:bp.data.logo_path?await getSignedBusinessMediaUrl(bp.data.logo_path):null}:null;
       setHubBusinessProducts(productsWithImages);setMyBusinessProfile(myProfile);setHubBusinessStores(storesWithLogos);
+      void AsyncStorage.setItem(hubCacheKey,JSON.stringify({communities:(cm.data||[]).map((r:any)=>({...((Array.isArray(r.kc_communities)?r.kc_communities[0]:r.kc_communities)||{}),role:r.role})).filter((x:any)=>x.id),products:productsWithImages,stores:storesWithLogos,myProfile})).catch(()=>{});
     }catch(e:any){console.warn('Updates hub load:',e?.message||e);}finally{setHubLoading(false);}
   },[session?.user?.id,getSignedBusinessMediaUrl]);
   const loadCommunityDetails=async(community:any)=>{
     if(!community?.id||!session?.user?.id)return;
+    const communityCacheKey='guftin-cache-community:'+session.user.id+':'+community.id;
     setSelectedCommunity(community);setCommunityDetailsLoading(true);setCommunityInviteCode('');
+    try{
+      const cachedRaw=await AsyncStorage.getItem(communityCacheKey);
+      if(cachedRaw){
+        const cached=JSON.parse(cachedRaw);
+        if(cached&&Array.isArray(cached.members)&&Array.isArray(cached.groups)){
+          setCommunityMembers(cached.members);
+          setCommunityGroups(cached.groups);
+          if(cached.inviteCode)setCommunityInviteCode(cached.inviteCode);
+          setCommunityDetailsLoading(false);
+        }
+      }
+    }catch(error:any){console.warn('Community cache could not be read:',error?.message||error);}
+    if(!onlineRef.current){setCommunityDetailsLoading(false);return;}
     try{
       const [membersResult,groupsResult]=await Promise.all([
         supabase.rpc('kc_list_community_members',{p_community_id:community.id}),
@@ -3026,8 +3057,10 @@ function GuftinApp() {
       ]);
       if(membersResult.error)throw membersResult.error;
       if(groupsResult.error)throw groupsResult.error;
-      setCommunityMembers(membersResult.data||[]);
-      setCommunityGroups((groupsResult.data||[]).map((row:any)=>Array.isArray(row.kc_conversations)?row.kc_conversations[0]:row.kc_conversations).filter(Boolean));
+      const members=membersResult.data||[];
+      const groups=(groupsResult.data||[]).map((row:any)=>Array.isArray(row.kc_conversations)?row.kc_conversations[0]:row.kc_conversations).filter(Boolean);
+      setCommunityMembers(members);
+      setCommunityGroups(groups);
       if(community.role==='owner'||community.role==='admin'){
         const {data:existing,error:inviteReadError}=await supabase.from('kc_community_invites').select('invite_code').eq('community_id',community.id).is('revoked_at',null).order('created_at',{ascending:false}).limit(1).maybeSingle();
         if(inviteReadError)throw inviteReadError;
@@ -3038,7 +3071,9 @@ function GuftinApp() {
           setCommunityInviteCode(created.invite_code);
         }
       }
-    }catch(error:any){Alert.alert('Community could not open',error?.message||'Please try again.');}
+      const inviteCode=(community.role==='owner'||community.role==='admin')?communityInviteCode:'';
+      void AsyncStorage.setItem(communityCacheKey,JSON.stringify({members,groups,inviteCode})).catch(()=>{});
+    }catch(error:any){if(!isConnectivityFailure(error))Alert.alert('Community could not open',error?.message||'Please try again.');}
     finally{setCommunityDetailsLoading(false);}
   };
   const shareCommunityInvite=async()=>{
@@ -3234,6 +3269,15 @@ function GuftinApp() {
 
   const loadChannels=useCallback(async()=>{
     if(!session)return;
+    const channelCacheKey='guftin-cache-channels:'+session.user.id;
+    try{
+      const cachedRaw=await AsyncStorage.getItem(channelCacheKey);
+      if(cachedRaw){
+        const cached=JSON.parse(cachedRaw);
+        if(Array.isArray(cached)){setChannels(cached);setChannelsLoading(false);}
+      }
+    }catch(error:any){console.warn('Channel cache could not be read:',error?.message||error);}
+    if(!onlineRef.current){setChannelsLoading(false);return;}
     setChannelsLoading(true);
     try{
       const {data,error}=await supabase.from('kc_channels')
@@ -3248,7 +3292,9 @@ function GuftinApp() {
         :{data:[],error:null};
       if(followingError)throw followingError;
       const membershipMap=new Map((following||[]).map((row:any)=>[row.conversation_id,row.role]));
-      setChannels(rowsWithLogos.map(row=>({...row,isFollowing:membershipMap.has(row.conversation_id),myRole:membershipMap.get(row.conversation_id)||null})));
+      const mappedChannels=rowsWithLogos.map(row=>({...row,isFollowing:membershipMap.has(row.conversation_id),myRole:membershipMap.get(row.conversation_id)||null}));
+      setChannels(mappedChannels);
+      void AsyncStorage.setItem(channelCacheKey,JSON.stringify(mappedChannels)).catch(()=>{});
     }catch(error:any){
       if(!isConnectivityFailure(error))Alert.alert('Channels could not load',error?.message||'Please refresh and try again.');
     }finally{setChannelsLoading(false);}
