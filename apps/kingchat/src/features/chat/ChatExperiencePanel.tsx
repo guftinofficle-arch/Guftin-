@@ -105,6 +105,29 @@ export function ChatExperiencePanel({
 
   const isGroup = conversationKind === 'group';
   const activeMessages = useMemo(() => messages.filter(m => !m.pending && !m.deleted_at), [messages]);
+  const syncChatNotificationChannel = useCallback(async (next: Record<string, unknown>) => {
+    if (Platform.OS !== 'android') return;
+    const soundKey = String(next.sound_key || 'default');
+    const soundFiles: Record<string, string> = {
+      soft: 'guftin_chat_soft.wav',
+      bright: 'guftin_chat_bright.wav',
+      chime: 'guftin_chat_chime.wav'
+    };
+    const vibrationEnabled = next.vibration_enabled !== false;
+    const channelId = 'guftin-chat-' + conversationId + '-' + soundKey + '-' + (vibrationEnabled ? 'v' : 'n');
+    const vibrationPattern = !vibrationEnabled ? [] :
+      soundKey === 'soft' ? [0, 75, 65, 75] :
+      soundKey === 'bright' ? [0, 180, 90, 180] :
+      soundKey === 'chime' ? [0, 110, 120, 240] : [0, 160, 100, 160];
+    await Notifications.setNotificationChannelAsync(channelId, {
+      name: ('Guftin · ' + conversationTitle).slice(0, 100),
+      importance: Notifications.AndroidImportance.HIGH,
+      sound: soundKey === 'silent' ? null : (soundFiles[soundKey] || 'default'),
+      vibrationPattern,
+      enableVibrate: vibrationEnabled,
+      enableLights: true
+    });
+  }, [conversationId, conversationTitle]);
   const selectedSearchResults = useMemo(() => activeMessages.filter(item => {
     const body = String(item.body || '');
     const matches = !query.trim() || body.toLowerCase().includes(query.trim().toLowerCase());
@@ -144,6 +167,7 @@ export function ChatExperiencePanel({
       if (preferenceResult.status === 'fulfilled' && preferenceResult.value) {
         const loadedPreferences = preferenceResult.value as Record<string, unknown>;
         setPreferences((p: any) => ({ ...p, ...loadedPreferences }));
+        await syncChatNotificationChannel(loadedPreferences);
       }
       if (reactionResult.status === 'fulfilled' && !reactionResult.value.error) setReactions(reactionResult.value.data || []);
       if (effectResult.status === 'fulfilled' && !effectResult.value.error) setEffects(effectResult.value.data || []);
@@ -179,7 +203,7 @@ export function ChatExperiencePanel({
     } finally {
       setBusy(false);
     }
-  }, [visible, conversationId, userId, isGroup]);
+  }, [visible, conversationId, userId, isGroup, syncChatNotificationChannel]);
 
   useEffect(() => {
     if (visible) {
@@ -249,23 +273,7 @@ export function ChatExperiencePanel({
     setPreferences(next);
     try {
       await upgrade20.saveChatPreferences(conversationId, patch as any);
-      if (Platform.OS === 'android') {
-        const soundKey = String(next.sound_key || 'default');
-        const vibrationEnabled = next.vibration_enabled !== false;
-        const channelId = 'guftin-chat-' + conversationId + '-' + soundKey + '-' + (vibrationEnabled ? 'v' : 'n');
-        const vibrationPattern = !vibrationEnabled ? [] :
-          soundKey === 'soft' ? [0, 75, 65, 75] :
-          soundKey === 'bright' ? [0, 180, 90, 180] :
-          soundKey === 'chime' ? [0, 110, 120, 240] : [0, 160, 100, 160];
-        await Notifications.setNotificationChannelAsync(channelId, {
-          name: ('Guftin · ' + conversationTitle).slice(0, 100),
-          importance: Notifications.AndroidImportance.HIGH,
-          sound: soundKey === 'silent' ? null : 'default',
-          vibrationPattern,
-          enableVibrate: vibrationEnabled,
-          enableLights: true
-        });
-      }
+      await syncChatNotificationChannel(next);
     } catch (error: any) {
       setPreferences(preferences);
       Alert.alert('Notification settings', error?.message || 'Could not save these settings.');
@@ -489,7 +497,7 @@ export function ChatExperiencePanel({
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7 }}>
         {['default','soft','bright','chime','silent'].map(sound => <Action key={sound} label={sound[0].toUpperCase()+sound.slice(1)} primary={preferences.sound_key === sound} onPress={() => void savePreferences({ sound_key: sound })}/>)}
       </View>
-      <Text style={{ color: muted, fontSize: 10, marginTop: 11, lineHeight: 16 }}>Each chat uses its own Android notification channel. Default and Silent control sound playback; Soft, Bright and Chime also apply distinct vibration patterns. Custom audio tones require bundled sound assets.</Text>
+      <Text style={{ color: muted, fontSize: 10, marginTop: 11, lineHeight: 16 }}>Each chat has its own notification channel. Default, Soft, Bright and Chime use different bundled alert tones; Silent turns sound off. Vibration and message previews are controlled separately.</Text>
     </View>;
   };
 
