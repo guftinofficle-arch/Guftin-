@@ -16,6 +16,7 @@ import { isStatusActive } from './src/features/status/statusUtils';
 import { saveMediaToGallery } from './src/features/media/saveMediaToGallery';
 import { ChatOptionsPopover } from './src/features/chat-menu/ChatOptionsPopover';
 import { ChatExperiencePanel } from './src/features/chat/ChatExperiencePanel';
+import { shouldShowChatInFolder } from './src/features/chat/chatFolderFilters.mjs';
 import { LiveverseScreen } from './src/features/liveverse/LiveverseScreen';
 import { MagicMomentsScreen } from './src/features/magic-moments/MagicMomentsScreen';
 import { getChannelAnalytics, recordChannelAnalyticsEvent } from './src/features/channels/channelAnalytics';
@@ -5284,13 +5285,7 @@ function GuftinApp() {
     if(!c.name.toLowerCase().includes(search.toLowerCase()))return false;
     if(!activeFolderId)return true;
     const folder=chatFolders.find((item:any)=>item.id===activeFolderId);
-    if(!folder)return false;
-    const title=String(folder.title||'').toLowerCase();
-    const manuallyAdded=(folder.conversation_ids||[]).includes(c.id);
-    if(title==='unread')return Number(c.unread)>0;
-    if(title==='friends')return c.kind==='direct'&&manuallyAdded;
-    if(title==='groups')return c.kind==='group'&&manuallyAdded;
-    return manuallyAdded;
+    return shouldShowChatInFolder(c,folder);
   }),[chats,search,activeFolderId,chatFolders]);
   const invokeGuftinAI=async(body:any)=>{
     const {data,error}=await supabase.functions.invoke('ai-chat',{body});
