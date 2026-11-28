@@ -81,6 +81,75 @@ export const upgrade20 = {
     return unwrap(await db.from('kc_chat_folders').insert({ user_id: userId, title: cleanTitle, color }).select().single());
   },
 
+  // Chat experience: per-chat notification settings, member tags, reactions,
+  // reminders, shared attachment library, custom stickers and live reactions.
+  async getChatPreferences(conversationId: string) {
+    const userId = await requireUserId();
+    return unwrap(await db.from('kc_chat_preferences').select('*').eq('user_id', userId).eq('conversation_id', conversationId).maybeSingle());
+  },
+  async saveChatPreferences(conversationId: string, patch: { notifications_enabled?: boolean; sound_key?: 'default'|'soft'|'bright'|'chime'|'silent'; vibration_enabled?: boolean; show_preview?: boolean }) {
+    const userId = await requireUserId();
+    const allowed = ['default','soft','bright','chime','silent'];
+    if (patch.sound_key && !allowed.includes(patch.sound_key)) throw new Error('Choose a supported notification sound.');
+    return unwrap(await db.from('kc_chat_preferences').upsert({ user_id: userId, conversation_id: conversationId, ...patch, updated_at: new Date().toISOString() }, { onConflict: 'user_id,conversation_id' }).select().single());
+  },
+  async listGroupMemberTags(conversationId: string) {
+    const userId = await requireUserId();
+    return unwrap(await db.from('kc_chat_member_tags').select('*').eq('user_id', userId).eq('conversation_id', conversationId).order('created_at'));
+  },
+  async tagGroupMember(conversationId: string, memberUserId: string, tag: string) {
+    const userId = await requireUserId();
+    const clean = tag.trim().slice(0, 32);
+    if (!clean || memberUserId === userId) throw new Error('Choose a group member and a valid tag.');
+    return unwrap(await db.from('kc_chat_member_tags').upsert({ user_id: userId, conversation_id: conversationId, member_user_id: memberUserId, tag: clean }, { onConflict: 'user_id,conversation_id,member_user_id,tag' }).select().single());
+  },
+  async reactToMessage(conversationId: string, messageId: string, reaction: string) {
+    const userId = await requireUserId();
+    const allowed = ['❤️','😂','👍','😮','🔥','👏','🎉','✨','🥳','💯'];
+    if (!allowed.includes(reaction)) throw new Error('Unsupported reaction.');
+    return unwrap(await db.from('kc_message_reactions').upsert({ conversation_id: conversationId, message_id: messageId, user_id: userId, reaction }, { onConflict: 'message_id,user_id,reaction' }).select().single());
+  },
+  async listMessageReactions(conversationId: string, messageId: string) {
+    return unwrap(await db.from('kc_message_reactions').select('id,user_id,reaction,created_at').eq('conversation_id', conversationId).eq('message_id', messageId).order('created_at'));
+  },
+  async saveMessageReminder(conversationId: string, messageId: string, remindAt: string, note?: string) {
+    const userId = await requireUserId();
+    const date = new Date(remindAt);
+    if (!Number.isFinite(date.getTime()) || date.getTime() <= Date.now()) throw new Error('Choose a reminder time in the future.');
+    return unwrap(await db.from('kc_message_reminders').insert({ user_id: userId, conversation_id: conversationId, message_id: messageId, remind_at: date.toISOString(), note: note?.trim().slice(0, 240) || null }).select().single());
+  },
+  async listChatLibrary(conversationId: string, mediaKind?: 'image'|'video'|'document'|'link'|'audio'|'other') {
+    let query = db.from('kc_chat_library_items').select('*').eq('conversation_id', conversationId).order('created_at', { ascending: false }).limit(300);
+    if (mediaKind) query = query.eq('media_kind', mediaKind);
+    return unwrap(await query);
+  },
+  async addChatLibraryItem(input: { conversation_id: string; message_id: string; media_kind: 'image'|'video'|'document'|'link'|'audio'|'other'; display_name?: string; object_path?: string; link_url?: string }) {
+    const userId = await requireUserId();
+    return unwrap(await db.from('kc_chat_library_items').upsert({ ...input, added_by: userId }, { onConflict: 'conversation_id,message_id' }).select().single());
+  },
+  async listCustomStickers() {
+    const userId = await requireUserId();
+    return unwrap(await db.from('kc_custom_stickers').select('*').eq('owner_id', userId).order('created_at', { ascending: false }));
+  },
+  async saveCustomSticker(input: { pack_name: string; sticker_name: string; object_path: string; is_animated?: boolean }) {
+    const userId = await requireUserId();
+    if (!input.pack_name.trim() || !input.sticker_name.trim() || !input.object_path.trim()) throw new Error('Sticker pack, name and stored asset are required.');
+    return unwrap(await db.from('kc_custom_stickers').insert({ ...input, owner_id: userId }).select().single());
+  },
+  async setMessageEffect(conversationId: string, messageId: string, effectKey: 'confetti'|'hearts'|'sparkle'|'fireworks'|'reveal') {
+    const userId = await requireUserId();
+    return unwrap(await db.from('kc_message_effects').upsert({ conversation_id: conversationId, message_id: messageId, sender_id: userId, effect_key: effectKey }, { onConflict: 'message_id' }).select().single());
+  },
+  async sendLiveverseReaction(spaceId: string, reaction: string) {
+    const userId = await requireUserId();
+    const allowed = ['❤️','👏','🔥','🎉','😂','✨','🙌','💯'];
+    if (!allowed.includes(reaction)) throw new Error('Unsupported LIVEVERSE reaction.');
+    return unwrap(await db.from('liveverse_reactions').insert({ space_id: spaceId, user_id: userId, reaction }).select().single());
+  },
+  async listLiveverseReactions(spaceId: string) {
+    return unwrap(await db.from('liveverse_reactions').select('id,user_id,reaction,created_at').eq('space_id', spaceId).order('created_at', { ascending: false }).limit(100));
+  },
+
   // 13–15: group polls, events, and communities.
   async listPolls(conversationId: string) {
     return unwrap(await db.from('kc_polls').select('*,kc_poll_options(*),kc_poll_votes(*)').eq('conversation_id', conversationId).order('created_at', { ascending: false }));
