@@ -3088,7 +3088,7 @@ function GuftinApp() {
         productQuery
       ]);
       if(profileResult.error)throw profileResult.error;if(productsResult.error)throw productsResult.error;
-      const profile=profileResult.data||{user_id:ownerId,store_name:'Business store',description:'No public store profile has been added yet.'};
+      const profile:any=profileResult.data||{user_id:ownerId,store_name:'Business store',description:'No public store profile has been added yet.',logo_path:null,contact_phone:null,contact_email:null};
       const logoUrl=profile.logo_path?await getSignedBusinessMediaUrl(profile.logo_path):null;
       setSelectedBusinessStore({...profile,logo_signed_url:logoUrl});
       const products=await Promise.all((productsResult.data||[]).map(async(row:any)=>({...row,image_signed_url:row.image_path?await getSignedBusinessMediaUrl(row.image_path):null})));
