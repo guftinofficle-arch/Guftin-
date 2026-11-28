@@ -3134,8 +3134,10 @@ function GuftinApp() {
     const file=new File(asset.uri);
     if(file.size>8*1024*1024)throw new Error('Store images must be under 8 MB.');
     const bytes=new Uint8Array(await file.arrayBuffer());
-    const path=session.user.id+'/'+folder+'/'+Date.now()+'_'+ExpoCrypto.randomUUID()+'.jpg';
-    const {error}=await supabase.storage.from('business-store-media').upload(path,bytes,{contentType:'image/jpeg',upsert:false});
+    const mime=['image/jpeg','image/png','image/webp'].includes(asset.mimeType)?asset.mimeType:'image/jpeg';
+    const extension=mime==='image/png'?'png':mime==='image/webp'?'webp':'jpg';
+    const path=session.user.id+'/'+folder+'/'+Date.now()+'_'+ExpoCrypto.randomUUID()+'.'+extension;
+    const {error}=await supabase.storage.from('business-store-media').upload(path,bytes,{contentType:mime,upsert:false});
     bytes.fill(0);
     if(error)throw error;
     return path;
