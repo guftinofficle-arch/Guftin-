@@ -299,6 +299,12 @@ const extractCommunityInviteCode=(url:string)=>{
   if(communityIndex<0||!parts[communityIndex+1])return '';
   try{return decodeURIComponent(parts[communityIndex+1]);}catch{return parts[communityIndex+1];}
 };
+const extractBusinessStoreOwner=(url:string)=>{
+  const parts=url.replace(/[?#].*$/, '').split('/').filter(Boolean);
+  const businessIndex=parts.findIndex(part=>part.toLowerCase()==='business'||part.toLowerCase()==='store');
+  const owner=businessIndex>=0?parts[businessIndex+1]:'';
+  return owner&&/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(owner)?owner:'';
+};
 const extractChannelInviteCode=(url:string)=>{
   const parts=url.replace(/[?#].*$/, '').split('/').filter(Boolean);
   const channelIndex=parts.findIndex(part=>part.toLowerCase()==='channel');
@@ -1189,6 +1195,7 @@ function GuftinApp() {
   const [businessBusy,setBusinessBusy]=useState(false);
   const [pendingChannelInvite,setPendingChannelInvite]=useState<string|null>(null);
   const [pendingCommunityInvite,setPendingCommunityInvite]=useState<string|null>(null);
+  const [pendingBusinessStoreOwner,setPendingBusinessStoreOwner]=useState<string|null>(null);
   const [selectedCommunity,setSelectedCommunity]=useState<any>(null);
   const [communityMembers,setCommunityMembers]=useState<any[]>([]);
   const [communityGroups,setCommunityGroups]=useState<any[]>([]);
@@ -1326,6 +1333,8 @@ function GuftinApp() {
       if(inviteCode)setPendingChannelInvite(inviteCode);
       const communityCode=extractCommunityInviteCode(url);
       if(communityCode)setPendingCommunityInvite(communityCode);
+      const businessOwner=extractBusinessStoreOwner(url);
+      if(businessOwner)setPendingBusinessStoreOwner(businessOwner);
     };
     const linkSub=Linking.addEventListener('url',({url})=>handleIncomingUrl(url));
     Linking.getInitialURL().then(url=>{if(url)handleIncomingUrl(url);});
@@ -3047,6 +3056,18 @@ function GuftinApp() {
       setBusinessStoreProducts(productsResult.data||[]);
     }catch(error:any){Alert.alert('Business store could not open',error?.message||'Please try again.');setSelectedBusinessStore(null);}
     finally{setBusinessStoreLoading(false);}
+  };
+  useEffect(()=>{
+    if(!session?.user?.id||!pendingBusinessStoreOwner)return;
+    const ownerId=pendingBusinessStoreOwner;setPendingBusinessStoreOwner(null);setTab('Hub');
+    void openBusinessStore(ownerId);
+  },[session?.user?.id,pendingBusinessStoreOwner]);
+  const shareBusinessStore=async()=>{
+    const ownerId=selectedBusinessStore?.user_id;
+    if(!ownerId)return;
+    const url=Linking.createURL('/business/'+ownerId);
+    try{await Share.share({message:'Visit this Guftin business store:\n'+url});}
+    catch(error:any){Alert.alert('Store link could not be shared',error?.message||'Please try again.');}
   };
   const createHubCommunity=async()=>{
     if(!communityDraftTitle.trim()||communityBusy)return;setCommunityBusy(true);
@@ -5870,7 +5891,7 @@ function GuftinApp() {
     </Modal>
     <Modal visible={!!selectedBusinessStore} transparent animationType="slide" onRequestClose={()=>setSelectedBusinessStore(null)}>
       <View style={{flex:1,backgroundColor:'#0009',justifyContent:'flex-end'}}><View style={{backgroundColor:C.white,borderTopLeftRadius:24,borderTopRightRadius:24,padding:18,maxHeight:'88%'}}>
-        <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginBottom:10}}><View style={{flex:1}}><Text style={{fontSize:19,fontWeight:'900',color:C.ink}}>{selectedBusinessStore?.store_name||'Business store'}</Text><Text style={{fontSize:11,color:C.muted,marginTop:3}}>Guftin business storefront</Text></View><Btn onPress={()=>setSelectedBusinessStore(null)} style={{padding:9}}><Text style={{fontSize:20,color:C.ink}}>✕</Text></Btn></View>
+        <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginBottom:10}}><View style={{flex:1}}><Text style={{fontSize:19,fontWeight:'900',color:C.ink}}>{selectedBusinessStore?.store_name||'Business store'}</Text><Text style={{fontSize:11,color:C.muted,marginTop:3}}>Guftin business storefront</Text></View><View style={{flexDirection:'row',alignItems:'center',gap:6}}><Btn onPress={()=>void shareBusinessStore()} style={{padding:9,backgroundColor:C.mint,borderRadius:10}}><Text style={{color:C.green,fontWeight:'900',fontSize:11}}>Share</Text></Btn><Btn onPress={()=>setSelectedBusinessStore(null)} style={{padding:9}}><Text style={{fontSize:20,color:C.ink}}>✕</Text></Btn></View></View>
         {businessStoreLoading?<Text style={{color:C.muted,padding:10}}>Loading store…</Text>:null}
         <ScrollView><Text style={{fontSize:12,color:C.ink,lineHeight:19}}>{selectedBusinessStore?.description||'Welcome to this Guftin business store.'}</Text>{selectedBusinessStore?.contact_email?<Text style={{fontSize:11,color:C.green,marginTop:7}}>Contact: {selectedBusinessStore.contact_email}</Text>:null}<Text style={{fontWeight:'900',color:C.ink,marginTop:16,marginBottom:8}}>Published products</Text>{businessStoreProducts.length?businessStoreProducts.map((product:any)=><View key={product.id} style={{backgroundColor:C.paper,borderRadius:12,padding:12,marginBottom:8}}><Text style={{fontWeight:'900',color:C.ink}}>{product.title}</Text><Text style={{fontSize:11,color:C.muted,marginTop:4}}>{product.description||'Business listing'}</Text><Text style={{fontSize:12,color:C.green,fontWeight:'900',marginTop:6}}>{String(product.currency_code||'PKR')+' '+String(product.price)}</Text><Text style={{fontSize:10,color:C.muted,marginTop:3}}>{product.availability||'available'}</Text></View>):<Text style={{fontSize:11,color:C.muted}}>This store has no published products yet.</Text>}</ScrollView>
       </View></View>
