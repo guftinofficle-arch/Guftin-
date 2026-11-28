@@ -2205,6 +2205,16 @@ function GuftinApp() {
 
   const loadChatFolders=async()=>{
     if(!session?.user?.id)return;
+    // Keep the standard folders present for every account; users only need to
+    // add chats, while still being free to create their own extra folders.
+    const defaults=[
+      {user_id:session.user.id,title:'Unread',color:'#64748b',sort_order:0},
+      {user_id:session.user.id,title:'Friends',color:'#0ea5e9',sort_order:1},
+      {user_id:session.user.id,title:'Groups',color:'#8b5cf6',sort_order:2},
+      {user_id:session.user.id,title:'Important',color:'#f59e0b',sort_order:3}
+    ];
+    const {error:seedError}=await supabase.from('kc_chat_folders').upsert(defaults,{onConflict:'user_id,title',ignoreDuplicates:true});
+    if(seedError)console.warn('Default chat folders could not be ensured:',seedError.message);
     const {data,error}=await supabase.from('kc_chat_folders')
       .select('id,title,color,sort_order,items:kc_chat_folder_items(conversation_id)')
       .eq('user_id',session.user.id).order('sort_order',{ascending:true});
