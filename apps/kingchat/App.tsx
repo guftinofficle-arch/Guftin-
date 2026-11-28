@@ -3037,7 +3037,7 @@ function GuftinApp() {
   const createHubCommunity=async()=>{
     if(!communityDraftTitle.trim()||communityBusy)return;setCommunityBusy(true);
     try{
-      const created=await upgrade20.createCommunity(communityDraftTitle.trim());
+      const created:any=await upgrade20.createCommunity(communityDraftTitle.trim());
       setCommunityDraftTitle('');setCommunityCreateOpen(false);await loadUpdatesHub();
       await loadCommunityDetails({...created,role:'owner'});
       Alert.alert('Community created','Your community is ready. You can add members now or share its invite link.');
