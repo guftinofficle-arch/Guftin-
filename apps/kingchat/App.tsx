@@ -4867,11 +4867,23 @@ function GuftinApp() {
     }finally{setGroupContactsLoading(false);}
   };
 
-  const openGroupCreator=async()=>{
+  const openGroupCreator=async(communityId?:string)=>{
+    if(communityId)setCommunityGroupTarget(communityId);
     setGroupName('');
     setSelectedGroupIds([]);
     setGroupCreateOpen(true);
     await loadGroupContacts();
+    if(communityId){
+      setGroupContacts(current=>{
+        const merged=new Map(current.map((person:any)=>[person.id,person]));
+        for(const member of communityMembers){
+          const id=member.user_id;
+          if(!id||id===session?.user?.id)continue;
+          merged.set(id,{id,display_name:member.display_name||member.username||'Community member',username:member.username||null,avatar_signed_url:member.avatar_url||null});
+        }
+        return [...merged.values()];
+      });
+    }
   };
 
   const toggleGroupMember=(id:string)=>{
@@ -6054,7 +6066,7 @@ function GuftinApp() {
         {(selectedCommunity?.role==='owner'||selectedCommunity?.role==='admin')?<View style={{backgroundColor:C.mint,borderRadius:14,padding:12,marginBottom:12}}><Text style={{fontWeight:'900',color:C.green}}>Invite people</Text><Text style={{fontSize:11,color:C.ink,marginTop:4}}>Share a link so someone can join this community directly.</Text><Btn disabled={!communityInviteCode} onPress={()=>void shareCommunityInvite()} style={{backgroundColor:C.green,padding:11,borderRadius:11,alignItems:'center',marginTop:9}}><Text style={{color:'#fff',fontWeight:'900'}}>Share invite link</Text></Btn><View style={{flexDirection:'row',gap:7,marginTop:10}}><TextInput value={communityMemberUsername} onChangeText={setCommunityMemberUsername} placeholder="Add by @username" autoCapitalize="none" style={{flex:1,backgroundColor:C.white,borderRadius:10,padding:11,color:C.ink}}/><Btn disabled={communityMemberBusy||!communityMemberUsername.trim()} onPress={()=>void addCommunityMember()} style={{backgroundColor:C.green,paddingHorizontal:13,justifyContent:'center',borderRadius:10}}><Text style={{color:'#fff',fontWeight:'900'}}>{communityMemberBusy?'…':'Add'}</Text></Btn></View></View>:null}
         {communityDetailsLoading?<Text style={{color:C.muted,padding:10}}>Loading community…</Text>:null}
         <ScrollView style={{flexGrow:0,maxHeight:250}}><Text style={{fontWeight:'900',color:C.ink,marginBottom:7}}>Members</Text>{communityMembers.map((member:any)=><View key={member.user_id} style={{flexDirection:'row',alignItems:'center',paddingVertical:8,borderBottomWidth:1,borderColor:C.line}}><Avatar label={initials(member.display_name||member.username||'G')} color={C.green} size={35} uri={member.avatar_url}/><View style={{marginLeft:9,flex:1}}><Text style={{fontWeight:'800',color:C.ink}}>{member.display_name||member.username||'Guftin member'}</Text><Text style={{fontSize:10,color:C.muted}}>{member.username?'@'+member.username:'Guftin account'} · {member.role}</Text></View></View>)}</ScrollView>
-        <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginTop:14,marginBottom:7}}><Text style={{fontWeight:'900',color:C.ink}}>Community groups</Text>{(selectedCommunity?.role==='owner'||selectedCommunity?.role==='admin')?<Btn onPress={()=>{setCommunityGroupTarget(selectedCommunity.id);setSelectedCommunity(null);void openGroupCreator();}} style={{backgroundColor:C.green,paddingHorizontal:11,paddingVertical:8,borderRadius:9}}><Text style={{color:'#fff',fontWeight:'900',fontSize:11}}>＋ Create group</Text></Btn>:null}</View>
+        <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginTop:14,marginBottom:7}}><Text style={{fontWeight:'900',color:C.ink}}>Community groups</Text>{(selectedCommunity?.role==='owner'||selectedCommunity?.role==='admin')?<Btn onPress={()=>{const communityId=selectedCommunity.id;setSelectedCommunity(null);void openGroupCreator(communityId);}} style={{backgroundColor:C.green,paddingHorizontal:11,paddingVertical:8,borderRadius:9}}><Text style={{color:'#fff',fontWeight:'900',fontSize:11}}>＋ Create group</Text></Btn>:null}</View>
         <ScrollView style={{maxHeight:170}}>{communityGroups.length?communityGroups.map((group:any)=><View key={group.id} style={{flexDirection:'row',alignItems:'center',backgroundColor:C.paper,borderRadius:11,padding:10,marginBottom:7}}><View style={{flex:1}}><Text style={{fontWeight:'800',color:C.ink}}>{group.title||'Community group'}</Text><Text style={{fontSize:10,color:C.muted}}>Open this group chat</Text></View><Btn onPress={()=>void openCommunityGroup(group)} style={{backgroundColor:C.green,padding:9,borderRadius:9}}><Text style={{color:'#fff',fontWeight:'900'}}>Open</Text></Btn></View>):<Text style={{fontSize:11,color:C.muted}}>No group chats have been added to this community yet.</Text>}</ScrollView>
       </View></View>
     </Modal>
