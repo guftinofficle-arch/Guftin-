@@ -7,6 +7,12 @@ const svgIcon = path.join(assetsDirectory, "guftin-icon.svg");
 const pngIcon = path.join(assetsDirectory, "guftin-icon.png");
 const callRingtoneScript = path.join(__dirname, "scripts", "prepare-call-ringtone.js");
 const callRingtoneAsset = path.join(assetsDirectory, "guftin_call_ringtone.wav");
+const chatNotificationSoundsScript = path.join(__dirname, "scripts", "prepare-chat-notification-sounds.js");
+const chatNotificationSoundAssets = [
+  "guftin_chat_soft.wav",
+  "guftin_chat_bright.wav",
+  "guftin_chat_chime.wav"
+].map(filename => path.join(assetsDirectory, filename));
 
 // Build a short, original ring-cycle WAV into Android/iOS notification resources.
 // The source generator is committed; the binary is recreated during EAS config.
@@ -19,6 +25,19 @@ if (ringtoneNeedsBuild) {
   });
   if (generatedRingtone.status !== 0 || !fs.existsSync(callRingtoneAsset)) {
     throw new Error("Guftin incoming-call ringtone generation failed.");
+  }
+}
+
+const chatSoundsNeedBuild = chatNotificationSoundAssets.some(asset =>
+  !fs.existsSync(asset) || fs.statSync(chatNotificationSoundsScript).mtimeMs > fs.statSync(asset).mtimeMs
+);
+if (chatSoundsNeedBuild) {
+  const generatedChatSounds = spawnSync(process.execPath, [chatNotificationSoundsScript], {
+    cwd: __dirname,
+    stdio: ["ignore", "ignore", "inherit"]
+  });
+  if (generatedChatSounds.status !== 0 || chatNotificationSoundAssets.some(asset => !fs.existsSync(asset))) {
+    throw new Error("Guftin chat notification sound generation failed.");
   }
 }
 
@@ -170,7 +189,12 @@ module.exports = ({ config }) => ({
       {
         color: "#087e6c",
         defaultChannel: "messages",
-        sounds: ["./assets/guftin_call_ringtone.wav"],
+        sounds: [
+          "./assets/guftin_call_ringtone.wav",
+          "./assets/guftin_chat_soft.wav",
+          "./assets/guftin_chat_bright.wav",
+          "./assets/guftin_chat_chime.wav"
+        ],
         enableBackgroundRemoteNotifications: true
       }
     ],
