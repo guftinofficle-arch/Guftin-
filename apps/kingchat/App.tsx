@@ -4899,14 +4899,13 @@ function GuftinApp() {
     if(selectedGroupIds.length<1){Alert.alert('Add members','Select at least one contact to create a group.');return;}
     setGroupCreating(true);
     try{
-      const {data,error}=await supabase.rpc('kc_create_group',{p_title:title,p_member_ids:selectedGroupIds});
-      if(error)throw error;
-      const conversationId=typeof data==='string'?data:(Array.isArray(data)?data[0]:data);
+      const result=communityGroupTarget
+        ?await supabase.rpc('kc_create_community_group',{p_community_id:communityGroupTarget,p_title:title,p_member_ids:selectedGroupIds})
+        :await supabase.rpc('kc_create_group',{p_title:title,p_member_ids:selectedGroupIds});
+      if(result.error)throw result.error;
+      const conversationId=typeof result.data==='string'?result.data:(Array.isArray(result.data)?result.data[0]:result.data);
       if(!conversationId)throw new Error('The group was created but its conversation ID was not returned.');
-      if(communityGroupTarget){
-        await upgrade20.addGroupToCommunity(communityGroupTarget,conversationId);
-        setCommunityGroupTarget(null);
-      }
+      if(communityGroupTarget)setCommunityGroupTarget(null);
       const chat:Chat={id:conversationId,name:title,avatar:initials(title),color:colorFor(title),last:'Group created',time:timeLabel(new Date().toISOString()),unread:0,online:false,kind:'group',lastAt:Date.now()};
       setChats(current=>[chat,...current.filter(item=>item.id!==chat.id)]);
       setGroupCreateOpen(false);
