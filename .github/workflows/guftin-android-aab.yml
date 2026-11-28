@@ -1,0 +1,101 @@
+name: Guftin Android AAB — Google Play Store Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/guftin-20-feature-upgrade
+    paths:
+      - "apps/kingchat/**"
+      - ".github/workflows/guftin-android-aab.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: guftin-android-aab-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-play-store-aab:
+    name: Build signed Guftin Android App Bundle
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Check out Guftin source
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+
+      - name: Validate release metadata
+        working-directory: apps/kingchat
+        run: |
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const pkg = require('./package.json');
+          const config = fs.readFileSync('app.config.js', 'utf8');
+          if (pkg.version !== '1.6.2' ||
+              !/versionCode:\\s*48/.test(config) ||
+              !/package:\\s*"com\\.guftin\\.app"/.test(config)) {
+            throw new Error('Guftin Android release metadata mismatch.');
+          }
+          console.log('Guftin 1.6.2 / versionCode 48 / com.guftin.app');
+          NODE
+
+      - name: Install JavaScript dependencies
+        working-directory: apps/kingchat
+        run: npm install --no-audit --no-fund
+
+      - name: Validate TypeScript
+        working-directory: apps/kingchat
+        run: npm run typecheck
+
+      - name: Prepare app assets and native patches
+        working-directory: apps/kingchat
+        run: |
+          npm run prepare:assets
+          npm run patch:callkeep
+          npm run patch:expo-fullscreen
+
+      - name: Verify Expo build access
+        working-directory: apps/kingchat
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          if [ -z "$EXPO_TOKEN" ]; then
+            echo "::error::Missing EXPO_TOKEN repository secret. Configure the same Expo account token used for Guftin production builds."
+            exit 1
+          fi
+          npx --yes eas-cli@latest whoami
+          npx --yes eas-cli@latest project:info
+
+      - name: Build Google Play Store AAB with EAS
+        working-directory: apps/kingchat
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          CI: "1"
+        run: npx --yes eas-cli@latest build --platform android --profile play-store --non-interactive
+
+      - name: Download completed AAB
+        working-directory: apps/kingchat
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          mkdir -p dist
+          npx --yes eas-cli@latest build:download --latest --platform android --output ./dist/guftin-1.6.2-play-store.aab
+          test -s ./dist/guftin-1.6.2-play-store.aab
+          file ./dist/guftin-1.6.2-play-store.aab
+          ls -lh ./dist/guftin-1.6.2-play-store.aab
+
+      - name: Upload Google Play Store AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: Guftin-Google-Play-AAB-${{ github.run_number }}
+          path: apps/kingchat/dist/guftin-1.6.2-play-store.aab
+          if-no-files-found: error
+          retention-days: 14

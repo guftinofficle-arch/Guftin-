@@ -6,6 +6,7 @@ on:
     branches:
       - release/guftin-v1.5.7-no-email-verification
       - release/guftin-v1.5.8-no-email-verification
+      - feature/guftin-20-feature-upgrade
     paths:
       - "apps/kingchat/**"
       - ".github/workflows/guftin-ios-simulator.yml"
