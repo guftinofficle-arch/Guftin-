@@ -288,7 +288,14 @@ Deno.serve(async (req: Request) => {
     const androidHeadlessCall = body.kind === "call" && platform === "android";
     const preference = user_id ? recipientPreferences.get(user_id) : undefined;
     const showPreview = preference?.show_preview !== false;
-    const preferredSound = preference?.sound_key === "silent" ? null : "default";
+    const soundFiles: Record<string, string> = {
+      soft: "guftin_chat_soft.wav",
+      bright: "guftin_chat_bright.wav",
+      chime: "guftin_chat_chime.wav",
+    };
+    const preferredSound = preference?.sound_key === "silent"
+      ? null
+      : (soundFiles[preference?.sound_key || ""] || "default");
     const preferredChannelId = conversationIdForPreference && preference
       ? "guftin-chat-" + conversationIdForPreference + "-" + preference.sound_key + "-" + (preference.vibration_enabled ? "v" : "n")
       : channelId;
