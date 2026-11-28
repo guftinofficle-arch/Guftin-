@@ -2958,8 +2958,10 @@ function GuftinApp() {
     // The real conversation is created by ensureActiveDirectConversation() on send/call.
     if(chat.pendingContactId || chat.id.startsWith('pending:'))return;
     // The active-chat effect performs the single initial load; do not fetch twice.
-    void supabase.from('kc_conversation_members').update({hidden_at:null})
-      .eq('conversation_id',chat.id).eq('user_id',session.user.id);
+    if(onlineRef.current){
+      void supabase.from('kc_conversation_members').update({hidden_at:null})
+        .eq('conversation_id',chat.id).eq('user_id',session.user.id);
+    }
   };
 
   const ensureActiveDirectConversation=async(chat:Chat):Promise<Chat>=>{
@@ -3061,18 +3063,19 @@ function GuftinApp() {
       const groups=(groupsResult.data||[]).map((row:any)=>Array.isArray(row.kc_conversations)?row.kc_conversations[0]:row.kc_conversations).filter(Boolean);
       setCommunityMembers(members);
       setCommunityGroups(groups);
+      let inviteCodeToCache='';
       if(community.role==='owner'||community.role==='admin'){
         const {data:existing,error:inviteReadError}=await supabase.from('kc_community_invites').select('invite_code').eq('community_id',community.id).is('revoked_at',null).order('created_at',{ascending:false}).limit(1).maybeSingle();
         if(inviteReadError)throw inviteReadError;
-        if(existing?.invite_code)setCommunityInviteCode(existing.invite_code);
+        if(existing?.invite_code)inviteCodeToCache=existing.invite_code;
         else{
           const {data:created,error:createError}=await supabase.from('kc_community_invites').insert({community_id:community.id,created_by:session.user.id}).select('invite_code').single();
           if(createError)throw createError;
-          setCommunityInviteCode(created.invite_code);
+          inviteCodeToCache=created.invite_code;
         }
+        setCommunityInviteCode(inviteCodeToCache);
       }
-      const inviteCode=(community.role==='owner'||community.role==='admin')?communityInviteCode:'';
-      void AsyncStorage.setItem(communityCacheKey,JSON.stringify({members,groups,inviteCode})).catch(()=>{});
+      void AsyncStorage.setItem(communityCacheKey,JSON.stringify({members,groups,inviteCode:inviteCodeToCache})).catch(()=>{});
     }catch(error:any){if(!isConnectivityFailure(error))Alert.alert('Community could not open',error?.message||'Please try again.');}
     finally{setCommunityDetailsLoading(false);}
   };
