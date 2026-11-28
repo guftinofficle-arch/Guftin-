@@ -1183,6 +1183,7 @@ function GuftinApp() {
   const [channels,setChannels]=useState<any[]>([]);
   const [hubCommunities,setHubCommunities]=useState<any[]>([]);
   const [hubBusinessProducts,setHubBusinessProducts]=useState<any[]>([]);
+  const [hubBusinessStores,setHubBusinessStores]=useState<any[]>([]);
   const [myBusinessProfile,setMyBusinessProfile]=useState<any>(null);
   const [hubLoading,setHubLoading]=useState(false);
   const [communityCreateOpen,setCommunityCreateOpen]=useState(false);
@@ -1195,6 +1196,8 @@ function GuftinApp() {
   const [businessBusy,setBusinessBusy]=useState(false);
   const [pendingChannelInvite,setPendingChannelInvite]=useState<string|null>(null);
   const [pendingCommunityInvite,setPendingCommunityInvite]=useState<string|null>(null);
+  const [communityInvitePreview,setCommunityInvitePreview]=useState<any>(null);
+  const [communityInvitePreviewLoading,setCommunityInvitePreviewLoading]=useState(false);
   const [pendingBusinessStoreOwner,setPendingBusinessStoreOwner]=useState<string|null>(null);
   const [selectedCommunity,setSelectedCommunity]=useState<any>(null);
   const [communityMembers,setCommunityMembers]=useState<any[]>([]);
@@ -2972,14 +2975,15 @@ function GuftinApp() {
   const loadUpdatesHub=useCallback(async()=>{
     if(!session?.user?.id)return;setHubLoading(true);
     try{
-      const [cm,pr,bp]=await Promise.all([
+      const [cm,pr,bp,stores]=await Promise.all([
         supabase.from('kc_community_members').select('community_id,role,joined_at,kc_communities!inner(id,title,owner_id,created_at)').eq('user_id',session.user.id).order('joined_at',{ascending:false}).limit(60),
         supabase.from('kc_business_products').select('id,owner_id,title,description,price,currency_code,availability,is_published,created_at').eq('is_published',true).order('created_at',{ascending:false}).limit(40),
-        supabase.from('kc_business_profiles').select('user_id,store_name,description,contact_email,currency_code').eq('user_id',session.user.id).maybeSingle()
+        supabase.from('kc_business_profiles').select('user_id,store_name,description,contact_email,currency_code').eq('user_id',session.user.id).maybeSingle(),
+        supabase.from('kc_business_profiles').select('user_id,store_name,description,contact_email,currency_code,created_at').order('created_at',{ascending:false}).limit(100)
       ]);
-      if(cm.error)throw cm.error;if(pr.error)throw pr.error;if(bp.error)throw bp.error;
+      if(cm.error)throw cm.error;if(pr.error)throw pr.error;if(bp.error)throw bp.error;if(stores.error)throw stores.error;
       setHubCommunities((cm.data||[]).map((r:any)=>({...((Array.isArray(r.kc_communities)?r.kc_communities[0]:r.kc_communities)||{}),role:r.role})).filter((x:any)=>x.id));
-      setHubBusinessProducts(pr.data||[]);setMyBusinessProfile(bp.data||null);
+      setHubBusinessProducts(pr.data||[]);setMyBusinessProfile(bp.data||null);setHubBusinessStores(stores.data||[]);
     }catch(e:any){console.warn('Updates hub load:',e?.message||e);}finally{setHubLoading(false);}
   },[session?.user?.id]);
   const loadCommunityDetails=async(community:any)=>{
@@ -3009,7 +3013,7 @@ function GuftinApp() {
   };
   const shareCommunityInvite=async()=>{
     if(!selectedCommunity?.id||!communityInviteCode)return;
-    const inviteUrl=Linking.createURL('/community/'+communityInviteCode);
+    const inviteUrl='https://guftin-official.pages.dev/community/'+encodeURIComponent(communityInviteCode);
     try{await Share.share({message:'Join my Guftin community “'+selectedCommunity.title+'”:\n'+inviteUrl});}
     catch(error:any){Alert.alert('Invite could not be shared',error?.message||'Please try again.');}
   };
@@ -3065,7 +3069,7 @@ function GuftinApp() {
   const shareBusinessStore=async()=>{
     const ownerId=selectedBusinessStore?.user_id;
     if(!ownerId)return;
-    const url=Linking.createURL('/business/'+ownerId);
+    const url='https://guftin-official.pages.dev/business/'+ownerId;
     try{await Share.share({message:'Visit this Guftin business store:\n'+url});}
     catch(error:any){Alert.alert('Store link could not be shared',error?.message||'Please try again.');}
   };
@@ -3089,25 +3093,35 @@ function GuftinApp() {
   useEffect(()=>{
     if(!session?.user?.id||!pendingCommunityInvite)return;
     let active=true;
-    const join=async()=>{
+    const preview=async()=>{
+      setCommunityInvitePreviewLoading(true);
       try{
-        const {data,error}=await supabase.rpc('kc_join_community_by_invite',{p_invite_code:pendingCommunityInvite});
+        const {data,error}=await supabase.rpc('kc_preview_community_invite',{p_invite_code:pendingCommunityInvite});
         if(error)throw error;
-        if(!active)return;
-        setPendingCommunityInvite(null);setTab('Hub');
-        await loadUpdatesHub();
-        const communityId=typeof data==='string'?data:data?.community_id;
-        if(communityId){
-          const {data:community,error:communityError}=await supabase.from('kc_communities').select('id,title,owner_id,created_at').eq('id',communityId).single();
-          if(communityError)throw communityError;
-          await loadCommunityDetails({...community,role:'member'});
-        }
-        Alert.alert('Community joined','You are now a member of this Guftin community.');
-      }catch(error:any){if(active){setPendingCommunityInvite(null);Alert.alert('Could not join community',error?.message||'This invite link may be invalid or expired.');}}
+        const row=Array.isArray(data)?data[0]:data;
+        if(!row?.community_id)throw new Error('This community invite link is invalid or expired.');
+        if(active){setCommunityInvitePreview({...row,invite_code:pendingCommunityInvite});setTab('Hub');}
+      }catch(error:any){if(active){setPendingCommunityInvite(null);Alert.alert('Community invite unavailable',error?.message||'This invite link may be invalid or expired.');}}
+      finally{if(active)setCommunityInvitePreviewLoading(false);}
     };
-    void join();
+    void preview();
     return()=>{active=false;};
-  },[session?.user?.id,pendingCommunityInvite,loadUpdatesHub]);
+  },[session?.user?.id,pendingCommunityInvite]);
+  const joinCommunityFromInvite=async()=>{
+    if(!communityInvitePreview?.invite_code||communityMemberBusy)return;
+    setCommunityMemberBusy(true);
+    try{
+      const {data,error}=await supabase.rpc('kc_join_community_by_invite',{p_invite_code:communityInvitePreview.invite_code});
+      if(error)throw error;
+      const communityId=typeof data==='string'?data:data?.community_id||communityInvitePreview.community_id;
+      const {data:community,error:communityError}=await supabase.from('kc_communities').select('id,title,owner_id,created_at').eq('id',communityId).single();
+      if(communityError)throw communityError;
+      setCommunityInvitePreview(null);setPendingCommunityInvite(null);await loadUpdatesHub();
+      await loadCommunityDetails({...community,role:'member'});
+      Alert.alert('Community joined','You are now a member of this Guftin community.');
+    }catch(error:any){Alert.alert('Could not join community',error?.message||'Please try again.');}
+    finally{setCommunityMemberBusy(false);}
+  };
 
   const loadChannels=useCallback(async()=>{
     if(!session)return;
@@ -5450,7 +5464,7 @@ function GuftinApp() {
         <Text style={{fontSize:18,fontWeight:'900',color:C.ink}}>Business & Communities</Text>
         <Text style={{fontSize:11,color:C.muted,marginTop:4}}>Your stores, published products and communities</Text>
       </View>
-      <View style={{marginTop:22,marginBottom:10,flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}><View style={{flex:1}}><Text style={{fontSize:18,fontWeight:'900',color:C.ink}}>Business</Text><Text style={{fontSize:11,color:C.muted}}>Stores and published products on Guftin</Text></View><Btn onPress={()=>{setBusinessDraftName(myBusinessProfile?.store_name||'');setBusinessDraftDescription(myBusinessProfile?.description||'');setBusinessDraftEmail(myBusinessProfile?.contact_email||'');setBusinessSetupOpen(true);}} style={{backgroundColor:C.green,padding:10,borderRadius:11}}><Text style={{color:'#fff',fontWeight:'900'}}>{myBusinessProfile?'Edit store':'Set up store'}</Text></Btn></View>
+      <View style={{marginTop:14,marginBottom:10}}><Text style={{fontSize:16,fontWeight:'900',color:C.ink}}>Business Directory</Text><Text style={{fontSize:11,color:C.muted,marginTop:3}}>Public Guftin stores from businesses across the app</Text></View>{hubBusinessStores.length?hubBusinessStores.map(store=><View key={store.user_id} style={{backgroundColor:C.white,borderRadius:14,padding:12,marginBottom:8,borderWidth:1,borderColor:C.line}}><Text style={{fontWeight:'900',color:C.ink}}>{store.store_name}</Text><Text style={{fontSize:11,color:C.muted,marginTop:4}} numberOfLines={2}>{store.description||'Guftin business store'}</Text><Btn onPress={()=>void openBusinessStore(store.user_id)} style={{backgroundColor:C.mint,padding:9,borderRadius:10,alignSelf:'flex-start',marginTop:8}}><Text style={{color:C.green,fontWeight:'900'}}>Open store</Text></Btn></View>):<Text style={{fontSize:11,color:C.muted}}>No public stores are listed yet.</Text>}<View style={{marginTop:22,marginBottom:10,flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}><View style={{flex:1}}><Text style={{fontSize:18,fontWeight:'900',color:C.ink}}>Business</Text><Text style={{fontSize:11,color:C.muted}}>Stores and published products on Guftin</Text></View><Btn onPress={()=>{setBusinessDraftName(myBusinessProfile?.store_name||'');setBusinessDraftDescription(myBusinessProfile?.description||'');setBusinessDraftEmail(myBusinessProfile?.contact_email||'');setBusinessSetupOpen(true);}} style={{backgroundColor:C.green,padding:10,borderRadius:11}}><Text style={{color:'#fff',fontWeight:'900'}}>{myBusinessProfile?'Edit store':'Set up store'}</Text></Btn></View>
       {myBusinessProfile?<View style={{backgroundColor:C.mint,borderRadius:15,padding:13,marginBottom:10}}><Text style={{fontWeight:'900',fontSize:14,color:C.green}}>{myBusinessProfile.store_name}</Text><Text style={{fontSize:11,color:C.ink,marginTop:4}}>{myBusinessProfile.description||'Your business profile'}</Text><Text style={{fontSize:10,color:C.muted,marginTop:5}}>{myBusinessProfile.contact_email||'No contact email added'}</Text><Btn onPress={()=>void openBusinessStore(session.user.id)} style={{backgroundColor:C.white,padding:9,borderRadius:10,alignSelf:'flex-start',marginTop:9}}><Text style={{color:C.green,fontWeight:'900'}}>Open my store</Text></Btn></View>:<Text style={{fontSize:11,color:C.muted,marginBottom:10}}>Set up a business profile to start a Guftin store.</Text>}
       {hubBusinessProducts.length?hubBusinessProducts.map(p=><View key={p.id} style={{backgroundColor:C.white,borderRadius:14,padding:12,marginBottom:8}}><Text style={{fontWeight:'900',color:C.ink}}>{p.title}</Text><Text style={{fontSize:11,color:C.muted,marginTop:4}}>{p.description||'Business listing'}</Text><Text style={{fontSize:12,color:C.green,fontWeight:'900',marginTop:6}}>{p.price==null?'Contact business':String(p.currency_code||'PKR')+' '+String(p.price)}</Text><Btn onPress={()=>void openBusinessStore(p.owner_id)} style={{backgroundColor:C.mint,padding:8,borderRadius:10,alignSelf:'flex-start',marginTop:8}}><Text style={{color:C.green,fontWeight:'900'}}>Open business</Text></Btn></View>):<Text style={{fontSize:11,color:C.muted}}>No published products are available yet.</Text>}
       <View style={{marginTop:22,marginBottom:10,flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}><View style={{flex:1}}><Text style={{fontSize:18,fontWeight:'900',color:C.ink}}>Communities</Text><Text style={{fontSize:11,color:C.muted}}>Bring your Guftin groups together</Text></View><Btn onPress={()=>setCommunityCreateOpen(true)} style={{backgroundColor:C.green,padding:10,borderRadius:11}}><Text style={{color:'#fff',fontWeight:'900'}}>＋ Create</Text></Btn></View>
@@ -5878,7 +5892,7 @@ function GuftinApp() {
       </SafeAreaView>
     </Modal>
 
-    <Modal visible={communityCreateOpen} transparent animationType="fade" onRequestClose={()=>setCommunityCreateOpen(false)}><View style={{flex:1,backgroundColor:'#0007',justifyContent:'center',padding:22}}><View style={{backgroundColor:C.white,borderRadius:20,padding:18}}><Text style={{fontSize:18,fontWeight:'900',color:C.ink}}>Create community</Text><TextInput value={communityDraftTitle} onChangeText={setCommunityDraftTitle} placeholder="Community name" maxLength={80} style={{backgroundColor:C.paper,borderRadius:12,padding:13,color:C.ink,marginTop:13}}/><View style={{flexDirection:'row',justifyContent:'flex-end',gap:10,marginTop:14}}><Btn onPress={()=>setCommunityCreateOpen(false)} style={{padding:12}}><Text style={{color:C.muted}}>Cancel</Text></Btn><Btn disabled={communityBusy||!communityDraftTitle.trim()} onPress={()=>void createHubCommunity()} style={{backgroundColor:C.green,padding:12,borderRadius:11}}><Text style={{color:'#fff',fontWeight:'900'}}>Create</Text></Btn></View></View></View></Modal>
+    <Modal visible={!!communityInvitePreview||communityInvitePreviewLoading} transparent animationType="fade" onRequestClose={()=>{setCommunityInvitePreview(null);setPendingCommunityInvite(null);}}><View style={{flex:1,backgroundColor:'#0008',justifyContent:'center',padding:22}}><View style={{backgroundColor:C.white,borderRadius:20,padding:18}}><Text style={{fontSize:19,fontWeight:'900',color:C.ink}}>Community invitation</Text>{communityInvitePreviewLoading?<Text style={{color:C.muted,marginTop:10}}>Loading community…</Text>:<><Text style={{fontSize:16,fontWeight:'800',color:C.green,marginTop:12}}>{communityInvitePreview?.title||'Guftin community'}</Text><Text style={{fontSize:12,color:C.muted,marginTop:6}}>You have been invited to this community. Join to see its members and community groups.</Text><View style={{flexDirection:'row',justifyContent:'flex-end',gap:10,marginTop:18}}><Btn onPress={()=>{setCommunityInvitePreview(null);setPendingCommunityInvite(null);}} style={{padding:11}}><Text style={{color:C.muted}}>Not now</Text></Btn><Btn disabled={communityMemberBusy} onPress={()=>void joinCommunityFromInvite()} style={{backgroundColor:C.green,padding:12,borderRadius:11}}><Text style={{color:'#fff',fontWeight:'900'}}>{communityMemberBusy?'Joining…':'Join Community'}</Text></Btn></View></>}</View></View></Modal><Modal visible={communityCreateOpen} transparent animationType="fade" onRequestClose={()=>setCommunityCreateOpen(false)}><View style={{flex:1,backgroundColor:'#0007',justifyContent:'center',padding:22}}><View style={{backgroundColor:C.white,borderRadius:20,padding:18}}><Text style={{fontSize:18,fontWeight:'900',color:C.ink}}>Create community</Text><TextInput value={communityDraftTitle} onChangeText={setCommunityDraftTitle} placeholder="Community name" maxLength={80} style={{backgroundColor:C.paper,borderRadius:12,padding:13,color:C.ink,marginTop:13}}/><View style={{flexDirection:'row',justifyContent:'flex-end',gap:10,marginTop:14}}><Btn onPress={()=>setCommunityCreateOpen(false)} style={{padding:12}}><Text style={{color:C.muted}}>Cancel</Text></Btn><Btn disabled={communityBusy||!communityDraftTitle.trim()} onPress={()=>void createHubCommunity()} style={{backgroundColor:C.green,padding:12,borderRadius:11}}><Text style={{color:'#fff',fontWeight:'900'}}>Create</Text></Btn></View></View></View></Modal>
     <Modal visible={!!selectedCommunity} transparent animationType="slide" onRequestClose={()=>setSelectedCommunity(null)}>
       <View style={{flex:1,backgroundColor:'#0009',justifyContent:'flex-end'}}><View style={{backgroundColor:C.white,borderTopLeftRadius:24,borderTopRightRadius:24,padding:18,maxHeight:'92%'}}>
         <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginBottom:10}}><View style={{flex:1}}><Text style={{fontSize:19,fontWeight:'900',color:C.ink}}>{selectedCommunity?.title||'Community'}</Text><Text style={{fontSize:11,color:C.muted,marginTop:3}}>{communityMembers.length} members · {selectedCommunity?.role==='owner'?'Owner':selectedCommunity?.role==='admin'?'Admin':'Member'}</Text></View><Btn onPress={()=>setSelectedCommunity(null)} style={{padding:9}}><Text style={{fontSize:20,color:C.ink}}>✕</Text></Btn></View>
