@@ -2520,15 +2520,18 @@ function GuftinApp() {
     setProfileReady(false);
     void loadProfile();
     void loadInbox();
-    void supabase.from('kc_profiles').update({is_online:true,last_seen_at:new Date().toISOString()}).eq('id',session.user.id);
+    if(onlineRef.current)void supabase.from('kc_profiles').update({is_online:true,last_seen_at:new Date().toISOString()}).eq('id',session.user.id);
+    let realtimeConnected=false;
     const appState=AppState.addEventListener('change',(state)=>{
-      void supabase.from('kc_profiles').update({is_online:onlineVisibility&&state==='active',last_seen_at:new Date().toISOString()}).eq('id',session.user.id);
+      if(onlineRef.current)void supabase.from('kc_profiles').update({is_online:onlineVisibility&&state==='active',last_seen_at:new Date().toISOString()}).eq('id',session.user.id);
       if(state==='active'){
         void loadInbox();
         if(activeConversationIdRef.current)void loadMessagesRef.current?.(activeConversationIdRef.current);
         void loadProfile();
-        void flushPendingMessagesRef.current?.();
-        void flushPendingMediaRef.current?.();
+        if(onlineRef.current){
+          void flushPendingMessagesRef.current?.();
+          void flushPendingMediaRef.current?.();
+        }
       }
     });
     const channel=supabase.channel('kingchat-user-'+session.user.id)
@@ -2624,18 +2627,24 @@ function GuftinApp() {
         }
       }).subscribe((status,error)=>{
         if(status==='SUBSCRIBED'){
+          realtimeConnected=true;
           console.log('Guftin realtime connected');
-          void flushPendingMessagesRef.current?.();
-          void flushPendingMediaRef.current?.();
+          if(onlineRef.current){
+            void flushPendingMessagesRef.current?.();
+            void flushPendingMediaRef.current?.();
+          }
         }else if(status==='CHANNEL_ERROR'||status==='TIMED_OUT'||status==='CLOSED'){
+          realtimeConnected=false;
           console.warn('Guftin realtime unavailable; automatic sync will use polling.',error?.message||status);
         }
       });
     // Realtime is the fast path. Polling is a recovery path for devices or
     // projects where Postgres Changes is not enabled or the socket drops.
     const syncTimer=setInterval(()=>{
-      if(AppState.currentState==='active'){
-        if(autoSync){
+      if(AppState.currentState==='active'&&onlineRef.current){
+        // Realtime already delivers changes immediately. Poll only when the
+        // socket is unavailable, avoiding repeated full inbox queries on fast devices.
+        if(autoSync&&!realtimeConnected){
           scheduleInboxRefresh();
           const conversationId=activeConversationIdRef.current;
           if(conversationId)void loadMessagesRef.current?.(conversationId);
