@@ -249,16 +249,24 @@ Deno.serve(async (req: Request) => {
       .select("user_id,notifications_enabled,show_preview,sound_key,vibration_enabled")
       .eq("conversation_id", conversationIdForPreference)
       .in("user_id", recipientIds);
-    if (preferenceError) return json({ error: "Could not load chat notification preferences." }, 500);
-    for (const preference of preferences || []) {
-      recipientPreferences.set(preference.user_id, {
-        notifications_enabled: preference.notifications_enabled !== false,
-        show_preview: preference.show_preview !== false,
-        sound_key: String(preference.sound_key || "default"),
-        vibration_enabled: preference.vibration_enabled !== false,
-      });
+    if (preferenceError && preferenceError.code !== "42P01") {
+      return json({ error: "Could not load chat notification preferences." }, 500);
     }
-    recipientIds = recipientIds.filter(id => recipientPreferences.get(id)?.notifications_enabled !== false);
+    if (preferenceError?.code === "42P01") {
+      // Keep the pre-migration push behavior until the chat preference tables
+      // have been deployed; this avoids dropping message alerts during rollout.
+      console.warn("kc_chat_preferences table is not deployed yet; using default push settings.");
+    } else {
+      for (const preference of preferences || []) {
+        recipientPreferences.set(preference.user_id, {
+          notifications_enabled: preference.notifications_enabled !== false,
+          show_preview: preference.show_preview !== false,
+          sound_key: String(preference.sound_key || "default"),
+          vibration_enabled: preference.vibration_enabled !== false,
+        });
+      }
+      recipientIds = recipientIds.filter(id => recipientPreferences.get(id)?.notifications_enabled !== false);
+    }
   }
   if (!recipientIds.length) return json({ sent: 0, reason: "No recipients have enabled notifications for this chat." });
 
