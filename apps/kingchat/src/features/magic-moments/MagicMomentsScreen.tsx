@@ -1,7 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Image, Modal, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Animated, FlatList, Image, Modal, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '../../lib/supabase';
+import { getMagicMomentCountdown } from './magicMomentCountdown.mjs';
+import { HolospaceTimelineScreen } from '../holospace/HolospaceTimelineScreen';
 
 type MomentKind='birthday'|'capsule'|'future_message'|'secret_surprise'|'together'|'anniversary';
 type Moment=any;
@@ -43,7 +45,12 @@ export function MagicMomentsScreen({userId,chats=[],getDeviceIdentity,onBack,onO
  const [members,setMembers]=useState<any[]>([]);
  const [myMembership,setMyMembership]=useState<any>(null);
  const [notifications,setNotifications]=useState<any[]>([]);
+ const [holospaceTimelineOpen,setHolospaceTimelineOpen]=useState(false);
+ const [countdownNow,setCountdownNow]=useState(Date.now());
+ const revealScale=useRef(new Animated.Value(1)).current;
  const kindInfo=useMemo(()=>KINDS.find(k=>k.id===kind)!,[kind]);
+ const revealCountdown=selected?.reveal_at&&selected.status==='scheduled'
+  ?getMagicMomentCountdown(selected.reveal_at,countdownNow):null;
 
  const writeMomentNotification=async(payload:any)=>{
   const {error}=await supabase.from('magic_moment_notifications').insert(payload);
@@ -67,6 +74,19 @@ export function MagicMomentsScreen({userId,chats=[],getDeviceIdentity,onBack,onO
  },[userId]);
 
  useEffect(()=>{let live=true;setLoading(true);load().catch((e:any)=>Alert.alert('Magic Moments',e.message||'Could not load moments.')).finally(()=>{if(live)setLoading(false);});return()=>{live=false;};},[load]);
+ useEffect(()=>{
+  if(!selected?.reveal_at||selected.status!=='scheduled')return;
+  const timer=setInterval(()=>setCountdownNow(Date.now()),1000);
+  return()=>clearInterval(timer);
+ },[selected?.id,selected?.reveal_at,selected?.status]);
+
+ useEffect(()=>{
+  if(selected?.status==='revealed'){
+   revealScale.setValue(0.82);
+   Animated.spring(revealScale,{toValue:1,useNativeDriver:true,friction:4}).start();
+  }
+ },[selected?.id,selected?.status,revealScale]);
+
  useEffect(()=>{
   if(!userId)return;
   const channel=supabase.channel('magic-moments-'+userId)
@@ -224,6 +244,33 @@ export function MagicMomentsScreen({userId,chats=[],getDeviceIdentity,onBack,onO
   void load();
  };
 
+ const revealMoment=async()=>{
+  if(!selected||selected.creator_id!==userId||!selected.reveal_at||busy)return;
+  const countdown=getMagicMomentCountdown(selected.reveal_at,Date.now());
+  if(!countdown?.isReady){
+   Alert.alert('Not ready to reveal','This Magic Moment can only be revealed after its countdown reaches zero.');
+   return;
+  }
+  setBusy(true);
+  try{
+   const now=new Date().toISOString();
+   const {data,error}=await supabase.from('magic_moments')
+    .update({status:'revealed',revealed_at:now})
+    .eq('id',selected.id)
+    .eq('creator_id',userId)
+    .eq('status','scheduled')
+    .lte('reveal_at',now)
+    .select('id,status,revealed_at').maybeSingle();
+   if(error)throw error;
+   if(!data)throw new Error('The reveal time has not arrived or this account is not the moment creator.');
+   setSelected({...selected,...data});
+   revealScale.setValue(0.72);
+   Animated.spring(revealScale,{toValue:1,useNativeDriver:true,friction:4}).start();
+   await load();
+  }catch(e:any){Alert.alert('Could not reveal this moment',e.message||'Please try again.');}
+  finally{setBusy(false);}
+ };
+
  const acceptInvitation=async()=>{
   if(!selected||!myMembership||myMembership.accepted_at)return;
   setBusy(true);
@@ -238,6 +285,8 @@ export function MagicMomentsScreen({userId,chats=[],getDeviceIdentity,onBack,onO
  const closeMoment=()=>{setSelected(null);setItems([]);setComments([]);setMembers([]);setMyMembership(null);};
  const statusColor=(s:string)=>s==='revealed'?'#64d6a1':s==='scheduled'?'#e8c77a':s==='cancelled'?'#e58b99':colors.muted;
 
+ if(holospaceTimelineOpen)return <HolospaceTimelineScreen userId={userId} onClose={()=>setHolospaceTimelineOpen(false)}/>;
+
  return <View style={{flex:1,backgroundColor:colors.bg}}>
   <View style={{paddingHorizontal:18,paddingTop:12,paddingBottom:14,flexDirection:'row',alignItems:'center',justifyContent:'space-between',borderBottomWidth:1,borderColor:colors.line}}>
    <TouchableOpacity onPress={selected?closeMoment:onBack} style={{padding:8}}><Text style={{color:colors.gold,fontSize:24}}>‹</Text></TouchableOpacity>
@@ -249,7 +298,13 @@ export function MagicMomentsScreen({userId,chats=[],getDeviceIdentity,onBack,onO
     <Text style={{fontSize:12,color:colors.gold,fontWeight:'900'}}>{KINDS.find(k=>k.id===selected.kind)?.emoji} {KINDS.find(k=>k.id===selected.kind)?.title?.toUpperCase()}</Text>
     <Text style={{fontSize:24,color:colors.white,fontWeight:'900',marginTop:7}}>{selected.title}</Text>
     {!!selected.description&&<Text style={{color:colors.muted,lineHeight:20,marginTop:8}}>{selected.description}</Text>}
-    <Text style={{color:statusColor(selected.status),fontSize:11,fontWeight:'900',marginTop:12}}>{String(selected.status||'draft').toUpperCase()} {selected.reveal_at?'· Reveal '+new Date(selected.reveal_at).toLocaleString():''}</Text>
+    <Text style={{color:statusColor(selected.status),fontSize:11,fontWeight:'900',marginTop:12}}>{String(selected.status||'draft').toUpperCase()}</Text>
+    {selected.reveal_at&&selected.status==='scheduled'?<View style={{marginTop:13,backgroundColor:'#0b1435',borderWidth:1,borderColor:'#554879',borderRadius:16,padding:14}}>
+     <Label>MAGIC REVEAL COUNTDOWN</Label>
+     {revealCountdown?<Text style={{color:colors.gold,fontSize:22,fontWeight:'900',textAlign:'center',marginVertical:8}}>{revealCountdown.isReady?'00d : 00h : 00m : 00s':String(revealCountdown.days).padStart(2,'0')+'d : '+String(revealCountdown.hours).padStart(2,'0')+'h : '+String(revealCountdown.minutes).padStart(2,'0')+'m : '+String(revealCountdown.seconds).padStart(2,'0')+'s'}</Text>:<Text style={{color:colors.muted,fontSize:12}}>Reveal date is unavailable.</Text>}
+     {revealCountdown?.isReady&&selected.creator_id===userId?<Button disabled={busy} onPress={()=>void revealMoment()} style={{backgroundColor:colors.purple,marginTop:5}}><Text style={{color:'#fff',fontWeight:'900'}}>✨ Reveal Magic Moment</Text></Button>:<Text style={{color:colors.muted,fontSize:11,textAlign:'center'}}>The moment will unlock when the countdown reaches zero.</Text>}
+    </View>:null}
+    {selected.status==='revealed'?<Animated.View style={{transform:[{scale:revealScale}],backgroundColor:'#29234e',borderRadius:14,padding:12,marginTop:12,borderWidth:1,borderColor:colors.gold}}><Text style={{color:colors.gold,fontSize:15,fontWeight:'900',textAlign:'center'}}>✨ A beautiful memory revealed ✨</Text><Text style={{color:colors.muted,fontSize:10,textAlign:'center',marginTop:4}}>{selected.revealed_at?new Date(selected.revealed_at).toLocaleString():''}</Text></Animated.View>:null}
     <Text style={{color:colors.muted,fontSize:11,marginTop:6}}>{members.length} members · {items.length} memories</Text>
     {myMembership&&!myMembership.accepted_at&&myMembership.role!=='owner'?<Button disabled={busy} onPress={()=>void acceptInvitation()} style={{backgroundColor:colors.purple,marginTop:12}}><Text style={{color:'#fff',fontWeight:'900'}}>Accept invitation</Text></Button>:null}
    </View>
@@ -279,6 +334,9 @@ export function MagicMomentsScreen({userId,chats=[],getDeviceIdentity,onBack,onO
    <Button disabled={!comment.trim()} onPress={()=>void postComment()} style={{backgroundColor:colors.purple}}><Text style={{color:'#fff',fontWeight:'900'}}>Post comment</Text></Button>
   </ScrollView>:<ScrollView contentContainerStyle={{padding:16,paddingBottom:30}}>
    {notifications.length?<View style={{backgroundColor:'#29234e',borderRadius:15,padding:13,marginBottom:14}}><Label>NEW NOTIFICATIONS</Label>{notifications.map(n=><TouchableOpacity key={n.id} onPress={()=>{void markRead(n.id);const m=moments.find(x=>x.id===n.moment_id);if(m)void openMoment(m);}} style={{paddingVertical:8,borderBottomWidth:1,borderColor:'#554d7a'}}><Text style={{color:colors.white,fontWeight:'800'}}>{n.title}</Text><Text style={{color:colors.muted,fontSize:11,marginTop:3}}>{n.body}</Text></TouchableOpacity>)}</View>:null}
+   <Button onPress={()=>setHolospaceTimelineOpen(true)} style={{backgroundColor:'#1b2050',borderWidth:1,borderColor:'#494478',marginBottom:15,flexDirection:'row',gap:9}}>
+    <Text style={{color:colors.gold,fontSize:14,fontWeight:'900'}}>🌌  Open HoloSpace Memory Timeline</Text>
+   </Button>
    <Text style={{color:colors.white,fontSize:18,fontWeight:'900',marginBottom:4}}>Create a moment worth keeping</Text><Text style={{color:colors.muted,fontSize:12,lineHeight:18,marginBottom:15}}>Choose a memory space, invite the people involved, then add words, photos or videos.</Text>
    {KINDS.map(k=><TouchableOpacity key={k.id} onPress={()=>{setKind(k.id);setTitle('');setDescription('');setRevealAt('');setRecipient('');setCreateOpen(true);}} style={{backgroundColor:colors.panel,borderWidth:1,borderColor:colors.line,borderRadius:17,padding:15,marginBottom:10,flexDirection:'row',alignItems:'center',gap:12}}>
     <View style={{width:48,height:48,borderRadius:15,backgroundColor:'#2a2b62',alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:25}}>{k.emoji}</Text></View><View style={{flex:1}}><Text style={{color:colors.white,fontSize:14,fontWeight:'900'}}>{k.title}</Text><Text style={{color:colors.muted,fontSize:11,marginTop:4,lineHeight:16}}>{k.subtitle}</Text></View><Text style={{color:colors.gold,fontSize:20}}>›</Text>
