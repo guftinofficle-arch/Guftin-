@@ -977,6 +977,7 @@ function GuftinApp() {
   const [aiChats,setAiChats]=useState<any[]>([]);
   const [aiBusy,setAiBusy]=useState(false);
   const [aiHistoryOpen,setAiHistoryOpen]=useState(false);
+  const [aiChatRowDismissed,setAiChatRowDismissed]=useState(false);
   const [aiMode,setAiMode]=useState<'chat'|'write'|'translate'|'summarize'|'reply'>('chat');
   const [search,setSearch]=useState('');
   const [searching,setSearching]=useState(false);
@@ -4800,6 +4801,7 @@ function GuftinApp() {
   };
   const openAIChat=async(chatId:string)=>{
     try{
+      setTab('AI');
       const data=await invokeGuftinAI({action:'load_chat',chatId});
       setAiChatId(chatId);
       setAiMessages(Array.isArray(data.messages)?data.messages:[]);
@@ -4824,11 +4826,15 @@ function GuftinApp() {
     }finally{setAiBusy(false);}
   };
   const startNewAIChat=()=>{
+    setTab('AI');
+    setAiChatRowDismissed(false);
     setAiChatId(null);
     setAiMessages([]);
     setAiHistoryOpen(false);
     setAiMode('chat');
   };
+  useEffect(()=>{if(!session?.user?.id)return;let alive=true;void (async()=>{try{const {data,error}=await supabase.functions.invoke('ai-chat',{body:{action:'list_chats'}});if(!error&&alive)setAiChats(Array.isArray(data?.chats)?data.chats:[]);}catch(e){console.warn('Karaboz AI chat list unavailable',e);}})();return()=>{alive=false;};},[session?.user?.id]);
+  const openKarabozAI=()=>{setTab('AI');setAiChatRowDismissed(false);if(aiChats.length)void openAIChat(aiChats[0].id);else startNewAIChat();};
   const pageTitle=tab==='Chats'?'Guftin':tab==='Magic'?'Magic Moments':tab==='AI'?'Karaboz AI':tab==='Updates'?'Updates':tab==='Channels'?'Channels':tab==='Hub'?'Business & Communities':tab==='Calls'?'Calls':'My Profile';
   const totalUnread=chats.reduce((sum:any,item:any)=>sum+(Number(item.unread)||0),0);
 
@@ -5208,7 +5214,7 @@ function GuftinApp() {
     {tab==='Chats'?<>
       {searching?<TextInput value={search} onChangeText={setSearch} placeholder="Search your conversations..." autoFocus style={{marginHorizontal:20,marginBottom:12,padding:14,backgroundColor:C.paper,borderRadius:14,color:C.ink}}/>:null}
       {loading&&chats.length===0?<View style={{flex:1,alignItems:'center',justifyContent:'center'}}><GuftinLoader color={C.green}/><Text style={{color:C.muted,marginTop:10}}>Loading your conversations…</Text></View>:
-        <FlatList data={visible} keyExtractor={x=>x.id} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={C.green}/>} contentContainerStyle={{paddingHorizontal:13,paddingTop:8,paddingBottom:24,flexGrow:1}}
+        <FlatList data={[...visible,...(aiChats.length&&!aiChatRowDismissed?[{id:'__karaboz_ai__',name:'Karaboz AI',avatar:'✦',color:C.green,online:true,avatarUrl:null,last:aiChats[0]?.title||'Your Guftin AI assistant',time:'',unread:0,__karaboz:true} as any]:[])]} keyExtractor={x=>x.id} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={C.green}/>} contentContainerStyle={{paddingHorizontal:13,paddingTop:8,paddingBottom:24,flexGrow:1}}
           ListHeaderComponent={<View style={{paddingTop:4,paddingBottom:12}}>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{gap:8,paddingBottom:12}}>
               <Btn onPress={()=>setActiveFolderId(null)} style={{paddingHorizontal:14,paddingVertical:9,borderRadius:20,backgroundColor:activeFolderId===null?C.green:C.paper}}><Text style={{color:activeFolderId===null?'#fff':C.ink,fontWeight:'900',fontSize:11}}>All chats</Text></Btn>
@@ -5232,7 +5238,7 @@ function GuftinApp() {
             <Text style={{fontSize:18,color:'#28785b',fontWeight:'800',fontStyle:'italic'}}>Chat Freely · Connect Always</Text>
             <View style={{width:90,height:3,borderRadius:3,backgroundColor:'#8bd9ad',marginTop:10}}/>
           </View>:null}
-          renderItem={({item})=><Btn onPress={()=>openChat(item)} onLongPress={()=>Alert.alert('Chat options',item.name,[{text:'Add to folder',onPress:()=>chooseChatFolder(item)},{text:'Delete chat for me',style:'destructive',onPress:()=>void hideChat(item)},{text:'Cancel',style:'cancel'}])} style={{flexDirection:'row',alignItems:'center',paddingHorizontal:12,paddingVertical:13,gap:12,borderRadius:22,backgroundColor:item.unread>0?'#d9f8e3':C.white,marginBottom:9,borderWidth:1,borderColor:item.unread>0?'#c8efd5':C.line}}>
+          renderItem={({item})=>item.__karaboz?<Btn onPress={()=>openKarabozAI()} onLongPress={()=>Alert.alert('Karaboz AI', 'Remove Karaboz AI from this chat list? The floating AI shortcut will remain available.',[{text:'Cancel',style:'cancel'},{text:'Remove from list',style:'destructive',onPress:()=>setAiChatRowDismissed(true)}])} style={{flexDirection:'row',alignItems:'center',paddingHorizontal:12,paddingVertical:13,gap:12,borderRadius:22,backgroundColor:C.mint,marginBottom:9,borderWidth:1,borderColor:'#c8efd5'}}><View style={{width:48,height:48,borderRadius:24,backgroundColor:C.green,alignItems:'center',justifyContent:'center'}}><Text style={{fontSize:26,color:'#fff',fontWeight:'900'}}>✦</Text></View><View style={{flex:1}}><Text style={{fontWeight:'900',color:C.ink,fontSize:14}}>Karaboz AI</Text><Text numberOfLines={1} style={{fontSize:12,color:C.muted,marginTop:5}}>{item.last}</Text></View><Text style={{fontSize:20,color:C.green,fontWeight:'900'}}>›</Text></Btn>:<Btn onPress={()=>openChat(item)} onLongPress={()=>Alert.alert('Chat options',item.name,[{text:'Add to folder',onPress:()=>chooseChatFolder(item)},{text:'Delete chat for me',style:'destructive',onPress:()=>void hideChat(item)},{text:'Cancel',style:'cancel'}])} style={{flexDirection:'row',alignItems:'center',paddingHorizontal:12,paddingVertical:13,gap:12,borderRadius:22,backgroundColor:item.unread>0?'#d9f8e3':C.white,marginBottom:9,borderWidth:1,borderColor:item.unread>0?'#c8efd5':C.line}}>
             <Avatar label={item.avatar} color={item.color} online={item.online} uri={item.avatarUrl}/>
             <View style={{flex:1,paddingBottom:2,paddingTop:2}}>
               <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center'}}><View style={{flexDirection:'row',alignItems:'center',gap:4,flex:1}}><Text numberOfLines={1} style={{fontWeight:'800',color:C.ink,fontSize:14}}>{item.name}</Text>{<>{item.isOfficial?<Text style={{fontSize:9,color:'#2387e8',fontWeight:'900'}}>OFFICIAL</Text>:null}{item.isVerified?<VerifiedBadge label={item.isOfficial?'Verified Guftin Official account':'Verified channel'}/>:null}</>}</View><Text style={{fontSize:10,color:C.muted}}>{item.time}</Text></View>
@@ -5397,6 +5403,7 @@ function GuftinApp() {
       </View>
 <Btn onPress={()=>supabase.auth.signOut()} style={{padding:18}}><Text style={{color:C.red,fontWeight:'800'}}>Sign out</Text></Btn>
     </ScrollView>:null}
+    {tab==='Chats'?<Btn onPress={openKarabozAI} style={{position:'absolute',right:18,bottom:Math.max(insets.bottom,5)+158,width:58,height:58,borderRadius:29,backgroundColor:C.green,alignItems:'center',justifyContent:'center',elevation:12,shadowColor:'#064b31',shadowOpacity:.28,shadowRadius:9,shadowOffset:{width:0,height:4},borderWidth:3,borderColor:'#d8f8e5'}}><Text style={{fontSize:29,color:'#fff',fontWeight:'900'}}>✦</Text></Btn>:null}
     {adsReady&&tab!=='You'?<View style={{alignItems:'center',justifyContent:'center',backgroundColor:C.white,minHeight:50,paddingTop:4}}>
       <BannerAd
         unitId={__DEV__?TestIds.BANNER:(process.env.EXPO_PUBLIC_ADMOB_BANNER_UNIT_ID||'ca-app-pub-3116820002792089/9054692427')}
@@ -5406,7 +5413,7 @@ function GuftinApp() {
       />
     </View>:null}
     <View style={{marginHorizontal:7,marginBottom:Math.max(insets.bottom,5),height:66,paddingTop:5,paddingBottom:5,borderRadius:27,borderWidth:1,borderColor:C.line,flexDirection:'row',alignItems:'center',justifyContent:'space-around',backgroundColor:C.white,elevation:10,shadowColor:'#123d2d',shadowOpacity:.09,shadowRadius:12,shadowOffset:{width:0,height:4}}}>
-      {([['Chats','▤'],['Magic','✧'],['AI','✦'],['Updates','◉'],['Hub','⌂'],['Calls','☎']] as string[][]).map(([t,icon])=><Btn key={t} onPress={()=>setTab(t)} style={{alignItems:'center',justifyContent:'center',minWidth:48,paddingHorizontal:2,paddingVertical:4}}>
+      {([['Chats','▤'],['Magic','✧'],['Updates','◉'],['Hub','⌂'],['Calls','☎']] as string[][]).map(([t,icon])=><Btn key={t} onPress={()=>setTab(t)} style={{alignItems:'center',justifyContent:'center',minWidth:48,paddingHorizontal:2,paddingVertical:4}}>
         <Text style={{fontSize:20,color:tab===t?C.green:C.muted,fontWeight:'900'}}>{icon}</Text>
         <Text style={{fontSize:10,fontWeight:tab===t?'900':'600',color:tab===t?C.green:C.muted,marginTop:3}}>{t==='Hub'?'Business':t}</Text>
         {tab===t?<View style={{height:3,width:24,borderRadius:3,backgroundColor:C.green,marginTop:3}}/>:null}
