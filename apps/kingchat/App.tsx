@@ -1003,6 +1003,10 @@ function GuftinApp() {
   const [recording,setRecording]=useState<Audio.Recording|null>(null);
   const [recordingBusy,setRecordingBusy]=useState(false);
   const [settingsOpen,setSettingsOpen]=useState(false);
+  const [officialUsersOpen,setOfficialUsersOpen]=useState(false);
+  const [officialMetrics,setOfficialMetrics]=useState<any>(null);
+  const [officialMetricsLoading,setOfficialMetricsLoading]=useState(false);
+  const [officialMetricsError,setOfficialMetricsError]=useState('');
   const [chatOptionsOpen,setChatOptionsOpen]=useState(false);
   const [attachmentTrayOpen,setAttachmentTrayOpen]=useState(false);
   const [advancedCenterOpen,setAdvancedCenterOpen]=useState(false);
@@ -3019,6 +3023,16 @@ function GuftinApp() {
     const chat:Chat={id:group.id,name:title,avatar:initials(title),avatarUrl:group.photo_url||undefined,color:colorFor(title),last:'Community group',time:'',unread:0,online:false,kind:'group',lastAt:Date.now()};
     setSelectedCommunity(null);setTab('Chats');
     try{await openChat(chat);}catch(error:any){Alert.alert('Group could not open',error?.message||'Please try again.');}
+  };
+  const loadOfficialUserMetrics=async()=>{
+    if((session?.user?.email||'').toLowerCase()!=='guftinofficle@gmail.com')return;
+    setOfficialMetricsLoading(true);setOfficialMetricsError('');
+    try{
+      const {data,error}=await supabase.rpc('kc_official_user_metrics');
+      if(error)throw error;
+      setOfficialMetrics(data||null);
+    }catch(error:any){setOfficialMetricsError(error?.message||'Could not load account metrics.');}
+    finally{setOfficialMetricsLoading(false);}
   };
   const openBusinessStore=async(ownerId:string)=>{
     if(!ownerId)return;
@@ -5814,8 +5828,33 @@ function GuftinApp() {
         </View>
         <Text style={{fontSize:10,color:C.muted,marginTop:10}}>Gallery access is requested only when you save media or enable auto-save.</Text>
         <Text style={{color:C.ink,fontWeight:'800',marginTop:10}}>Sync interval</Text><View style={{flexDirection:'row',gap:8,marginTop:10}}>{[15,30,60].map(seconds=><Btn key={seconds} onPress={()=>setSyncIntervalSeconds(seconds)} style={{flex:1,padding:12,borderRadius:12,backgroundColor:syncIntervalSeconds===seconds?C.green:C.paper,alignItems:'center'}}><Text style={{color:syncIntervalSeconds===seconds?'#fff':C.ink,fontWeight:'800'}}>{seconds}s</Text></Btn>)}</View>
+        {(session?.user?.email||'').toLowerCase()==='guftinofficle@gmail.com'?<Btn onPress={()=>{setSettingsOpen(false);setOfficialUsersOpen(true);void loadOfficialUserMetrics();}} style={{backgroundColor:C.mint,padding:13,borderRadius:13,alignItems:'center',marginTop:10,borderWidth:1,borderColor:'#b9e4cd'}}><Text style={{color:C.green,fontWeight:'900'}}>My Users</Text></Btn>:null}
         <Btn onPress={()=>setSettingsOpen(false)} style={{backgroundColor:C.green,padding:13,borderRadius:14,alignItems:'center',marginTop:16}}><Text style={{color:'#fff',fontWeight:'900'}}>Done</Text></Btn>
       </ScrollView></View></View>
+    </Modal>
+
+    <Modal visible={officialUsersOpen} animationType="slide" onRequestClose={()=>setOfficialUsersOpen(false)}>
+      <SafeAreaView style={{flex:1,backgroundColor:C.paper}}>
+        <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',padding:18,backgroundColor:C.white,borderBottomWidth:1,borderColor:C.line}}>
+          <View><Text style={{fontSize:21,fontWeight:'900',color:C.ink}}>My Users</Text><Text style={{fontSize:11,color:C.muted,marginTop:3}}>Guftin Official account overview</Text></View>
+          <Btn onPress={()=>setOfficialUsersOpen(false)} style={{padding:8}}><Text style={{fontSize:24,color:C.ink}}>×</Text></Btn>
+        </View>
+        <ScrollView contentContainerStyle={{padding:18,gap:12}}>
+          {officialMetricsLoading?<GuftinLoader color={C.green} style={{marginTop:24}}/>:null}
+          {officialMetricsError?<Text style={{color:C.red,fontSize:12}}>{officialMetricsError}</Text>:null}
+          <View style={{backgroundColor:C.white,borderRadius:16,padding:18,borderWidth:1,borderColor:C.line}}>
+            <Text style={{color:C.muted,fontSize:12,fontWeight:'800'}}>REGISTERED ACCOUNTS</Text>
+            <Text style={{color:C.ink,fontSize:34,fontWeight:'900',marginTop:6}}>{officialMetrics?.registered_accounts??'—'}</Text>
+          </View>
+          <View style={{backgroundColor:C.white,borderRadius:16,padding:18,borderWidth:1,borderColor:C.line}}>
+            <Text style={{color:C.muted,fontSize:12,fontWeight:'800'}}>ACTIVE NOW</Text>
+            <Text style={{color:C.green,fontSize:34,fontWeight:'900',marginTop:6}}>{officialMetrics?.active_now??'—'}</Text>
+            <Text style={{color:C.muted,fontSize:11,marginTop:5}}>Accounts marked online and seen within the last 5 minutes.</Text>
+          </View>
+          <Text style={{color:C.muted,fontSize:11,lineHeight:17}}>This overview shows aggregate account activity only. Private message content and personal chat relationships are not displayed.</Text>
+          <Btn onPress={()=>void loadOfficialUserMetrics()} style={{backgroundColor:C.green,padding:13,borderRadius:12,alignItems:'center'}}><Text style={{color:'#fff',fontWeight:'900'}}>Refresh</Text></Btn>
+        </ScrollView>
+      </SafeAreaView>
     </Modal>
 
     <Modal visible={communityCreateOpen} transparent animationType="fade" onRequestClose={()=>setCommunityCreateOpen(false)}><View style={{flex:1,backgroundColor:'#0007',justifyContent:'center',padding:22}}><View style={{backgroundColor:C.white,borderRadius:20,padding:18}}><Text style={{fontSize:18,fontWeight:'900',color:C.ink}}>Create community</Text><TextInput value={communityDraftTitle} onChangeText={setCommunityDraftTitle} placeholder="Community name" maxLength={80} style={{backgroundColor:C.paper,borderRadius:12,padding:13,color:C.ink,marginTop:13}}/><View style={{flexDirection:'row',justifyContent:'flex-end',gap:10,marginTop:14}}><Btn onPress={()=>setCommunityCreateOpen(false)} style={{padding:12}}><Text style={{color:C.muted}}>Cancel</Text></Btn><Btn disabled={communityBusy||!communityDraftTitle.trim()} onPress={()=>void createHubCommunity()} style={{backgroundColor:C.green,padding:12,borderRadius:11}}><Text style={{color:'#fff',fontWeight:'900'}}>Create</Text></Btn></View></View></View></Modal>
