@@ -2073,8 +2073,20 @@ function GuftinApp() {
       ...patch,
       updated_at:new Date().toISOString()
     };
+    const cacheKey='guftin-cache-privacy-settings:'+session.user.id;
+    try{await AsyncStorage.setItem(cacheKey,JSON.stringify(payload));}
+    catch(error:any){Alert.alert('Privacy setting not saved locally',error?.message||'Phone storage is unavailable.');return false;}
+    if(!onlineRef.current){
+      await AsyncStorage.setItem('guftin-pending-privacy-settings:'+session.user.id,'1').catch(()=>{});
+      return true;
+    }
     const {error}=await supabase.from('kc_user_privacy_settings').upsert(payload,{onConflict:'user_id'});
-    if(error){Alert.alert('Privacy setting not saved',error.message);return false;}
+    if(error){
+      await AsyncStorage.setItem('guftin-pending-privacy-settings:'+session.user.id,'1').catch(()=>{});
+      if(!isConnectivityFailure(error))Alert.alert('Privacy setting saved on this phone; server sync will retry when online.',error.message);
+      return true;
+    }
+    await AsyncStorage.removeItem('guftin-pending-privacy-settings:'+session.user.id).catch(()=>{});
     return true;
   };
 
@@ -2134,6 +2146,26 @@ function GuftinApp() {
     })();
     return ()=>{mounted=false;};
   },[session?.user?.id]);
+
+  useEffect(()=>{
+    if(!session?.user?.id||!isOnline)return;
+    let active=true;
+    const syncPendingPrivacy=async()=>{
+      const pendingKey='guftin-pending-privacy-settings:'+session.user.id;
+      try{
+        if(await AsyncStorage.getItem(pendingKey)!=='1')return;
+        const raw=await AsyncStorage.getItem('guftin-cache-privacy-settings:'+session.user.id);
+        if(!raw)return;
+        const cached=JSON.parse(raw);
+        const {error}=await supabase.from('kc_user_privacy_settings')
+          .upsert({...cached,user_id:session.user.id,updated_at:new Date().toISOString()},{onConflict:'user_id'});
+        if(!error&&active)await AsyncStorage.removeItem(pendingKey);
+        else if(error&&!isConnectivityFailure(error))console.warn('Offline privacy settings sync:',error.message);
+      }catch(error:any){console.warn('Offline privacy settings remain queued:',error?.message||error);}
+    };
+    void syncPendingPrivacy();
+    return()=>{active=false;};
+  },[isOnline,session?.user?.id]);
 
   const removeSavedItem=async(id:string)=>{
     if(!session?.user?.id)return;
