@@ -4829,7 +4829,7 @@ function GuftinApp() {
     setAiHistoryOpen(false);
     setAiMode('chat');
   };
-  const pageTitle=tab==='Chats'?'Guftin':tab==='Magic'?'Magic Moments':tab==='AI'?'Karaboz AI':tab==='Updates'?'Updates':tab==='Channels'?'Channels':tab==='Hub'?'Business & Communities':tab==='Calls'?'Calls':'You';
+  const pageTitle=tab==='Chats'?'Guftin':tab==='Magic'?'Magic Moments':tab==='AI'?'Karaboz AI':tab==='Updates'?'Updates':tab==='Channels'?'Channels':tab==='Hub'?'Business & Communities':tab==='Calls'?'Calls':'My Profile';
   const totalUnread=chats.reduce((sum:any,item:any)=>sum+(Number(item.unread)||0),0);
 
   if(authRestoring){
@@ -5191,10 +5191,10 @@ function GuftinApp() {
       {tab==='Chats'?<View pointerEvents="none" style={{position:'absolute',right:-28,top:-54,width:190,height:190,borderRadius:100,backgroundColor:'#16a765',opacity:.42}}/>:null}
       <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}>
         <View style={{flexDirection:'row',alignItems:'center',gap:11,flex:1}}>
-          {tab==='Chats'?<BrandLogo size={62}/>:<Btn onPress={()=>setTab('You')}><Avatar label={initials(profile?.display_name||'G')} color={C.green} size={42} uri={profileAvatarUrl}/></Btn>}
+          {tab==='Chats'?<BrandLogo size={62}/>:tab==='You'?<Btn onPress={()=>setTab('Chats')}><Text style={{fontSize:27,color:C.green,fontWeight:'900'}}>‹</Text></Btn>:<BrandLogo size={42}/>}
           <View style={{flex:1}}>
             <Text style={{fontSize:29,fontWeight:'900',letterSpacing:-.8,color:tab==='Chats'?'#fff':C.ink}}>{pageTitle}</Text>
-            <Text style={{color:tab==='Chats'?'#e4fff1':C.muted,fontSize:12,marginTop:2}}>{tab==='Chats'?'Your real conversations':tab==='AI'?'Ask, write, translate and summarize':tab==='You'?'Your Guftin ID':tab==='Hub'?'Stores and communities':'Guftin'}</Text>
+            <Text style={{color:tab==='Chats'?'#e4fff1':C.muted,fontSize:12,marginTop:2}}>{tab==='Chats'?'Your real conversations':tab==='AI'?'Ask, write, translate and summarize':tab==='You'?'Manage your Guftin profile':tab==='Hub'?'Stores and communities':'Guftin'}</Text>
           </View>
         </View>
         <View style={{flexDirection:'row',gap:8}}>
@@ -5406,7 +5406,7 @@ function GuftinApp() {
       />
     </View>:null}
     <View style={{marginHorizontal:7,marginBottom:Math.max(insets.bottom,5),height:66,paddingTop:5,paddingBottom:5,borderRadius:27,borderWidth:1,borderColor:C.line,flexDirection:'row',alignItems:'center',justifyContent:'space-around',backgroundColor:C.white,elevation:10,shadowColor:'#123d2d',shadowOpacity:.09,shadowRadius:12,shadowOffset:{width:0,height:4}}}>
-      {([['Chats','▤'],['Magic','✧'],['AI','✦'],['Updates','◉'],['Hub','⌂'],['Calls','☎'],['You','●']] as string[][]).map(([t,icon])=><Btn key={t} onPress={()=>setTab(t)} style={{alignItems:'center',justifyContent:'center',minWidth:48,paddingHorizontal:2,paddingVertical:4}}>
+      {([['Chats','▤'],['Magic','✧'],['AI','✦'],['Updates','◉'],['Hub','⌂'],['Calls','☎']] as string[][]).map(([t,icon])=><Btn key={t} onPress={()=>setTab(t)} style={{alignItems:'center',justifyContent:'center',minWidth:48,paddingHorizontal:2,paddingVertical:4}}>
         <Text style={{fontSize:20,color:tab===t?C.green:C.muted,fontWeight:'900'}}>{icon}</Text>
         <Text style={{fontSize:10,fontWeight:tab===t?'900':'600',color:tab===t?C.green:C.muted,marginTop:3}}>{t==='Hub'?'Business':t}</Text>
         {tab===t?<View style={{height:3,width:24,borderRadius:3,backgroundColor:C.green,marginTop:3}}/>:null}
@@ -5604,6 +5604,14 @@ function GuftinApp() {
     <Modal visible={settingsOpen} transparent animationType="fade" onRequestClose={()=>setSettingsOpen(false)}>
       <View style={{flex:1,backgroundColor:'#0005',alignItems:'flex-end',justifyContent:'flex-start',paddingTop:insets.top+8,paddingHorizontal:10}}><TouchableOpacity activeOpacity={1} onPress={()=>setSettingsOpen(false)} style={{position:'absolute',top:0,left:0,right:0,bottom:0}}/><View style={{backgroundColor:'#fffdf8',borderRadius:22,padding:15,width:320,maxWidth:'92%',maxHeight:'78%',borderWidth:1,borderColor:'#e6f2e9',elevation:20,shadowColor:'#064b32',shadowOpacity:.24,shadowRadius:20,shadowOffset:{width:0,height:9}}}><View style={{height:4,width:42,borderRadius:3,backgroundColor:'#08a66a',alignSelf:'flex-end',marginBottom:10}}/><ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
         <Text style={{fontSize:21,fontWeight:'900',color:C.ink}}>Guftin settings</Text>
+        <Btn onPress={()=>{setSettingsOpen(false);setTab('You');}} style={{backgroundColor:C.mint,borderRadius:14,padding:13,marginTop:12,marginBottom:14,flexDirection:'row',alignItems:'center',gap:12,borderWidth:1,borderColor:'#cce9d9'}}>
+          <Avatar label={initials(profile?.display_name||session.user.email||'G')} color={C.green} size={46} uri={profileAvatarUrl}/>
+          <View style={{flex:1}}>
+            <Text style={{color:C.green,fontWeight:'900',fontSize:15}}>My Profile</Text>
+            <Text style={{color:C.muted,fontSize:11,marginTop:3}}>Photo, name, username, About and profile details</Text>
+          </View>
+          <Text style={{fontSize:22,color:C.green,fontWeight:'900'}}>›</Text>
+        </Btn>
         <Text style={{color:C.muted,fontSize:12,marginTop:5,marginBottom:15}}>Privacy and connection preferences</Text>
         <Btn onPress={()=>{setSettingsOpen(false);setAdvancedCenterOpen(true);void loadAdvancedFeatureCenter();}} style={{backgroundColor:C.mint,borderRadius:12,padding:13,marginBottom:12}}><Text style={{color:C.green,fontWeight:'900'}}>✦  Advanced features center</Text></Btn>
         <Btn onPress={()=>{setSettingsOpen(false);setScheduledMessagesOpen(true);void loadScheduledMessages();}} style={{backgroundColor:C.mint,borderRadius:12,padding:13,marginBottom:12}}><Text style={{color:C.green,fontWeight:'900'}}>◷  Scheduled messages</Text></Btn>
