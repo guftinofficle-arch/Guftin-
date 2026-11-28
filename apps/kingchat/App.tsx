@@ -3727,7 +3727,7 @@ function GuftinApp() {
         setMessages(prev=>({...prev,[active.id]:[...(prev[active.id]||[]),item]}));
         setDraft('');
         setChats(prev=>prev.map(chat=>chat.id===active.id?{...chat,last:body,time:timeLabel(data.created_at),lastAt:Date.now()}:chat));
-        void dispatchPush(active.kind==='announcement'?'community_announcement':active.isOfficial?'official_broadcast':'message',data.id);
+        void dispatchPush(active.kind==='announcement'?'message':active.isOfficial?'official_broadcast':'message',data.id);
       }catch(error:any){Alert.alert(active.kind==='announcement'?'Announcement not posted':'Channel update not sent',error?.message||'Please try again.');}
       finally{setSending(false);}
       return;
