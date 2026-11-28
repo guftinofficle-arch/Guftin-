@@ -137,3 +137,15 @@ create policy liveverse_reactions_member_insert on public.liveverse_reactions
    select 1 from public.liveverse_members m where m.space_id=liveverse_reactions.space_id and m.user_id=(select auth.uid())
  ));
 grant select,insert on public.liveverse_reactions to authenticated;
+
+
+-- These SECURITY DEFINER helpers are intended for the auth.users trigger and
+-- trusted migration/service contexts only. Trigger invocation does not require
+-- callers to hold direct EXECUTE permission on the trigger function.
+revoke all on function public.kc_seed_default_chat_folders(uuid) from public, anon, authenticated;
+revoke all on function public.kc_seed_default_chat_folders_on_signup() from public, anon, authenticated;
+
+-- Pin the definer search path to trusted schemas and keep the target table
+-- schema-qualified so caller-controlled objects cannot shadow dependencies.
+alter function public.kc_seed_default_chat_folders(uuid) set search_path = pg_catalog, public;
+alter function public.kc_seed_default_chat_folders_on_signup() set search_path = pg_catalog, public;

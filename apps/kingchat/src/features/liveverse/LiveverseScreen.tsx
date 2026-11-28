@@ -43,6 +43,22 @@ function ConnectedRoom({ connection, onLeave, onEnd }: {
   const [reactions, setReactions] = useState<any[]>([]);
   const [reactionBusy, setReactionBusy] = useState(false);
   const reactionScale = React.useRef(new Animated.Value(1)).current;
+  const [featuredReaction, setFeaturedReaction] = useState<string | null>(null);
+  const featuredOpacity = React.useRef(new Animated.Value(0)).current;
+  const featuredScale = React.useRef(new Animated.Value(0.55)).current;
+  const showFeaturedReaction = useCallback((emoji: string) => {
+    setFeaturedReaction(emoji);
+    featuredOpacity.setValue(0);
+    featuredScale.setValue(0.55);
+    Animated.sequence([
+      Animated.parallel([
+        Animated.timing(featuredOpacity, { toValue: 1, duration: 130, useNativeDriver: true }),
+        Animated.spring(featuredScale, { toValue: 1, useNativeDriver: true, friction: 4 })
+      ]),
+      Animated.delay(650),
+      Animated.timing(featuredOpacity, { toValue: 0, duration: 280, useNativeDriver: true })
+    ]).start(({ finished }) => { if (finished) setFeaturedReaction(null); });
+  }, [featuredOpacity, featuredScale]);
   const loadReactions = useCallback(async () => {
     try { setReactions(await upgrade20.listLiveverseReactions(connection.roomId) as any[]); }
     catch (error: any) { console.warn('LIVEVERSE reactions could not load:', error?.message || error); }
@@ -53,15 +69,17 @@ function ConnectedRoom({ connection, onLeave, onEnd }: {
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'liveverse_reactions', filter: 'space_id=eq.' + connection.roomId }, payload => {
         const row = payload.new as any;
         setReactions(current => [row, ...current.filter(item => item.id !== row.id)].slice(0, 100));
+        if (row.reaction) showFeaturedReaction(String(row.reaction));
       }).subscribe();
     return () => { void supabase.removeChannel(channel); };
-  }, [connection.roomId, loadReactions]);
+  }, [connection.roomId, loadReactions, showFeaturedReaction]);
   const sendReaction = async (emoji: string) => {
     if (reactionBusy) return;
     setReactionBusy(true);
     try {
       const saved = await upgrade20.sendLiveverseReaction(connection.roomId, emoji);
       setReactions(current => [saved, ...current].slice(0, 100));
+      showFeaturedReaction(emoji);
       reactionScale.setValue(0.72);
       Animated.spring(reactionScale, { toValue: 1, useNativeDriver: true, friction: 4 }).start();
     } catch (error: any) {
@@ -102,6 +120,11 @@ function ConnectedRoom({ connection, onLeave, onEnd }: {
 
   return (
     <View style={{ flex: 1, justifyContent: 'space-between' }}>
+      {featuredReaction ? <Animated.View pointerEvents="none" style={{ position: 'absolute', left: 0, right: 0, top: '36%', zIndex: 20, alignItems: 'center', opacity: featuredOpacity, transform: [{ scale: featuredScale }] }}>
+        <View style={{ minWidth: 92, minHeight: 92, borderRadius: 46, backgroundColor: '#0d765f', borderWidth: 2, borderColor: palette.mint, alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 12, elevation: 8 }}>
+          <Text style={{ fontSize: 52 }}>{featuredReaction}</Text>
+        </View>
+      </Animated.View> : null}
       <View style={{ alignItems: 'center', paddingTop: 42 }}>
         <View style={{ width: 112, height: 112, borderRadius: 56, backgroundColor: '#0b765f',
           borderWidth: 2, borderColor: palette.mint, alignItems: 'center', justifyContent: 'center' }}>

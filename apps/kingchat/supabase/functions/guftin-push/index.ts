@@ -81,6 +81,8 @@ Deno.serve(async (req: Request) => {
   const actorName = actorProfile?.display_name || "A Guftin contact";
 
   let recipientIds: string[] = [];
+  let conversationIdForPreference: string | null = null;
+  const recipientPreferences = new Map<string, { notifications_enabled: boolean; show_preview: boolean; sound_key: string; vibration_enabled: boolean }>();
   let title = "Guftin";
   let message = "You have a new update.";
   let data: Record<string, unknown> = {};
@@ -105,6 +107,7 @@ Deno.serve(async (req: Request) => {
       .select("user_id").eq("conversation_id", row.conversation_id).neq("user_id", actor.id);
     if (membershipError) return json({ error: "Could not load conversation recipients." }, 500);
     recipientIds = (memberships || []).map((item: any) => item.user_id).filter(Boolean);
+    conversationIdForPreference = row.conversation_id;
     title = actorName;
     message = row.message_type === "image" ? "sent you a photo." :
       row.message_type === "video" ? "sent you a video." :
@@ -238,9 +241,36 @@ Deno.serve(async (req: Request) => {
   }
 
   recipientIds = [...new Set(recipientIds.filter((id) => id && (body.kind === "test" || id !== actor.id)))];
-  if (!recipientIds.length) return json({ sent: 0, reason: "No recipients." });
 
-  let targets: { token: string; platform: string }[];
+  // Apply each recipient's conversation-specific delivery settings before
+  // loading device tokens. Missing preferences retain the app's default behavior.
+  if (body.kind === "message" && conversationIdForPreference && recipientIds.length) {
+    const { data: preferences, error: preferenceError } = await admin.from("kc_chat_preferences")
+      .select("user_id,notifications_enabled,show_preview,sound_key,vibration_enabled")
+      .eq("conversation_id", conversationIdForPreference)
+      .in("user_id", recipientIds);
+    if (preferenceError && preferenceError.code !== "42P01") {
+      return json({ error: "Could not load chat notification preferences." }, 500);
+    }
+    if (preferenceError?.code === "42P01") {
+      // Keep the pre-migration push behavior until the chat preference tables
+      // have been deployed; this avoids dropping message alerts during rollout.
+      console.warn("kc_chat_preferences table is not deployed yet; using default push settings.");
+    } else {
+      for (const preference of preferences || []) {
+        recipientPreferences.set(preference.user_id, {
+          notifications_enabled: preference.notifications_enabled !== false,
+          show_preview: preference.show_preview !== false,
+          sound_key: String(preference.sound_key || "default"),
+          vibration_enabled: preference.vibration_enabled !== false,
+        });
+      }
+      recipientIds = recipientIds.filter(id => recipientPreferences.get(id)?.notifications_enabled !== false);
+    }
+  }
+  if (!recipientIds.length) return json({ sent: 0, reason: "No recipients have enabled notifications for this chat." });
+
+  let targets: { token: string; platform: string; user_id?: string }[];
   if (body.kind === "official_broadcast" || (
     body.kind === "status" && data.subtype === "official_status"
   )) {
@@ -251,26 +281,39 @@ Deno.serve(async (req: Request) => {
     }
   } else {
     const { data: devices, error: tokenError } = await admin.from("kc_device_tokens")
-      .select("token,platform").in("user_id", recipientIds);
+      .select("user_id,token,platform").in("user_id", recipientIds);
     if (tokenError) return json({ error: "Could not load recipient devices." }, 500);
     targets = [...new Map((devices || [])
       .filter((item: any) => typeof item.token === "string" && item.token.startsWith("ExponentPushToken["))
-      .map((item: any) => [item.token, { token: item.token, platform: String(item.platform || "").toLowerCase() }])
+      .map((item: any) => [item.token, { token: item.token, platform: String(item.platform || "").toLowerCase(), user_id: item.user_id }])
     ).values()];
   }
   if (!targets.length) return json({ sent: 0, reason: "Recipients have not enabled push notifications on a device." });
 
-  const notifications = targets.map(({ token, platform }) => {
+  const notifications = targets.map(({ token, platform, user_id }) => {
     // Expo's Android headless task only runs for data-only notifications when
     // the app is terminated. Let CallKeep create the native incoming-call UI.
     const androidHeadlessCall = body.kind === "call" && platform === "android";
+    const preference = user_id ? recipientPreferences.get(user_id) : undefined;
+    const showPreview = preference?.show_preview !== false;
+    const soundFiles: Record<string, string> = {
+      soft: "guftin_chat_soft.wav",
+      bright: "guftin_chat_bright.wav",
+      chime: "guftin_chat_chime.wav",
+    };
+    const preferredSound = preference?.sound_key === "silent"
+      ? null
+      : (soundFiles[preference?.sound_key || ""] || "default");
+    const preferredChannelId = conversationIdForPreference && preference
+      ? "guftin-chat-" + conversationIdForPreference + "-" + preference.sound_key + "-" + (preference.vibration_enabled ? "v" : "n")
+      : channelId;
     return {
       to: token,
       ...(androidHeadlessCall ? {} : {
-        title,
-        body: message,
-        sound: "default",
-        channelId,
+        title: showPreview ? title : "New message",
+        body: showPreview ? message : "Open Guftin to view your new message.",
+        sound: preferredSound,
+        channelId: preferredChannelId,
         ...(categoryId ? { categoryId } : {}),
         ...(body.kind === "call" && typeof data.call_id === "string"
           ? { tag: "guftin-call-" + data.call_id }

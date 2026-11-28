@@ -1,6 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator, Alert, Image, Modal, SafeAreaView, ScrollView, Switch,
+  ActivityIndicator, Alert, Animated, Image, Modal, Platform, SafeAreaView, ScrollView, Switch,
   Text, TextInput, TouchableOpacity, View
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
@@ -60,6 +60,21 @@ function Action({ label, onPress, disabled = false, primary = false }: { label: 
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return <Text style={{ color: ink, fontWeight: '900', fontSize: 14, marginTop: 9, marginBottom: 9 }}>{children}</Text>;
 }
+function AnimatedEffectBadge({ effect }: { effect: string }) {
+  const scale = useRef(new Animated.Value(0.9)).current;
+  useEffect(() => {
+    const animation = Animated.loop(Animated.sequence([
+      Animated.timing(scale, { toValue: 1.12, duration: 520, useNativeDriver: true }),
+      Animated.timing(scale, { toValue: 0.96, duration: 520, useNativeDriver: true })
+    ]));
+    animation.start();
+    return () => animation.stop();
+  }, [scale]);
+  const option = EFFECTS.find(item => item.key === effect);
+  return <Animated.View style={{ transform: [{ scale }], alignSelf: 'flex-start', backgroundColor: '#eaf7ee', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 6, marginTop: 7 }}>
+    <Text style={{ color: green, fontSize: 11, fontWeight: '900' }}>{option?.emoji || '✨'} {option?.label || effect} effect</Text>
+  </Animated.View>;
+}
 
 export function ChatExperiencePanel({
   visible, conversationId, conversationTitle, conversationKind, userId, messages,
@@ -86,9 +101,33 @@ export function ChatExperiencePanel({
   const [reactions, setReactions] = useState<any[]>([]);
   const [effects, setEffects] = useState<any[]>([]);
   const [libraryRows, setLibraryRows] = useState<any[]>([]);
+  const reactionScale = useRef(new Animated.Value(1)).current;
 
   const isGroup = conversationKind === 'group';
   const activeMessages = useMemo(() => messages.filter(m => !m.pending && !m.deleted_at), [messages]);
+  const syncChatNotificationChannel = useCallback(async (next: Record<string, unknown>) => {
+    if (Platform.OS !== 'android') return;
+    const soundKey = String(next.sound_key || 'default');
+    const soundFiles: Record<string, string> = {
+      soft: 'guftin_chat_soft.wav',
+      bright: 'guftin_chat_bright.wav',
+      chime: 'guftin_chat_chime.wav'
+    };
+    const vibrationEnabled = next.vibration_enabled !== false;
+    const channelId = 'guftin-chat-' + conversationId + '-' + soundKey + '-' + (vibrationEnabled ? 'v' : 'n');
+    const vibrationPattern = !vibrationEnabled ? [] :
+      soundKey === 'soft' ? [0, 75, 65, 75] :
+      soundKey === 'bright' ? [0, 180, 90, 180] :
+      soundKey === 'chime' ? [0, 110, 120, 240] : [0, 160, 100, 160];
+    await Notifications.setNotificationChannelAsync(channelId, {
+      name: ('Guftin · ' + conversationTitle).slice(0, 100),
+      importance: Notifications.AndroidImportance.HIGH,
+      sound: soundKey === 'silent' ? null : (soundFiles[soundKey] || 'default'),
+      vibrationPattern,
+      enableVibrate: vibrationEnabled,
+      enableLights: true
+    });
+  }, [conversationId, conversationTitle]);
   const selectedSearchResults = useMemo(() => activeMessages.filter(item => {
     const body = String(item.body || '');
     const matches = !query.trim() || body.toLowerCase().includes(query.trim().toLowerCase());
@@ -125,7 +164,11 @@ export function ChatExperiencePanel({
         setSavedIds(rows.filter(row => row.conversation_id === conversationId).map(row => row.message_id));
       }
       if (reminderResult.status === 'fulfilled' && !reminderResult.value.error) setReminders(reminderResult.value.data || []);
-      if (preferenceResult.status === 'fulfilled' && preferenceResult.value) setPreferences((p: any) => ({ ...p, ...preferenceResult.value }));
+      if (preferenceResult.status === 'fulfilled' && preferenceResult.value) {
+        const loadedPreferences = preferenceResult.value as Record<string, unknown>;
+        setPreferences((p: any) => ({ ...p, ...loadedPreferences }));
+        await syncChatNotificationChannel(loadedPreferences);
+      }
       if (reactionResult.status === 'fulfilled' && !reactionResult.value.error) setReactions(reactionResult.value.data || []);
       if (effectResult.status === 'fulfilled' && !effectResult.value.error) setEffects(effectResult.value.data || []);
       if (libraryResult.status === 'fulfilled') setLibraryRows(Array.isArray(libraryResult.value) ? libraryResult.value as any[] : []);
@@ -160,7 +203,7 @@ export function ChatExperiencePanel({
     } finally {
       setBusy(false);
     }
-  }, [visible, conversationId, userId, isGroup]);
+  }, [visible, conversationId, userId, isGroup, syncChatNotificationChannel]);
 
   useEffect(() => {
     if (visible) {
@@ -230,6 +273,7 @@ export function ChatExperiencePanel({
     setPreferences(next);
     try {
       await upgrade20.saveChatPreferences(conversationId, patch as any);
+      await syncChatNotificationChannel(next);
     } catch (error: any) {
       setPreferences(preferences);
       Alert.alert('Notification settings', error?.message || 'Could not save these settings.');
@@ -244,7 +288,7 @@ export function ChatExperiencePanel({
       return;
     }
     try {
-      const row = await upgrade20.saveMessageReminder(conversationId, reminderMessage, date.toISOString(), reminderNote);
+      const row = await upgrade20.saveMessageReminder(conversationId, reminderMessage, date.toISOString(), reminderNote) as Record<string, unknown>;
       const identifier = await Notifications.scheduleNotificationAsync({
         content: { title: 'Guftin · Reply reminder', body: reminderNote.trim() || 'A message is waiting for your reply.', data: { conversation_id: conversationId, message_id: reminderMessage } },
         trigger: date as any
@@ -293,6 +337,8 @@ export function ChatExperiencePanel({
         .eq('conversation_id', conversationId).eq('message_id', messageId).order('created_at');
       if (error) throw error;
       setReactions(current => [...current.filter(row => row.message_id !== messageId), ...(data || [])]);
+      reactionScale.setValue(0.72);
+      Animated.spring(reactionScale, { toValue: 1, useNativeDriver: true, friction: 4 }).start();
     } catch (error: any) {
       Alert.alert('Reaction', error?.message || 'Could not add reaction.');
     }
@@ -316,7 +362,7 @@ export function ChatExperiencePanel({
     setSection('Reminders');
   };
 
-  const sectionNames = ['Search','Library', ...(isGroup ? ['Members','Tags'] : []), 'Important','Reminders','Stickers','Effects','Settings'];
+  const sectionNames = ['Search','Library', ...(isGroup ? ['Photos','Members','Tags'] : []), 'Important','Reminders','Stickers','Effects','Settings'];
 
   const renderMessage = (item: MessageRow) => {
     const grouped = reactions.filter(row => row.message_id === item.id);
@@ -329,8 +375,8 @@ export function ChatExperiencePanel({
         : item.message_type === 'video'
           ? <Text style={{ color: ink, fontWeight: '800', marginTop: 8 }}>▶ {body}</Text>
           : <Text style={{ color: ink, lineHeight: 20, marginTop: 7 }}>{body.slice(0, 500)}</Text>}
-      {effect ? <Text style={{ color: green, fontSize: 11, marginTop: 6, fontWeight: '900' }}>{EFFECTS.find(option => option.key === effect.effect_key)?.emoji} {effect.effect_key} effect</Text> : null}
-      {grouped.length ? <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: 8 }}>{grouped.map(row => <Text key={row.id} style={{ backgroundColor: '#f2f7f3', borderRadius: 12, paddingHorizontal: 8, paddingVertical: 4, color: ink, fontSize: 12 }}>{row.reaction}</Text>)}</View> : null}
+      {effect ? <AnimatedEffectBadge effect={effect.effect_key}/> : null}
+      {grouped.length ? <Animated.View style={{ transform: [{ scale: reactionScale }], flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: 8 }}>{grouped.map(row => <Text key={row.id} style={{ backgroundColor: '#f2f7f3', borderRadius: 12, paddingHorizontal: 8, paddingVertical: 4, color: ink, fontSize: 12 }}>{row.reaction}</Text>)}</Animated.View> : null}
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginTop: 10 }}>
         {REACTIONS.slice(0, 6).map(emoji => <TouchableOpacity key={emoji} onPress={() => void react(item.id, emoji)} style={{ backgroundColor: '#f4f8f5', borderRadius: 18, padding: 7 }}><Text style={{ fontSize: 16 }}>{emoji}</Text></TouchableOpacity>)}
         <Action label={savedIds.includes(item.id) ? '★ Saved' : '☆ Important'} onPress={() => void toggleSaved(item)}/>
@@ -360,6 +406,20 @@ export function ChatExperiencePanel({
       <Text style={{ color: muted, fontSize: 10, marginTop: 8, marginBottom: 8 }}>{libraryRows.length} indexed shared items · {mediaMessages.length} matching items in loaded chat history</Text>
       {mediaMessages.length ? mediaMessages.slice(0, 100).map(renderMessage) : <Text style={{ color: muted, textAlign: 'center', padding: 24 }}>No matching shared media yet.</Text>}
     </View>;
+
+    if (section === 'Photos' && isGroup) {
+      const photos = activeMessages.filter(item => item.message_type === 'image' && Boolean(item.attachment_url))
+        .slice().reverse();
+      return <View>
+        <Text style={{ color: ink, fontWeight: '900', fontSize: 17 }}>Shared group photo gallery</Text>
+        <Text style={{ color: muted, fontSize: 11, marginTop: 4, marginBottom: 12 }}>Photos shared in this group, shown from the conversation history currently loaded on this device.</Text>
+        {photos.length ? <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+          {photos.slice(0, 120).map(item => <View key={item.id} style={{ width: '31%', aspectRatio: 1, borderRadius: 12, overflow: 'hidden', backgroundColor: '#eaf2ec' }}>
+            <Image source={{ uri: item.attachment_url! }} style={{ width: '100%', height: '100%' }} resizeMode="cover"/>
+          </View>)}
+        </View> : <Text style={{ color: muted, textAlign: 'center', padding: 26 }}>No photos are available in the loaded group history yet.</Text>}
+      </View>;
+    }
 
     if (section === 'Members') return <View>
       <Text style={{ color: ink, fontWeight: '900', fontSize: 17 }}>Group members · {members.length}</Text>
@@ -437,7 +497,7 @@ export function ChatExperiencePanel({
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7 }}>
         {['default','soft','bright','chime','silent'].map(sound => <Action key={sound} label={sound[0].toUpperCase()+sound.slice(1)} primary={preferences.sound_key === sound} onPress={() => void savePreferences({ sound_key: sound })}/>)}
       </View>
-      <Text style={{ color: muted, fontSize: 10, marginTop: 11, lineHeight: 16 }}>The selected sound preference is stored per chat. Device-specific custom sound playback depends on the notification channel supported by the installed app build.</Text>
+      <Text style={{ color: muted, fontSize: 10, marginTop: 11, lineHeight: 16 }}>Each chat has its own notification channel. Default, Soft, Bright and Chime use different bundled alert tones; Silent turns sound off. Vibration and message previews are controlled separately.</Text>
     </View>;
   };
 
